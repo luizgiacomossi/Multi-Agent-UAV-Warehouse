@@ -1,6 +1,7 @@
+
 import React, { useMemo } from 'react';
-import { CheckCircle2, AlertTriangle, Activity, ShieldAlert, Skull, Zap, Package, TrendingUp, Navigation, Truck, Undo2 } from 'lucide-react';
-import { Agent, CollisionEvent } from '../types';
+import { CheckCircle2, AlertTriangle, Activity, ShieldAlert, Skull, Zap, Package, TrendingUp, Navigation, Truck, Undo2, BatteryWarning } from 'lucide-react';
+import { Agent, CollisionEvent, ENERGY_COSTS } from '../types';
 
 interface StatusPanelProps {
   agents: Agent[];
@@ -16,11 +17,17 @@ const StatusPanel: React.FC<StatusPanelProps> = ({ agents, collisions, tick }) =
     let destroyed = 0;
     let distance = 0;
     let blocked = 0;
+    let deadBattery = 0;
+    let totalEnergyConsumed = 0;
     
     agents.forEach(agent => {
         if (agent.status === 'blocked' || agent.path.length <= 1) {
             blocked++;
             return;
+        }
+        
+        if (agent.status === 'out_of_battery') {
+            deadBattery++;
         }
 
         const limit = agent.destructionTime ?? agent.path.length - 1;
@@ -28,6 +35,14 @@ const StatusPanel: React.FC<StatusPanelProps> = ({ agents, collisions, tick }) =
         // Calculate distance flown so far based on current tick
         const effectiveTick = Math.min(tick, limit);
         distance += Math.max(0, effectiveTick);
+        
+        // Calc Energy
+        for(let i=1; i<=effectiveTick && i<agent.path.length; i++) {
+            const prev = agent.path[i-1];
+            const curr = agent.path[i];
+            if(prev.x === curr.x && prev.y === curr.y && prev.z === curr.z) totalEnergyConsumed += ENERGY_COSTS.WAIT;
+            else totalEnergyConsumed += ENERGY_COSTS.MOVE;
+        }
 
         // Check current state relative to tick
         const isDestroyedNow = agent.destructionTime !== undefined && tick >= agent.destructionTime;
@@ -35,8 +50,14 @@ const StatusPanel: React.FC<StatusPanelProps> = ({ agents, collisions, tick }) =
         const deliveryTime = agent.deliveryTime ?? agent.path.length - 1;
         const hasDelivered = tick >= deliveryTime;
 
+        // Out of battery dynamic check (if they stop mid-flight)
+        // This check is for the counter only, assumes planner set max path length correctly
+        const isDead = agent.status === 'out_of_battery';
+
         if (isDestroyedNow) {
             destroyed++;
+        } else if (isDead) {
+            // already counted
         } else if (hasDelivered) {
             delivered++;
         } else {
@@ -44,10 +65,11 @@ const StatusPanel: React.FC<StatusPanelProps> = ({ agents, collisions, tick }) =
         }
     });
 
-    return { active, delivered, destroyed, distance, blocked };
+    return { active, delivered, destroyed, distance, blocked, deadBattery, totalEnergyConsumed };
   }, [agents, tick]);
 
   const completionPct = agents.length > 0 ? Math.round((stats.delivered / agents.length) * 100) : 0;
+  const avgEnergy = agents.length > 0 ? (stats.totalEnergyConsumed / agents.length).toFixed(1) : 0;
 
   return (
     <div className="absolute top-4 right-4 w-80 bg-slate-900/90 backdrop-blur-md p-4 rounded-xl border border-slate-700 shadow-xl text-slate-100 flex flex-col gap-4 z-10 max-h-[90vh] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent">
@@ -75,13 +97,13 @@ const StatusPanel: React.FC<StatusPanelProps> = ({ agents, collisions, tick }) =
            <Activity className="absolute -right-2 -bottom-2 text-blue-500/10" size={48} />
         </div>
 
-        {/* Distance */}
+        {/* Energy Usage */}
         <div className="bg-slate-800/60 p-2 rounded border border-slate-700/50 flex flex-col relative overflow-hidden">
            <div className="flex items-center gap-1.5 text-[10px] text-slate-400 uppercase mb-1">
-              <TrendingUp size={10} /> Range
+              <Zap size={10} /> Avg. Energy
            </div>
            <div className="text-xl font-mono text-emerald-400 font-semibold relative z-10">
-              {stats.distance} <span className="text-xs text-slate-600">m</span>
+              {avgEnergy} <span className="text-xs text-slate-600">u</span>
            </div>
            <Zap className="absolute -right-2 -bottom-2 text-emerald-500/10" size={48} />
         </div>
@@ -101,17 +123,15 @@ const StatusPanel: React.FC<StatusPanelProps> = ({ agents, collisions, tick }) =
            </div>
         </div>
 
-        {/* Casualties */}
-        <div className={`bg-slate-800/60 p-2 rounded border flex flex-col relative overflow-hidden transition-colors ${stats.destroyed > 0 ? 'border-red-900/50 bg-red-950/10' : 'border-slate-700/50'}`}>
+        {/* Casualties/Dead Battery */}
+        <div className={`bg-slate-800/60 p-2 rounded border flex flex-col relative overflow-hidden transition-colors ${stats.destroyed + stats.deadBattery > 0 ? 'border-red-900/50 bg-red-950/10' : 'border-slate-700/50'}`}>
            <div className="flex items-center gap-1.5 text-[10px] text-slate-400 uppercase mb-1">
-              <Skull size={10} className={stats.destroyed > 0 ? "text-red-400" : ""} /> Lost Units
+              <Skull size={10} className={stats.destroyed + stats.deadBattery > 0 ? "text-red-400" : ""} /> Lost Units
            </div>
-           <div className={`text-xl font-mono font-semibold relative z-10 ${stats.destroyed > 0 ? 'text-red-500' : 'text-slate-500'}`}>
-              {stats.destroyed}
+           <div className={`text-xl font-mono font-semibold relative z-10 ${stats.destroyed + stats.deadBattery > 0 ? 'text-red-500' : 'text-slate-500'}`}>
+              {stats.destroyed + stats.deadBattery}
+              {stats.deadBattery > 0 && <span className="text-xs ml-1 text-amber-500">({stats.deadBattery} bat)</span>}
            </div>
-           {stats.destroyed > 0 && (
-                <div className="absolute inset-0 bg-red-500/5 animate-pulse pointer-events-none" />
-           )}
         </div>
       </div>
 
@@ -172,25 +192,27 @@ const StatusPanel: React.FC<StatusPanelProps> = ({ agents, collisions, tick }) =
           const finishTime = agent.path.length - 1;
           
           const isDestroyed = agent.status === 'destroyed' && (agent.destructionTime !== undefined && tick >= agent.destructionTime);
-          const isBlocked = (agent.path.length <= 1 || agent.status === 'blocked') && !isDestroyed;
+          const isDeadBattery = agent.status === 'out_of_battery';
+          const isBlocked = (agent.path.length <= 1 || agent.status === 'blocked') && !isDestroyed && !isDeadBattery;
           
           // Delivery Status
-          const hasDelivered = !isDestroyed && !isBlocked && tick >= deliveryTime;
+          const hasDelivered = !isDestroyed && !isBlocked && !isDeadBattery && tick >= deliveryTime;
           
           // Mission Status (Round Trip Complete)
-          const isFinished = !isDestroyed && !isBlocked && tick >= finishTime;
+          const isFinished = !isDestroyed && !isBlocked && !isDeadBattery && tick >= finishTime;
           
           // Returning Status (Delivered but not yet Finished)
           const isReturning = hasDelivered && !isFinished;
 
           // Delivering Status (Moving, Has Package)
-          const isDelivering = !isDestroyed && !isBlocked && !hasDelivered && tick < deliveryTime;
+          const isDelivering = !isDestroyed && !isBlocked && !isDeadBattery && !hasDelivered && tick < deliveryTime;
 
           return (
             <div 
               key={agent.id} 
               className={`flex items-center justify-between p-2 rounded-lg border transition-colors ${
                   isDestroyed ? 'bg-red-900/10 border-red-900/30' : 
+                  isDeadBattery ? 'bg-amber-900/10 border-amber-900/30' :
                   isFinished ? 'bg-slate-700/30 border-slate-600' :
                   isReturning ? 'bg-purple-900/10 border-purple-900/30' :
                   'bg-slate-800 border-slate-700'
@@ -200,12 +222,12 @@ const StatusPanel: React.FC<StatusPanelProps> = ({ agents, collisions, tick }) =
                 <div 
                   className={`w-1.5 h-1.5 rounded-full ${isDelivering || isReturning ? 'animate-pulse' : ''}`}
                   style={{ 
-                    backgroundColor: isDestroyed ? '#ef4444' : agent.color,
+                    backgroundColor: isDestroyed || isDeadBattery ? '#555' : agent.color,
                     boxShadow: (isDelivering || isReturning) ? `0 0 8px ${agent.color}` : 'none'
                   }} 
                 />
                 <div className="flex flex-col">
-                  <span className={`text-xs font-medium ${isDestroyed ? 'text-red-400' : 'text-slate-200'}`}>{agent.name}</span>
+                  <span className={`text-xs font-medium ${isDestroyed ? 'text-red-400' : isDeadBattery ? 'text-amber-500' : 'text-slate-200'}`}>{agent.name}</span>
                 </div>
               </div>
 
@@ -214,6 +236,12 @@ const StatusPanel: React.FC<StatusPanelProps> = ({ agents, collisions, tick }) =
                    <span className="flex items-center gap-1 text-[9px] text-red-400 font-bold uppercase">
                         <Skull size={10} /> Crashed
                    </span>
+                )}
+
+                {isDeadBattery && (
+                    <span className="flex items-center gap-1 text-[9px] text-amber-500 font-bold uppercase">
+                        <BatteryWarning size={10} /> No Power
+                    </span>
                 )}
 
                 {isBlocked && (

@@ -151,7 +151,8 @@ export const generateScenario = async (
       goal: goal!,
       color: colors[i % colors.length],
       path: [],
-      status: 'idle'
+      status: 'idle',
+      maxBattery: 80
     });
   }
 

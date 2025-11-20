@@ -1,4 +1,4 @@
-import { Position3D, Agent, PathNode } from '../types';
+import { Position3D, Agent, PathNode, ENERGY_COSTS } from '../types';
 
 // Helper to check coordinate equality
 const isSamePos = (a: Position3D, b: Position3D) => a.x === b.x && a.y === b.y && a.z === b.z;
@@ -60,7 +60,15 @@ export const calculatePaths = (
         continue;
     }
 
-    const startNode: PathNode = { ...agent.start, g: 0, h: heuristic(agent.start, agent.goal), f: 0, parent: null, time: 0 };
+    const startNode: PathNode = { 
+      ...agent.start, 
+      g: 0, 
+      h: heuristic(agent.start, agent.goal), 
+      f: 0, 
+      parent: null, 
+      time: 0,
+      energy: 0
+    };
     startNode.f = startNode.g + startNode.h;
 
     const openList: PathNode[] = [startNode];
@@ -103,11 +111,16 @@ export const calculatePaths = (
         const h = heuristic(neighborPos, agent.goal);
         const f = g + h;
 
+        const isWait = isSamePos(neighborPos, current);
+        const stepCost = isWait ? ENERGY_COSTS.WAIT : ENERGY_COSTS.MOVE;
+        const energy = current.energy + stepCost;
+
         const neighborNode: PathNode = {
           ...neighborPos,
           g, h, f,
           parent: current,
-          time: neighborTime
+          time: neighborTime,
+          energy
         };
 
         // Optimization: Simple check if we already have this node in open list with lower cost

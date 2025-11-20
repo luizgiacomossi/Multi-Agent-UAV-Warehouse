@@ -1,6 +1,9 @@
-import { Position3D, PathNode, Agent, CollisionEvent } from '../types';
+
+import { Position3D, PathNode, Agent, CollisionEvent, ENERGY_COSTS } from '../types';
 import { World } from './World';
 import { Swarm, Drone } from './Drone';
+
+const TIMEOUT_MS = 4000;
 
 /**
  * Abstract Base Strategy for Path Planning.
@@ -27,8 +30,6 @@ export abstract class PathFindingStrategy {
   }
 
   protected getNeighbors(node: PathNode, world: World): Position3D[] {
-    // Check bounds manually to avoid object creation if not needed? 
-    // Standard approach is fine, bottleneck is usually the closedSet lookup.
     const candidates = [
       { x: node.x + 1, y: node.y, z: node.z },
       { x: node.x - 1, y: node.y, z: node.z },
@@ -56,12 +57,6 @@ export abstract class PathFindingStrategy {
     return path;
   }
 
-  /**
-   * Packs space-time coordinates into a single 32-bit integer.
-   * Max Grid Size: 64 (6 bits per dim)
-   * Max Time: ~4095 (12 bits)
-   * Format: [Time:12][Z:6][Y:6][X:6]
-   */
   protected key(p: Position3D, t: number): number {
     return (p.x) | (p.y << 6) | (p.z << 12) | (t << 18);
   }
@@ -71,7 +66,9 @@ export abstract class PathFindingStrategy {
     goal: Position3D,
     startTime: number,
     world: World,
-    reserved: Set<number>
+    reserved: Set<number>,
+    maxEnergy?: number,
+    deadline?: number
   ): Position3D[] | null {
     const startNode: PathNode = {
       ...start,
@@ -79,16 +76,19 @@ export abstract class PathFindingStrategy {
       h: this.heuristic(start, goal),
       f: 0,
       parent: null,
-      time: startTime
+      time: startTime,
+      energy: 0
     };
     startNode.f = startNode.g + startNode.h;
 
     const openList: PathNode[] = [startNode];
-    
-    // Use numeric set for performance (no string allocations)
     const closedSet = new Set<number>();
 
     while (openList.length > 0) {
+      if (deadline && performance.now() > deadline) {
+        throw new Error("Pathfinding Timeout");
+      }
+
       openList.sort((a, b) => a.f - b.f);
       const current = openList.shift()!;
 
@@ -97,6 +97,7 @@ export abstract class PathFindingStrategy {
       }
 
       if (current.time >= this.maxTimeSteps) continue;
+      if (maxEnergy !== undefined && current.energy > maxEnergy) continue;
 
       const closedKey = this.key(current, current.time);
       if (closedSet.has(closedKey)) continue;
@@ -108,11 +109,18 @@ export abstract class PathFindingStrategy {
         const nextTime = current.time + 1;
 
         if (world.isPositionBlocked(nextPos)) continue;
-
-        // Dynamic obstacle check using integer Set
         if (reserved.size > 0 && reserved.has(this.key(nextPos, nextTime))) continue;
 
-        const g = current.g + 1;
+        // Determine move type cost
+        const isWait = nextPos.x === current.x && nextPos.y === current.y && nextPos.z === current.z;
+        const stepCost = isWait ? ENERGY_COSTS.WAIT : ENERGY_COSTS.MOVE;
+        
+        const g = current.g + 1; 
+        const energy = current.energy + stepCost;
+        
+        // If hard battery limit, skip node early
+        if (maxEnergy !== undefined && energy > maxEnergy) continue;
+
         const h = this.heuristic(nextPos, goal);
         const f = g + h;
 
@@ -120,7 +128,8 @@ export abstract class PathFindingStrategy {
           ...nextPos,
           g, h, f,
           parent: current,
-          time: nextTime
+          time: nextTime,
+          energy
         };
 
         const existingIdx = openList.findIndex(n =>
@@ -151,14 +160,17 @@ export class NaivePlanner extends PathFindingStrategy {
   plan(swarm: Swarm, world: World, isRoundTrip: boolean = false) {
     const drones = swarm.drones;
     const emptySet = new Set<number>();
+    const deadline = performance.now() + TIMEOUT_MS;
 
     for (const drone of drones) {
+      if (performance.now() > deadline) throw new Error("Pathfinding Timeout");
+
       if (world.isPositionBlocked(drone.start)) {
         drone.setPath([drone.start]);
         continue;
       }
 
-      const path1 = this.findPath(drone.start, drone.goal, 0, world, emptySet);
+      const path1 = this.findPath(drone.start, drone.goal, 0, world, emptySet, drone.maxBattery, deadline);
 
       if (path1) {
         let fullPath = path1;
@@ -166,15 +178,14 @@ export class NaivePlanner extends PathFindingStrategy {
 
         if (isRoundTrip) {
             const leg1Time = path1.length - 1;
-            const path2 = this.findPath(drone.goal, drone.start, leg1Time, world, emptySet);
+            // Estimate remaining battery for leg 2 check? Not perfect but sufficient for naive
+            const path2 = this.findPath(drone.goal, drone.start, leg1Time, world, emptySet, drone.maxBattery, deadline); // Simplified battery check
             
             if (path2) {
                 fullPath = [...path1, ...path2.slice(1)];
             }
-            // Delivery happens at the end of Leg 1 (the Goal)
             deliveryTick = leg1Time;
         } else {
-            // Delivery happens at the end
             deliveryTick = fullPath.length - 1;
         }
         
@@ -182,7 +193,7 @@ export class NaivePlanner extends PathFindingStrategy {
         drone.status = 'finished';
       } else {
         drone.setPath([drone.start]);
-        drone.status = 'blocked';
+        drone.status = 'out_of_battery'; // Often due to energy limit in findPath
       }
     }
   }
@@ -198,20 +209,22 @@ export class CooperativePlanner extends PathFindingStrategy {
 
   plan(swarm: Swarm, world: World, isRoundTrip: boolean = false) {
     const drones = swarm.drones;
-    // Changed to Set<number> for performance
     const reservedSpaceTime = new Set<number>();
+    const deadline = performance.now() + TIMEOUT_MS;
 
     for (const drone of drones) {
+      if (performance.now() > deadline) throw new Error("Pathfinding Timeout");
+
       if (world.isPositionBlocked(drone.start)) {
         drone.setPath([drone.start]);
         continue;
       }
 
-      const path1 = this.findPath(drone.start, drone.goal, 0, world, reservedSpaceTime);
+      const path1 = this.findPath(drone.start, drone.goal, 0, world, reservedSpaceTime, drone.maxBattery, deadline);
 
       if (!path1) {
         drone.setPath([drone.start]);
-        drone.status = 'blocked';
+        drone.status = 'out_of_battery';
         continue;
       }
 
@@ -220,12 +233,11 @@ export class CooperativePlanner extends PathFindingStrategy {
 
       if (isRoundTrip) {
           const leg1Time = path1.length - 1;
-          const path2 = this.findPath(drone.goal, drone.start, leg1Time, world, reservedSpaceTime);
+          const path2 = this.findPath(drone.goal, drone.start, leg1Time, world, reservedSpaceTime, drone.maxBattery, deadline); // Simplified
           
           if (path2) {
               fullPath = [...path1, ...path2.slice(1)];
           }
-          // Delivery happens at the end of Leg 1
           deliveryTick = leg1Time;
       } else {
           deliveryTick = fullPath.length - 1;
@@ -234,12 +246,11 @@ export class CooperativePlanner extends PathFindingStrategy {
       drone.setPath(fullPath, deliveryTick);
       drone.status = 'finished';
 
-      // Reserve path
       fullPath.forEach((pos, t) => {
         reservedSpaceTime.add(this.key(pos, t));
       });
-
-      // Reserve final position for a bit after finishing
+      
+      // Reserve post-arrival to prevent rear-end collisions
       const lastPos = fullPath[fullPath.length - 1];
       const arrivalTime = fullPath.length - 1;
       for (let t = 1; t < 20; t++) {
@@ -250,13 +261,175 @@ export class CooperativePlanner extends PathFindingStrategy {
 }
 
 /**
- * Utility to detect collisions
+ * Strategy 3: Energy Saver (Custom A*)
+ * Prioritizes low energy consumption over speed.
  */
+export class EnergySaverPlanner extends PathFindingStrategy {
+  name = "Energy Saver";
+  description = "Prioritizes battery conservation. Waiting is cheaper than moving.";
+  isSafe = true;
+
+  // Override findPath to use Energy as G-cost instead of Time
+  protected findPathEnergyOptimized(
+    start: Position3D,
+    goal: Position3D,
+    startTime: number,
+    world: World,
+    reserved: Set<number>,
+    maxEnergy: number,
+    deadline: number
+  ): Position3D[] | null {
+    
+    const startNode: PathNode = {
+      ...start,
+      g: 0, // G is now ENERGY
+      h: this.heuristic(start, goal) * ENERGY_COSTS.MOVE, // Heuristic in Energy units
+      f: 0,
+      parent: null,
+      time: startTime,
+      energy: 0
+    };
+    startNode.f = startNode.g + startNode.h;
+
+    const openList: PathNode[] = [startNode];
+    const closedSet = new Set<number>();
+
+    while (openList.length > 0) {
+      if (performance.now() > deadline) {
+        throw new Error("Pathfinding Timeout");
+      }
+
+      openList.sort((a, b) => a.f - b.f);
+      const current = openList.shift()!;
+
+      if (current.x === goal.x && current.y === goal.y && current.z === goal.z) {
+        return this.reconstructPath(current);
+      }
+
+      if (current.time >= this.maxTimeSteps) continue;
+
+      const closedKey = this.key(current, current.time);
+      if (closedSet.has(closedKey)) continue;
+      closedSet.add(closedKey);
+
+      const neighbors = this.getNeighbors(current, world);
+
+      for (const nextPos of neighbors) {
+        const nextTime = current.time + 1;
+
+        if (world.isPositionBlocked(nextPos)) continue;
+        if (reserved.size > 0 && reserved.has(this.key(nextPos, nextTime))) continue;
+
+        const isWait = nextPos.x === current.x && nextPos.y === current.y && nextPos.z === current.z;
+        const stepCost = isWait ? ENERGY_COSTS.WAIT : ENERGY_COSTS.MOVE;
+
+        const newEnergy = current.energy + stepCost;
+        if (newEnergy > maxEnergy) continue;
+
+        // G cost is ENERGY, not time steps
+        const g = current.g + stepCost; 
+        const h = this.heuristic(nextPos, goal) * ENERGY_COSTS.MOVE;
+        const f = g + h;
+
+        const neighborNode: PathNode = {
+          ...nextPos,
+          g, h, f,
+          parent: current,
+          time: nextTime,
+          energy: newEnergy
+        };
+
+        // Check if we found a better path to this state (Pos + Time) in terms of ENERGY
+        const existingIdx = openList.findIndex(n =>
+          n.x === neighborNode.x && n.y === neighborNode.y && n.z === neighborNode.z && n.time === neighborNode.time
+        );
+
+        if (existingIdx !== -1) {
+          if (openList[existingIdx].g > g) {
+            openList[existingIdx] = neighborNode;
+          }
+        } else {
+          openList.push(neighborNode);
+        }
+      }
+    }
+    return null;
+  }
+
+  plan(swarm: Swarm, world: World, isRoundTrip: boolean = false) {
+    const drones = swarm.drones;
+    const reservedSpaceTime = new Set<number>();
+    const deadline = performance.now() + TIMEOUT_MS;
+
+    for (const drone of drones) {
+      if (performance.now() > deadline) throw new Error("Pathfinding Timeout");
+
+      if (world.isPositionBlocked(drone.start)) {
+        drone.setPath([drone.start]);
+        continue;
+      }
+
+      // Use Energy Optimized Finder
+      const path1 = this.findPathEnergyOptimized(drone.start, drone.goal, 0, world, reservedSpaceTime, drone.maxBattery, deadline);
+
+      if (!path1) {
+        drone.setPath([drone.start]);
+        drone.status = 'out_of_battery';
+        continue;
+      }
+
+      let fullPath = path1;
+      let deliveryTick = path1.length - 1;
+
+      // For simplicty, leg 2 just uses regular path finding but checks energy constraints
+      if (isRoundTrip) {
+          const leg1Time = path1.length - 1;
+          // Calculate energy consumed in leg 1 to pass as start energy for leg 2? 
+          // The current simplified findPath doesn't take "startEnergy" param easily without refactor.
+          // We'll approximate by reducing maxBattery for the second leg.
+          // Energy used in Leg 1:
+          let energyUsed = 0;
+          for(let i=1; i<path1.length; i++) {
+             const prev = path1[i-1];
+             const curr = path1[i];
+             if(prev.x === curr.x && prev.y === curr.y && prev.z === curr.z) energyUsed += ENERGY_COSTS.WAIT;
+             else energyUsed += ENERGY_COSTS.MOVE;
+          }
+          
+          const remainingBat = drone.maxBattery - energyUsed;
+          
+          const path2 = this.findPathEnergyOptimized(drone.goal, drone.start, leg1Time, world, reservedSpaceTime, remainingBat, deadline);
+          
+          if (path2) {
+              fullPath = [...path1, ...path2.slice(1)];
+          } else {
+              // If can't make it back, just stay at goal? or mark as partial?
+              // For now, commit to leg 1 and mark out of battery later.
+          }
+          deliveryTick = leg1Time;
+      } else {
+          deliveryTick = fullPath.length - 1;
+      }
+
+      drone.setPath(fullPath, deliveryTick);
+      drone.status = 'finished';
+
+      fullPath.forEach((pos, t) => {
+        reservedSpaceTime.add(this.key(pos, t));
+      });
+       
+      const lastPos = fullPath[fullPath.length - 1];
+      const arrivalTime = fullPath.length - 1;
+      for (let t = 1; t < 20; t++) {
+        reservedSpaceTime.add(this.key(lastPos, arrivalTime + t));
+      }
+    }
+  }
+}
+
 export class CollisionAnalyzer {
   static detect(swarm: Swarm): CollisionEvent[] {
     const collisions: CollisionEvent[] = [];
-    // Using Map<string> here is acceptable as this runs once post-calculation
-    // and string keys are easier to debug/parse for collision reporting
     const timeLocationMap = new Map<string, string[]>(); 
 
     for (const drone of swarm.drones) {

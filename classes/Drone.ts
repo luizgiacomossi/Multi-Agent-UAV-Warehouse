@@ -1,3 +1,4 @@
+
 import { Agent, Position3D } from '../types';
 import { World } from './World';
 
@@ -8,10 +9,11 @@ export class Drone implements Agent {
   goal: Position3D;
   color: string;
   path: Position3D[];
-  status: 'idle' | 'moving' | 'finished' | 'blocked';
+  status: 'idle' | 'moving' | 'finished' | 'blocked' | 'out_of_battery';
   deliveryTime?: number;
+  maxBattery: number;
 
-  constructor(id: string, name: string, color: string) {
+  constructor(id: string, name: string, color: string, maxBattery: number = 50) {
     this.id = id;
     this.name = name;
     this.color = color;
@@ -20,6 +22,7 @@ export class Drone implements Agent {
     this.path = [];
     this.status = 'idle';
     this.deliveryTime = undefined;
+    this.maxBattery = maxBattery;
   }
 
   setMission(start: Position3D, goal: Position3D) {
@@ -54,19 +57,22 @@ export class Swarm {
 
   constructor(count: number) {
     this.drones = [];
-    this.resize(count);
+    this.resize(count, 50);
   }
 
-  resize(count: number) {
+  resize(count: number, maxBattery: number) {
     if (count > this.drones.length) {
       // Add new
       for (let i = this.drones.length; i < count; i++) {
-        this.drones.push(new Drone(`drone-${i}`, `Drone ${i + 1}`, this.colors[i % this.colors.length]));
+        this.drones.push(new Drone(`drone-${i}`, `Drone ${i + 1}`, this.colors[i % this.colors.length], maxBattery));
       }
     } else if (count < this.drones.length) {
       // Remove
       this.drones = this.drones.slice(0, count);
     }
+    
+    // Update battery for all
+    this.drones.forEach(d => d.maxBattery = maxBattery);
   }
 
   initializeScenario(world: World, deployFromBase: boolean = false) {

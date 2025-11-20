@@ -1,5 +1,6 @@
+
 import React from 'react';
-import { Play, Pause, RotateCcw, Box, Grid3X3, Settings, Building2, ShieldCheck, Skull, Shuffle, Cpu, Repeat } from 'lucide-react';
+import { Play, Pause, RotateCcw, Box, Grid3X3, Settings, Building2, ShieldCheck, Skull, Shuffle, Cpu, Repeat, Battery } from 'lucide-react';
 import { GenerationTheme } from '../types';
 
 interface ControlPanelProps {
@@ -25,6 +26,9 @@ interface ControlPanelProps {
 
   isRoundTrip: boolean;
   setIsRoundTrip: (b: boolean) => void;
+  
+  batteryCapacity: number;
+  setBatteryCapacity: (n: number) => void;
 }
 
 const ControlPanel: React.FC<ControlPanelProps> = ({
@@ -47,7 +51,9 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   availableAlgorithms,
   currentAlgoDesc,
   isRoundTrip,
-  setIsRoundTrip
+  setIsRoundTrip,
+  batteryCapacity,
+  setBatteryCapacity
 }) => {
   return (
     <div className="absolute top-4 left-4 w-80 bg-slate-800/90 backdrop-blur-md p-4 rounded-xl border border-slate-700 shadow-xl text-slate-100 flex flex-col gap-4 z-10 max-h-[90vh] overflow-y-auto">
@@ -131,6 +137,23 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                 value={gridSizeValue} 
                 onChange={(e) => setGridSizeValue(Number(e.target.value))}
                 className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-cyan-500"
+             />
+        </div>
+        
+        {/* Battery Slider */}
+        <div className="space-y-1">
+             <div className="flex items-center justify-between text-xs text-slate-400">
+                <span className="flex items-center gap-1"><Battery size={12}/> Max Battery</span>
+                <span className="font-mono text-emerald-400">{batteryCapacity}</span>
+             </div>
+             <input 
+                type="range" 
+                min="10" 
+                max="200" 
+                step="10"
+                value={batteryCapacity} 
+                onChange={(e) => setBatteryCapacity(Number(e.target.value))}
+                className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500"
              />
         </div>
 

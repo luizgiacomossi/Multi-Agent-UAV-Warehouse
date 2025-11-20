@@ -1,3 +1,4 @@
+
 export interface Position3D {
   x: number;
   y: number;
@@ -11,9 +12,10 @@ export interface Agent {
   goal: Position3D;
   color: string;
   path: Position3D[];
-  status: 'idle' | 'moving' | 'finished' | 'blocked' | 'destroyed';
+  status: 'idle' | 'moving' | 'finished' | 'blocked' | 'destroyed' | 'out_of_battery';
   destructionTime?: number;
   deliveryTime?: number;
+  maxBattery: number;
 }
 
 export interface CollisionEvent {
@@ -35,4 +37,10 @@ export interface PathNode extends Position3D {
   f: number;
   parent: PathNode | null;
   time: number;
+  energy: number; // Accumulated energy cost
 }
+
+export const ENERGY_COSTS = {
+  MOVE: 1.0,
+  WAIT: 0.1 // Hovering consumes much less than moving
+};

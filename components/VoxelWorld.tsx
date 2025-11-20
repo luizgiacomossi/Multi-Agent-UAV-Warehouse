@@ -1,8 +1,9 @@
+
 import React, { useMemo, useRef, useLayoutEffect } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
-import { OrbitControls, Text, Environment, ContactShadows, Stars, Float, Line } from '@react-three/drei';
+import { OrbitControls, Text, Environment, ContactShadows, Stars, Float, Line, Billboard } from '@react-three/drei';
 import * as THREE from 'three';
-import { Agent, Position3D, CollisionEvent } from '../types';
+import { Agent, Position3D, CollisionEvent, ENERGY_COSTS } from '../types';
 
 // -- Subcomponents --
 
@@ -47,6 +48,29 @@ const AgentDrone: React.FC<AgentDroneProps> = ({ agent, tick }) => {
   const isDestroyed = agent.destructionTime !== undefined && tick >= agent.destructionTime;
   const stopTime = agent.destructionTime !== undefined ? agent.destructionTime : agent.path.length - 1;
   
+  // Calculate Real-time Battery
+  const currentBattery = useMemo(() => {
+     if (!agent.path || agent.path.length === 0) return agent.maxBattery;
+     
+     let consumed = 0;
+     // Only calculate up to current tick or when path ends
+     const currentTickLimit = Math.min(tick, agent.path.length - 1);
+     
+     for (let i = 1; i <= currentTickLimit; i++) {
+         const prev = agent.path[i-1];
+         const curr = agent.path[i];
+         if (prev.x === curr.x && prev.y === curr.y && prev.z === curr.z) {
+             consumed += ENERGY_COSTS.WAIT;
+         } else {
+             consumed += ENERGY_COSTS.MOVE;
+         }
+     }
+     return Math.max(0, agent.maxBattery - consumed);
+  }, [agent.path, agent.maxBattery, tick]);
+
+  const isDeadBattery = currentBattery <= 0;
+  const showDead = isDeadBattery && !isDestroyed;
+
   // Determine package visibility: Visible if not delivered yet and not destroyed
   const hasPackage = useMemo(() => {
      if (isDestroyed) return false;
@@ -56,10 +80,13 @@ const AgentDrone: React.FC<AgentDroneProps> = ({ agent, tick }) => {
 
   const currentPos = useMemo(() => {
     if (!agent.path || agent.path.length === 0) return agent.start;
-    // Stop moving if destroyed
-    const t = isDestroyed ? stopTime : tick;
+    // Stop moving if destroyed or out of battery
+    let t = tick;
+    if (isDestroyed) t = stopTime;
+    else if (isDeadBattery) t = Math.min(t, agent.path.length - 1); // It stops where it is
+    
     return agent.path[Math.min(t, agent.path.length - 1)];
-  }, [agent, tick, isDestroyed, stopTime]);
+  }, [agent, tick, isDestroyed, stopTime, isDeadBattery]);
 
   if (isDestroyed) {
       return (
@@ -92,12 +119,34 @@ const AgentDrone: React.FC<AgentDroneProps> = ({ agent, tick }) => {
       );
   }
 
+  const batPct = currentBattery / agent.maxBattery;
+  const batColor = batPct > 0.5 ? '#22c55e' : batPct > 0.2 ? '#eab308' : '#ef4444';
+
   return (
     <group position={[currentPos.x, currentPos.y, currentPos.z]}>
+      {/* Battery Bar */}
+      <Billboard position={[0, 1.2, 0]}>
+          <mesh position={[-0.5 + (batPct/2), 0, 0]}>
+             <planeGeometry args={[batPct, 0.15]} />
+             <meshBasicMaterial color={batColor} />
+          </mesh>
+          <mesh position={[0, 0, -0.01]}>
+              <planeGeometry args={[1.02, 0.17]} />
+              <meshBasicMaterial color="#000" />
+          </mesh>
+          {showDead && (
+             <Text position={[0, 0.4, 0]} fontSize={0.4} color="#ef4444">NO POWER</Text>
+          )}
+      </Billboard>
+
       {/* Drone Body */}
       <mesh scale={0.4}>
         <sphereGeometry args={[1, 16, 16]} />
-        <meshStandardMaterial color={agent.color} emissive={agent.color} emissiveIntensity={0.5} />
+        <meshStandardMaterial 
+            color={showDead ? "#333" : agent.color} 
+            emissive={showDead ? "#000" : agent.color} 
+            emissiveIntensity={showDead ? 0 : 0.5} 
+        />
       </mesh>
       
       {/* The Package */}
@@ -113,23 +162,15 @@ const AgentDrone: React.FC<AgentDroneProps> = ({ agent, tick }) => {
         </mesh>
       )}
 
-      {/* Propellers */}
-      <mesh position={[0.3, 0.1, 0.3]} rotation={[Math.PI/2, 0, 0]}>
-        <ringGeometry args={[0.1, 0.15, 8]} />
-        <meshBasicMaterial color="white" side={THREE.DoubleSide} opacity={0.5} transparent />
-      </mesh>
-      <mesh position={[-0.3, 0.1, 0.3]} rotation={[Math.PI/2, 0, 0]}>
-         <ringGeometry args={[0.1, 0.15, 8]} />
-        <meshBasicMaterial color="white" side={THREE.DoubleSide} opacity={0.5} transparent />
-      </mesh>
-      <mesh position={[0.3, 0.1, -0.3]} rotation={[Math.PI/2, 0, 0]}>
-         <ringGeometry args={[0.1, 0.15, 8]} />
-        <meshBasicMaterial color="white" side={THREE.DoubleSide} opacity={0.5} transparent />
-      </mesh>
-      <mesh position={[-0.3, 0.1, -0.3]} rotation={[Math.PI/2, 0, 0]}>
-         <ringGeometry args={[0.1, 0.15, 8]} />
-        <meshBasicMaterial color="white" side={THREE.DoubleSide} opacity={0.5} transparent />
-      </mesh>
+      {/* Propellers - Spin only if active */}
+      <group>
+        {[1, -1].map(i => [1, -1].map(j => (
+            <mesh key={`${i}-${j}`} position={[0.3 * i, 0.1, 0.3 * j]} rotation={[Math.PI/2, 0, 0]}>
+                <ringGeometry args={[0.1, 0.15, 8]} />
+                <meshBasicMaterial color={showDead ? "#555" : "white"} side={THREE.DoubleSide} opacity={0.5} transparent />
+            </mesh>
+        )))}
+      </group>
 
       {/* Label */}
       <Text
@@ -142,7 +183,7 @@ const AgentDrone: React.FC<AgentDroneProps> = ({ agent, tick }) => {
         {agent.name}
       </Text>
       
-      <pointLight intensity={0.5} distance={3} color={agent.color} />
+      {!showDead && <pointLight intensity={0.5} distance={3} color={agent.color} />}
     </group>
   );
 };
