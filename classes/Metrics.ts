@@ -1,3 +1,4 @@
+
 import { Agent, ENERGY_COSTS } from '../types';
 import { Drone } from './Drone';
 
@@ -17,7 +18,7 @@ export class Metrics {
     /**
      * Calculates a snapshot of simulation statistics for a specific tick.
      */
-    static calculate(agents: Agent[], tick: number): SimulationStats {
+    static calculate(agents: Agent[], tick: number, batteryEnabled: boolean = true): SimulationStats {
         let active = 0;
         let delivered = 0;
         let destroyed = 0;
@@ -61,13 +62,15 @@ export class Metrics {
 
             // Energy Estimate Calculation
             // We iterate through the path taken SO FAR to sum up move vs wait costs
-            for (let i = 1; i <= effectiveTick && i < agent.path.length; i++) {
-                const prev = agent.path[i - 1];
-                const curr = agent.path[i];
-                if (prev.x === curr.x && prev.y === curr.y && prev.z === curr.z) {
-                    totalEnergyConsumed += ENERGY_COSTS.WAIT;
-                } else {
-                    totalEnergyConsumed += ENERGY_COSTS.MOVE;
+            if (batteryEnabled) {
+                for (let i = 1; i <= effectiveTick && i < agent.path.length; i++) {
+                    const prev = agent.path[i - 1];
+                    const curr = agent.path[i];
+                    if (prev.x === curr.x && prev.y === curr.y && prev.z === curr.z) {
+                        totalEnergyConsumed += ENERGY_COSTS.WAIT;
+                    } else {
+                        totalEnergyConsumed += ENERGY_COSTS.MOVE;
+                    }
                 }
             }
 

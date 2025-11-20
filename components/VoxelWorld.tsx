@@ -59,13 +59,14 @@ interface AgentDroneProps {
   agent: Agent;
   tick: number;
   chargeStations?: Position3D[];
+  batteryEnabled: boolean;
 }
 
-const AgentDrone: React.FC<AgentDroneProps> = ({ agent, tick, chargeStations = [] }) => {
+const AgentDrone: React.FC<AgentDroneProps> = ({ agent, tick, chargeStations = [], batteryEnabled }) => {
   
   const snapshot = useMemo(() => {
       if (agent instanceof Drone) {
-          return agent.getSnapshotAt(tick, chargeStations);
+          return agent.getSnapshotAt(tick, chargeStations, batteryEnabled);
       }
       const t = Math.min(tick, agent.path.length - 1);
       return {
@@ -76,7 +77,7 @@ const AgentDrone: React.FC<AgentDroneProps> = ({ agent, tick, chargeStations = [
           isRecharging: false,
           hasPackage: true
       };
-  }, [agent, tick, chargeStations]);
+  }, [agent, tick, chargeStations, batteryEnabled]);
 
   const { position, battery, isDestroyed, isDeadBattery, isRecharging, hasPackage } = snapshot;
 
@@ -264,10 +265,11 @@ interface VoxelWorldProps {
   tick: number;
   warehouse: Warehouse | null;
   chargeStations?: Position3D[];
+  batteryEnabled: boolean;
 }
 
 const VoxelWorld: React.FC<VoxelWorldProps> = ({ 
-    gridSize, obstacles, agents, incidents, tick, warehouse, chargeStations = []
+    gridSize, obstacles, agents, incidents, tick, warehouse, chargeStations = [], batteryEnabled
 }) => {
   const camPos = useMemo(() => new THREE.Vector3(gridSize.x * 1.5, gridSize.y * 1.2, gridSize.z * 1.5), [gridSize]);
   const center = useMemo(() => new THREE.Vector3((gridSize.x-1)/2, (gridSize.y-1)/2, (gridSize.z-1)/2), [gridSize]);
@@ -308,6 +310,7 @@ const VoxelWorld: React.FC<VoxelWorldProps> = ({
                 agent={agent} 
                 tick={tick} 
                 chargeStations={chargeStations}
+                batteryEnabled={batteryEnabled}
              />
              <PathLine 
                 path={agent.path} 

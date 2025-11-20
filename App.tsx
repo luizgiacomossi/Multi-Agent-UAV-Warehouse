@@ -169,6 +169,7 @@ const App: React.FC = () => {
         tick={tick}
         warehouse={warehouse}
         chargeStations={chargeStations}
+        batteryEnabled={batteryEnabled}
       />
       
       <ControlPanel
@@ -204,7 +205,7 @@ const App: React.FC = () => {
         setMaxAltitude={setMaxAltitude}
       />
 
-      <StatusPanel agents={agents} incidents={incidents} tick={tick} />
+      <StatusPanel agents={agents} incidents={incidents} tick={tick} batteryEnabled={batteryEnabled} />
 
       {error && (
         <div className="absolute inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">

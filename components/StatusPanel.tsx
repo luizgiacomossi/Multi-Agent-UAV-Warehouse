@@ -9,12 +9,13 @@ interface StatusPanelProps {
   agents: Agent[];
   incidents: SimulationIncident[];
   tick: number;
+  batteryEnabled: boolean;
 }
 
-const StatusPanel: React.FC<StatusPanelProps> = ({ agents, incidents, tick }) => {
+const StatusPanel: React.FC<StatusPanelProps> = ({ agents, incidents, tick, batteryEnabled }) => {
 
   // Use the new Metrics class to calculate stats
-  const stats = useMemo(() => Metrics.calculate(agents, tick), [agents, tick]);
+  const stats = useMemo(() => Metrics.calculate(agents, tick, batteryEnabled), [agents, tick, batteryEnabled]);
 
   return (
     <div className="absolute top-4 right-4 w-80 bg-slate-900/90 backdrop-blur-md p-4 rounded-xl border border-slate-700 shadow-xl text-slate-100 flex flex-col gap-4 z-10 max-h-[90vh] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent">
@@ -48,7 +49,7 @@ const StatusPanel: React.FC<StatusPanelProps> = ({ agents, incidents, tick }) =>
               <Zap size={10} /> Avg. Energy
            </div>
            <div className="text-xl font-mono text-emerald-400 font-semibold relative z-10">
-              {stats.avgEnergy.toFixed(1)} <span className="text-xs text-slate-600">u</span>
+              {batteryEnabled ? stats.avgEnergy.toFixed(1) : "∞"} <span className="text-xs text-slate-600">u</span>
            </div>
            <Zap className="absolute -right-2 -bottom-2 text-emerald-500/10" size={48} />
         </div>
