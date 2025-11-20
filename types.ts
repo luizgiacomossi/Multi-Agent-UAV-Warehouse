@@ -5,6 +5,8 @@ export interface Position3D {
   z: number;
 }
 
+export type MissionState = 'IDLE' | 'OUTBOUND' | 'RETURNING' | 'COMPLETED';
+
 export interface Agent {
   id: string;
   name: string;
@@ -16,13 +18,19 @@ export interface Agent {
   destructionTime?: number;
   deliveryTimes?: number[]; // Changed from deliveryTime to support multiple drops
   maxBattery: number;
+  // New props handled by MissionController implicitly, but exposed here for UI if needed
+  missionState?: MissionState;
 }
 
-export interface CollisionEvent {
+export type IncidentType = 'collision' | 'battery_dead';
+
+export interface SimulationIncident {
+  id: string;
+  type: IncidentType;
   position: Position3D;
   time: number;
   agentIds: string[];
-  agentNames: string[]; // Added for better logs
+  agentNames: string[];
 }
 
 export enum GenerationTheme {

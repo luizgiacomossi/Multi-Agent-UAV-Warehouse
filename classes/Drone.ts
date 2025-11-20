@@ -1,18 +1,23 @@
 
-import { Agent, Position3D, ENERGY_COSTS } from '../types';
+import { Agent, Position3D, ENERGY_COSTS, MissionState } from '../types';
+import { MissionController } from './MissionController';
 import { World } from './World';
 
 export class Drone implements Agent {
   id: string;
   name: string;
   start: Position3D;
-  goal: Position3D;
+  // goal property is now primarily for initial setup/UI, actual logic uses MissionController
+  goal: Position3D; 
   color: string;
   path: Position3D[];
   status: 'idle' | 'moving' | 'finished' | 'blocked' | 'destroyed' | 'out_of_battery';
   deliveryTimes?: number[];
   maxBattery: number;
   destructionTime?: number;
+  missionState?: MissionState;
+  
+  public mission: MissionController;
 
   constructor(id: string, name: string, color: string, maxBattery: number = 50) {
     this.id = id;
@@ -24,6 +29,7 @@ export class Drone implements Agent {
     this.status = 'idle';
     this.deliveryTimes = [];
     this.maxBattery = maxBattery;
+    this.mission = new MissionController({x:0, y:0, z:0});
   }
 
   clone(): Drone {
@@ -34,26 +40,46 @@ export class Drone implements Agent {
     d.status = this.status;
     d.deliveryTimes = this.deliveryTimes ? [...this.deliveryTimes] : [];
     d.destructionTime = this.destructionTime;
+    // We don't deep clone mission controller state for React rendering, 
+    // but we copy the basic props if needed for UI logic
+    d.missionState = this.mission.state; 
     return d;
   }
 
-  setMission(start: Position3D, goal: Position3D) {
+  setMissionConfig(start: Position3D, firstGoal: Position3D, isInfinite: boolean, isRoundTrip: boolean) {
     this.start = { ...start };
-    this.goal = { ...goal };
-    this.path = [];
+    this.goal = { ...firstGoal };
+    this.path = [this.start]; // Initialize path with start pos
     this.status = 'idle';
     this.deliveryTimes = [];
     this.destructionTime = undefined;
+    
+    // Configure Controller
+    this.mission.warehouseLocation = { ...start };
+    this.mission.configure(isInfinite, isRoundTrip);
+    this.mission.reset();
+    this.mission.assignNewMission(firstGoal);
   }
 
-  setPath(path: Position3D[], deliveryTimes?: number[]) {
-    this.path = path;
-    this.deliveryTimes = deliveryTimes || [];
-    if (path.length > 0) {
-        this.status = 'idle'; 
-    } else {
-        this.status = 'blocked';
-    }
+  /**
+   * Appends a new path segment to the drone's history.
+   */
+  appendPath(segment: Position3D[], isDelivery: boolean = false) {
+      // If this is not the very first segment, we skip the first point of the new segment
+      // because it matches the last point of the existing path
+      const startIndex = (this.path.length > 0) ? 1 : 0;
+      
+      for(let i = startIndex; i < segment.length; i++) {
+          this.path.push(segment[i]);
+      }
+
+      if (isDelivery) {
+          this.deliveryTimes = this.deliveryTimes || [];
+          // The delivery happens at the end of this segment
+          this.deliveryTimes.push(this.path.length - 1);
+      }
+
+      this.status = 'moving';
   }
 
   /**
@@ -64,7 +90,9 @@ export class Drone implements Agent {
   getSnapshotAt(tick: number, chargeStations: Position3D[], batteryEnabled: boolean = true) {
     // 1. Check for Collision Destruction
     if (this.destructionTime !== undefined && tick >= this.destructionTime) {
-         const crashPos = this.path[Math.min(tick, this.path.length-1)] || this.start;
+         // Freeze at destruction time. Use destructionTime index, not current tick.
+         const crashIdx = Math.min(this.destructionTime, this.path.length - 1);
+         const crashPos = (this.path.length > 0) ? this.path[crashIdx] : this.start;
          return {
              position: crashPos,
              battery: 0,
@@ -107,6 +135,18 @@ export class Drone implements Agent {
     const effectiveTick = Math.min(tick, this.path.length - 1);
     const position = (this.path.length > 0) ? this.path[effectiveTick] : this.start;
 
+    // If finished and waiting at end
+    if (tick >= this.path.length && this.path.length > 0) {
+        return {
+            position: this.path[this.path.length-1],
+            battery: battery, // Keeps last calculated battery
+            isDestroyed: false,
+            isDeadBattery: false,
+            isRecharging: false,
+            hasPackage: false // Finished usually means delivered
+        };
+    }
+
     return {
         position,
         battery,
@@ -119,8 +159,9 @@ export class Drone implements Agent {
 
   /**
    * Iterates through the path to calculate battery drain, recharges, and package state.
+   * Made Public to allow SimulationManager to detect battery failures for logging.
    */
-  private calculateStateAt(tick: number, chargeStations: Position3D[], batteryEnabled: boolean) {
+  public calculateStateAt(tick: number, chargeStations: Position3D[], batteryEnabled: boolean) {
       if (!this.path || this.path.length === 0) {
           return { battery: this.maxBattery, hasPackage: true, isRecharging: false, deathTick: undefined };
       }
@@ -148,8 +189,12 @@ export class Drone implements Agent {
               const isWaiting = this.isWaiting(prev, curr);
               
               // Check for Base/Station Recharge
-              // We recharge if we are at a station OR at the starting base
-              const atBase = (curr.x === this.start.x && curr.y === this.start.y && curr.z === this.start.z);
+              // We recharge if we are at a station OR at the starting base (warehouse location)
+              // Check Mission Warehouse
+              const atBase = (curr.x === this.mission.warehouseLocation.x && 
+                              curr.y === this.mission.warehouseLocation.y && 
+                              curr.z === this.mission.warehouseLocation.z);
+              
               const atStation = this.isAtStation(curr, chargeStations);
 
               if ((atBase || atStation) && isWaiting) {
@@ -174,7 +219,6 @@ export class Drone implements Agent {
               // Death Check
               if (batteryEnabled && battery <= 0 && deathTick === undefined) {
                   deathTick = i;
-                  // We don't break here because we need to see if the requested tick is later
               }
           }
       }
@@ -192,90 +236,86 @@ export class Drone implements Agent {
 }
 
 export class Swarm {
-  drones: Drone[];
-  private colors = ['#ef4444', '#3b82f6', '#22c55e', '#eab308', '#a855f7', '#ec4899', '#f97316', '#06b6d4'];
+    public drones: Drone[] = [];
 
-  constructor(count: number) {
-    this.drones = [];
-    this.resize(count, 50);
-  }
-
-  resize(count: number, maxBattery: number) {
-    if (count > this.drones.length) {
-      for (let i = this.drones.length; i < count; i++) {
-        this.drones.push(new Drone(`drone-${i}`, `Drone ${i + 1}`, this.colors[i % this.colors.length], maxBattery));
-      }
-    } else if (count < this.drones.length) {
-      this.drones = this.drones.slice(0, count);
+    constructor(count: number) {
+        // Drones initialized via resize
     }
-    this.drones.forEach(d => d.maxBattery = maxBattery);
-  }
 
-  initializeScenario(world: World, maxAltitude: number = 24) {
-    const occupied = new Set<string>();
-    const posKey = (p: Position3D) => `${p.x},${p.y},${p.z}`;
-    const warehouse = world.warehouse;
-    
-    // Constraint: Goals cannot be higher than maxAltitude
-    const yLimit = Math.min(world.size - 1, maxAltitude);
-
-    for (let i = 0; i < this.drones.length; i++) {
-      const drone = this.drones[i];
-      let start: Position3D;
-      let goal: Position3D;
-      let attempts = 0;
-
-      if (warehouse) {
-        start = warehouse.getSpawnLocation(i);
-        occupied.add(posKey(start));
-      } else {
-        while (attempts < 1000) {
-          start = {
-            x: Math.floor(Math.random() * world.size),
-            y: Math.floor(Math.random() * yLimit),
-            z: Math.floor(Math.random() * world.size)
-          };
-          const key = posKey(start);
-          if (!world.isBlocked(start.x, start.y, start.z) && !occupied.has(key)) {
-            occupied.add(key);
-            break;
-          }
-          attempts++;
-        }
-      }
-
-      attempts = 0;
-      const minDist = Math.max(4, Math.floor(world.size / 3));
-      
-      while (attempts < 2000) {
-        goal = {
-          x: Math.floor(Math.random() * world.size),
-          y: Math.floor(Math.random() * yLimit),
-          z: Math.floor(Math.random() * world.size)
-        };
-        const key = posKey(goal);
-        const dist = Math.abs(start!.x - goal.x) + Math.abs(start!.y - goal.y) + Math.abs(start!.z - goal.z);
-
-        const inWarehouse = warehouse ? 
-            (goal.x >= warehouse.position.x && goal.x < warehouse.position.x + warehouse.baseSize && 
-             goal.z >= warehouse.position.z && goal.z < warehouse.position.z + warehouse.baseSize && 
-             goal.y < 3) 
-            : false;
-
-        if (!world.isBlocked(goal.x, goal.y, goal.z) && 
-            !occupied.has(key) && 
-            dist > minDist && 
-            !inWarehouse &&
-            !(start!.x === goal.x && start!.y === goal.y && start!.z === goal.z)
-            ) {
-          occupied.add(key); 
-          break;
-        }
-        attempts++;
-      }
-
-      if (attempts >= 2000) goal = { ...start! };
-      drone.setMission(start!, goal!);
+    resize(count: number, battery: number) {
+         this.drones = [];
+         const colors = ['#ef4444', '#3b82f6', '#22c55e', '#eab308', '#a855f7', '#ec4899', '#f97316', '#06b6d4'];
+         for(let i=0; i<count; i++) {
+             this.drones.push(new Drone(
+                 `agent-${i}-${Date.now()}`,
+                 `Drone ${i + 1}`,
+                 colors[i % colors.length],
+                 battery
+             ));
+         }
     }
-  }
+
+    initializeScenario(world: World, maxAltitude: number) {
+        const agents = this.drones;
+        
+        for (let i = 0; i < agents.length; i++) {
+            const drone = agents[i];
+            let start: Position3D;
+            
+            // 1. Assign Start
+            if (world.warehouse) {
+                start = world.warehouse.getSpawnLocation(i);
+            } else {
+                let attempts = 0;
+                while(attempts < 1000) {
+                    start = {
+                        x: Math.floor(Math.random() * world.size),
+                        y: Math.floor(Math.random() * Math.min(world.size, maxAltitude)),
+                        z: Math.floor(Math.random() * world.size)
+                    };
+                    if (!world.isBlocked(start.x, start.y, start.z) && !this.isOccupied(start)) break;
+                    attempts++;
+                }
+                if (attempts >= 1000) start = {x:0, y:0, z:0}; 
+            }
+            drone.start = start;
+
+            // 2. Assign Initial Goal
+            let attempts = 0;
+            const minDistance = 4;
+            
+            while (attempts < 1000) {
+                const goal = {
+                    x: Math.floor(Math.random() * world.size),
+                    y: Math.floor(Math.random() * Math.min(world.size, maxAltitude)),
+                    z: Math.floor(Math.random() * world.size)
+                };
+                
+                const dist = Math.abs(start.x - goal.x) + Math.abs(start.y - goal.y) + Math.abs(start.z - goal.z);
+                
+                // Check bounds, blocks, warehouse exclusion
+                let valid = !world.isBlocked(goal.x, goal.y, goal.z) && dist > minDistance;
+                
+                if (valid && world.warehouse) {
+                    const b = world.warehouse.getBounds();
+                    if (goal.x >= b.minX && goal.x <= b.maxX && goal.z >= b.minZ && goal.z <= b.maxZ) {
+                        valid = false;
+                    }
+                }
+
+                if (valid) {
+                    drone.goal = goal;
+                    break;
+                }
+                attempts++;
+            }
+            if (attempts >= 1000) drone.goal = {x:0, y:0, z:0}; 
+        }
+    }
+
+    private isOccupied(p: Position3D) {
+      return this.drones.some(a => 
+        (a.start.x === p.x && a.start.y === p.y && a.start.z === p.z)
+      );
+    }
 }

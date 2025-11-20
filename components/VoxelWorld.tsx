@@ -1,8 +1,9 @@
+
 import React, { useMemo, useRef, useLayoutEffect } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { OrbitControls, Text, Environment, ContactShadows, Stars, Float, Line, Billboard } from '@react-three/drei';
 import * as THREE from 'three';
-import { Agent, Position3D, CollisionEvent } from '../types';
+import { Agent, Position3D, SimulationIncident } from '../types';
 import { Drone } from '../classes/Drone';
 import { Warehouse } from '../classes/Warehouse';
 
@@ -259,51 +260,70 @@ interface VoxelWorldProps {
   gridSize: Position3D;
   obstacles: Position3D[];
   agents: Agent[];
-  collisions: CollisionEvent[];
+  incidents: SimulationIncident[];
   tick: number;
   warehouse: Warehouse | null;
   chargeStations?: Position3D[];
 }
 
 const VoxelWorld: React.FC<VoxelWorldProps> = ({ 
-    gridSize, obstacles, agents, collisions, tick, warehouse, chargeStations = []
+    gridSize, obstacles, agents, incidents, tick, warehouse, chargeStations = []
 }) => {
   const camPos = useMemo(() => new THREE.Vector3(gridSize.x * 1.5, gridSize.y * 1.2, gridSize.z * 1.5), [gridSize]);
   const center = useMemo(() => new THREE.Vector3((gridSize.x-1)/2, (gridSize.y-1)/2, (gridSize.z-1)/2), [gridSize]);
-  const activeCollisions = useMemo(() => collisions.filter(c => c.time === tick), [collisions, tick]);
+  
+  // Only show collisions in the visualizer, not battery deaths
+  const visibleCollisions = useMemo(() => 
+    incidents.filter(i => i.type === 'collision' && i.time <= tick), 
+  [incidents, tick]);
 
   return (
-    <div className="w-full h-full bg-slate-900 relative">
-      <Canvas camera={{ position: camPos, fov: 45 }} shadows dpr={[1, 2]}>
-        <OrbitControls target={center} makeDefault />
-        <ambientLight intensity={0.6} />
-        <pointLight position={[gridSize.x, gridSize.y * 2, gridSize.z]} intensity={0.8} castShadow />
+    <div className="w-full h-full">
+      <Canvas camera={{ position: camPos, fov: 45 }} shadows>
+        <color attach="background" args={['#0f172a']} />
+        <Stars radius={100} depth={50} count={5000} factor={4} saturation={0} fade speed={1} />
+        <ambientLight intensity={0.4} />
+        <pointLight position={[gridSize.x, gridSize.y * 2, gridSize.z]} intensity={1} castShadow />
         <Environment preset="city" />
-        <Stars radius={200} depth={50} count={5000} factor={4} saturation={0} fade speed={1} />
 
-        <group>
-            <ObstacleField obstacles={obstacles} />
-            <ChargingStation positions={chargeStations} />
-            {warehouse && <WarehouseBase warehouse={warehouse} />}
+        <OrbitControls 
+           makeDefault 
+           target={center}
+           minPolarAngle={0}
+           maxPolarAngle={Math.PI / 1.8}
+           maxDistance={gridSize.x * 3}
+        />
 
-            {agents.map((agent) => (
-                <React.Fragment key={agent.id}>
-                    <AgentDrone agent={agent} tick={tick} chargeStations={chargeStations} />
-                    <PathLine path={agent.path} color={agent.color} destructionTime={agent.destructionTime} />
-                    <GoalMarker position={agent.goal} color={agent.color} />
-                </React.Fragment>
-            ))}
-            
-            {activeCollisions.map((col, idx) => (
-                <CollisionMarker key={`col-${col.time}-${idx}`} position={col.position} />
-            ))}
-             <GridBase size={gridSize} />
-        </group>
-        <ContactShadows position={[0, -0.6, 0]} opacity={0.5} scale={Math.max(gridSize.x, gridSize.z) * 2} blur={2} far={4.5} />
+        <GridBase size={gridSize} />
+        
+        <ObstacleField obstacles={obstacles} />
+        
+        {chargeStations.length > 0 && <ChargingStation positions={chargeStations} />}
+        
+        {warehouse && <WarehouseBase warehouse={warehouse} />}
+
+        {agents.map((agent) => (
+          <React.Fragment key={agent.id}>
+             <AgentDrone 
+                agent={agent} 
+                tick={tick} 
+                chargeStations={chargeStations}
+             />
+             <PathLine 
+                path={agent.path} 
+                color={agent.color} 
+                destructionTime={agent.destructionTime} 
+             />
+             {agent.goal && <GoalMarker position={agent.goal} color={agent.color} />}
+          </React.Fragment>
+        ))}
+
+        {visibleCollisions.map((col) => (
+            <CollisionMarker key={col.id} position={col.position} />
+        ))}
+
+        <ContactShadows opacity={0.5} scale={gridSize.x * 2} blur={2} far={4} />
       </Canvas>
-      <div className="absolute bottom-4 right-4 text-xs text-slate-500 pointer-events-none select-none">
-         Left Click: Rotate | Right Click: Pan | Scroll: Zoom
-      </div>
     </div>
   );
 };

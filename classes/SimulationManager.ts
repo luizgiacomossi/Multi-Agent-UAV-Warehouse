@@ -2,7 +2,7 @@
 import { World } from './World';
 import { Swarm, Drone } from './Drone';
 import { Warehouse } from './Warehouse';
-import { CollisionEvent, GenerationTheme, Position3D } from '../types';
+import { SimulationIncident, Position3D } from '../types';
 import { ReservedZone } from './WorldGenerator';
 import { 
     PathFindingStrategy, 
@@ -70,91 +70,123 @@ export class SimulationManager {
         this.swarm.initializeScenario(this.world, maxAltitude);
     }
 
+    private generateRandomGoal(warehouse: Warehouse | null, maxAltitude: number): Position3D {
+        const yLimit = Math.min(this.world.size - 1, maxAltitude);
+        let attempts = 0;
+        let goal: Position3D;
+
+        while (attempts < 200) {
+            goal = {
+                x: Math.floor(Math.random() * this.world.size),
+                y: Math.floor(Math.random() * yLimit),
+                z: Math.floor(Math.random() * this.world.size)
+            };
+            
+            const inWarehouse = warehouse ? 
+                (goal.x >= warehouse.position.x && goal.x < warehouse.position.x + warehouse.baseSize && 
+                 goal.z >= warehouse.position.z && goal.z < warehouse.position.z + warehouse.baseSize && 
+                 goal.y < 3) : false;
+
+            if (!this.world.isBlocked(goal.x, goal.y, goal.z) && !inWarehouse) {
+                return goal;
+            }
+            attempts++;
+        }
+        return { x: 0, y: 0, z: 0 }; // Fallback
+    }
+
     public async runPathfinding(
         algorithmName: string, 
         isRoundTrip: boolean,
         isInfiniteMode: boolean = false,
         maxAltitude: number = 24,
         batteryEnabled: boolean = true
-    ): Promise<{ agents: Drone[], collisions: CollisionEvent[], maxTicks: number }> {
+    ): Promise<{ agents: Drone[], incidents: SimulationIncident[], maxTicks: number }> {
         
         const strategy = this.algorithms[algorithmName];
         if (!strategy) throw new Error(`Algorithm ${algorithmName} not found`);
 
-        // Reset status
-        this.swarm.drones.forEach(d => {
-            d.destructionTime = undefined;
-            d.status = 'idle';
-            d.path = [];
+        const missionCount = isInfiniteMode ? 3 : 1; // Reduced loops for better performance
+        const reservedSpaceTime = new Set<number>(); // Persist reservations across legs for consistency
+
+        // 1. Setup Initial Missions using MissionController
+        this.swarm.drones.forEach(drone => {
+            // We use the goal previously assigned in initializeScenario as the FIRST goal
+            drone.setMissionConfig(drone.start, drone.goal, isInfiniteMode, isRoundTrip);
         });
 
-        // In infinite mode, we generate a sequence of missions (loops).
-        // 5 loops usually provides enough "infinite" feel before the user resets or we could regenerate.
-        const missionCount = isInfiniteMode ? 5 : 1;
+        // 2. Iterative Simulation Loop
+        // Instead of one giant plan, we plan leg-by-leg (Outbound -> Return -> Outbound...)
         
-        // If infinite mode, we need to generate extra random goals for each agent
-        const missionQueues = new Map<string, Position3D[]>();
-        
-        if (isInfiniteMode) {
-            const warehouse = this.world.warehouse;
-            const yLimit = Math.min(this.world.size - 1, maxAltitude);
-            
-            this.swarm.drones.forEach(drone => {
-                const queue: Position3D[] = [drone.goal]; // First goal is the one set in initialize
-                
-                for(let i = 0; i < missionCount - 1; i++) {
-                    let nextGoal: Position3D;
-                    let attempts = 0;
-                    
-                    while (attempts < 100) {
-                        nextGoal = {
-                            x: Math.floor(Math.random() * this.world.size),
-                            y: Math.floor(Math.random() * yLimit),
-                            z: Math.floor(Math.random() * this.world.size)
-                        };
-                        
-                        // Avoid obstacles and warehouse interior
-                        const inWarehouse = warehouse ? 
-                            (nextGoal.x >= warehouse.position.x && nextGoal.x < warehouse.position.x + warehouse.baseSize && 
-                             nextGoal.z >= warehouse.position.z && nextGoal.z < warehouse.position.z + warehouse.baseSize && 
-                             nextGoal.y < 3) : false;
+        // Maximum global ticks for safety
+        const MAX_GLOBAL_TIME = 10000;
+        strategy.setMaxTimeSteps(MAX_GLOBAL_TIME);
 
-                        if (!this.world.isBlocked(nextGoal.x, nextGoal.y, nextGoal.z) && !inWarehouse) {
-                            break;
-                        }
-                        attempts++;
-                    }
-                    queue.push(nextGoal!);
+        for (let cycle = 0; cycle < missionCount * 2; cycle++) { // *2 because Out + Back = 2 legs
+            
+            // A. Plan Current Leg for all agents
+            // The planner now just looks at where they are (end of current path) and where MissionController says to go.
+            strategy.planLeg(this.swarm, this.world, 0, reservedSpaceTime, maxAltitude, batteryEnabled);
+
+            // B. Update Mission States
+            this.swarm.drones.forEach(drone => {
+                const readyForNew = drone.mission.completeLeg();
+                
+                if (readyForNew) {
+                    const newGoal = this.generateRandomGoal(this.world.warehouse, maxAltitude);
+                    drone.mission.assignNewMission(newGoal);
                 }
-                missionQueues.set(drone.id, queue);
+            });
+
+            // Break early if everyone is finished/blocked
+            const everyoneDone = this.swarm.drones.every(d => d.mission.state === 'COMPLETED' || d.status === 'blocked' || d.status === 'out_of_battery' || d.status === 'destroyed');
+            if (everyoneDone) break;
+        }
+
+        // 3. Detect Collisions
+        let collisions = CollisionAnalyzer.detect(this.swarm);
+        
+        // 4. Detect Battery Incidents
+        const batteryIncidents: SimulationIncident[] = [];
+        if (batteryEnabled) {
+            const totalDuration = Math.max(...this.swarm.drones.map(d => d.path.length));
+            this.swarm.drones.forEach(d => {
+                 // Check the full path including a buffer
+                 const { deathTick } = d.calculateStateAt(totalDuration + 100, this.world.chargeStations, true);
+                 if (deathTick !== undefined) {
+                     batteryIncidents.push({
+                         id: `bat-${d.id}-${deathTick}`,
+                         type: 'battery_dead',
+                         time: deathTick,
+                         position: d.path[Math.min(deathTick, d.path.length - 1)] || d.start,
+                         agentIds: [d.id],
+                         agentNames: [d.name]
+                     });
+                     d.status = 'out_of_battery'; 
+                }
             });
         }
 
-        const baseMaxTime = Math.max(200, this.world.size * this.world.size / 2);
-        // Extend time budget for multiple loops
-        strategy.setMaxTimeSteps(baseMaxTime * (missionCount * 2)); // *2 for round trips
+        // Merge and Sort
+        const incidents = [...collisions, ...batteryIncidents].sort((a, b) => a.time - b.time);
 
-        // Execute Planning
-        // Pass maxBattery as undefined if battery simulation is disabled, so pathfinders don't prune based on energy
-        const effectiveBattery = batteryEnabled ? undefined : Number.MAX_SAFE_INTEGER; // undefined means usage defaults to drone.maxBattery in logic, we want to override
-        
-        strategy.plan(this.swarm, this.world, isRoundTrip || isInfiniteMode, missionQueues, maxAltitude, batteryEnabled);
-
-        // Detect Collisions
-        let collisions = CollisionAnalyzer.detect(this.swarm);
-
-        // Handle Unsafe Destruction
+        // Handle Unsafe Destruction (Naive)
         if (!strategy.isSafe) {
-            collisions.sort((a, b) => a.time - b.time);
+            // Filter for collisions only
+            const collisionIncidents = incidents.filter(i => i.type === 'collision');
             const destroyedIds = new Set<string>();
             
-            collisions.forEach(col => {
+            collisionIncidents.forEach(col => {
                 col.agentIds.forEach(id => {
                     if(destroyedIds.has(id)) return;
                     const drone = this.swarm.drones.find(d => d.id === id);
                     if (drone) {
                         drone.destructionTime = col.time;
                         drone.status = 'destroyed';
+                        // Truncate path after destruction so they stop moving logically
+                        if (drone.path.length > col.time + 1) {
+                            drone.path = drone.path.slice(0, col.time + 1);
+                        }
                         destroyedIds.add(id);
                     }
                 });
@@ -165,6 +197,6 @@ export class SimulationManager {
         const agents = this.swarm.drones.map(d => d.clone());
         const maxTicks = Math.max(...agents.map(a => a.path.length), 0);
 
-        return { agents, collisions, maxTicks };
+        return { agents, incidents, maxTicks };
     }
 }

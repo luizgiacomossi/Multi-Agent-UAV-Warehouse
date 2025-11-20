@@ -4,7 +4,7 @@ import { AlertTriangle } from 'lucide-react';
 import VoxelWorld from './components/VoxelWorld';
 import ControlPanel from './components/ControlPanel';
 import StatusPanel from './components/StatusPanel';
-import { Agent, Position3D, GenerationTheme, CollisionEvent } from './types';
+import { Agent, Position3D, GenerationTheme, SimulationIncident } from './types';
 import { SimulationManager } from './classes/SimulationManager';
 import { Warehouse } from './classes/Warehouse';
 
@@ -25,7 +25,7 @@ const App: React.FC = () => {
   const [obstacles, setObstacles] = useState<Position3D[]>([]);
   const [chargeStations, setChargeStations] = useState<Position3D[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
-  const [collisions, setCollisions] = useState<CollisionEvent[]>([]);
+  const [incidents, setIncidents] = useState<SimulationIncident[]>([]);
   const [warehouse, setWarehouse] = useState<Warehouse | null>(null);
   
   // -- Flow Control --
@@ -46,7 +46,7 @@ const App: React.FC = () => {
           const result = await engineRef.current.runPathfinding(algo, roundTrip, infinite, altitude, batEnabled);
           
           setAgents(result.agents);
-          setCollisions(result.collisions);
+          setIncidents(result.incidents);
           setMaxTicks(result.maxTicks);
       } catch (e: any) {
           console.error("Sim Error", e);
@@ -165,7 +165,7 @@ const App: React.FC = () => {
         gridSize={{ x: gridSizeVal, y: gridSizeVal, z: gridSizeVal }}
         obstacles={obstacles}
         agents={agents}
-        collisions={collisions}
+        incidents={incidents}
         tick={tick}
         warehouse={warehouse}
         chargeStations={chargeStations}
@@ -204,7 +204,7 @@ const App: React.FC = () => {
         setMaxAltitude={setMaxAltitude}
       />
 
-      <StatusPanel agents={agents} collisions={collisions} tick={tick} />
+      <StatusPanel agents={agents} incidents={incidents} tick={tick} />
 
       {error && (
         <div className="absolute inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
