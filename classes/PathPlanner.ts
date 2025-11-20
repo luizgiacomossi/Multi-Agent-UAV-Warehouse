@@ -3,7 +3,17 @@ import { Position3D, PathNode, Agent, CollisionEvent, ENERGY_COSTS } from '../ty
 import { World } from './World';
 import { Swarm, Drone } from './Drone';
 
-const TIMEOUT_MS = 4000;
+const TIMEOUT_MS = 30000;
+
+const DIRECTIONS = [
+  { x: 1, y: 0, z: 0 },
+  { x: -1, y: 0, z: 0 },
+  { x: 0, y: 1, z: 0 },
+  { x: 0, y: -1, z: 0 },
+  { x: 0, y: 0, z: 1 },
+  { x: 0, y: 0, z: -1 },
+  { x: 0, y: 0, z: 0 }, // Wait
+];
 
 /**
  * Abstract Base Strategy for Path Planning.
@@ -27,24 +37,6 @@ export abstract class PathFindingStrategy {
 
   protected heuristic(a: Position3D, b: Position3D): number {
     return Math.abs(a.x - b.x) + Math.abs(a.y - b.y) + Math.abs(a.z - b.z);
-  }
-
-  protected getNeighbors(node: PathNode, world: World): Position3D[] {
-    const candidates = [
-      { x: node.x + 1, y: node.y, z: node.z },
-      { x: node.x - 1, y: node.y, z: node.z },
-      { x: node.x, y: node.y + 1, z: node.z },
-      { x: node.x, y: node.y - 1, z: node.z },
-      { x: node.x, y: node.y, z: node.z + 1 },
-      { x: node.x, y: node.y, z: node.z - 1 },
-      { x: node.x, y: node.y, z: node.z }, // Wait
-    ];
-
-    return candidates.filter(p =>
-      p.x >= 0 && p.x < world.size &&
-      p.y >= 0 && p.y < world.size &&
-      p.z >= 0 && p.z < world.size
-    );
   }
 
   protected reconstructPath(node: PathNode): Position3D[] {
@@ -83,11 +75,16 @@ export abstract class PathFindingStrategy {
 
     const openList: PathNode[] = [startNode];
     const closedSet = new Set<number>();
+    let nodesExpanded = 0;
 
     while (openList.length > 0) {
-      if (deadline && performance.now() > deadline) {
-        throw new Error("Pathfinding Timeout");
+      // Check timeout every 64 iterations to reduce overhead
+      if ((nodesExpanded & 63) === 0) {
+        if (deadline && performance.now() > deadline) {
+          throw new Error("Pathfinding Timeout");
+        }
       }
+      nodesExpanded++;
 
       openList.sort((a, b) => a.f - b.f);
       const current = openList.shift()!;
@@ -103,29 +100,37 @@ export abstract class PathFindingStrategy {
       if (closedSet.has(closedKey)) continue;
       closedSet.add(closedKey);
 
-      const neighbors = this.getNeighbors(current, world);
+      // Direct neighbor generation (Optimized)
+      for (const dir of DIRECTIONS) {
+        const nx = current.x + dir.x;
+        const ny = current.y + dir.y;
+        const nz = current.z + dir.z;
 
-      for (const nextPos of neighbors) {
+        // Fast boundary and obstacle check
+        // World.isBlocked handles boundary checks implicitly
+        if (world.isBlocked(nx, ny, nz)) continue;
+
         const nextTime = current.time + 1;
-
-        if (world.isPositionBlocked(nextPos)) continue;
+        
+        // Create temp position object only for reservation key generation if needed
+        // Ideally we optimize key generation to take x,y,z,t directly, but for now:
+        const nextPos: Position3D = { x: nx, y: ny, z: nz };
+        
         if (reserved.size > 0 && reserved.has(this.key(nextPos, nextTime))) continue;
 
-        // Determine move type cost
-        const isWait = nextPos.x === current.x && nextPos.y === current.y && nextPos.z === current.z;
+        const isWait = nx === current.x && ny === current.y && nz === current.z;
         const stepCost = isWait ? ENERGY_COSTS.WAIT : ENERGY_COSTS.MOVE;
         
         const g = current.g + 1; 
         const energy = current.energy + stepCost;
         
-        // If hard battery limit, skip node early
         if (maxEnergy !== undefined && energy > maxEnergy) continue;
 
         const h = this.heuristic(nextPos, goal);
         const f = g + h;
 
         const neighborNode: PathNode = {
-          ...nextPos,
+          x: nx, y: ny, z: nz,
           g, h, f,
           parent: current,
           time: nextTime,
@@ -133,7 +138,7 @@ export abstract class PathFindingStrategy {
         };
 
         const existingIdx = openList.findIndex(n =>
-          n.x === neighborNode.x && n.y === neighborNode.y && n.z === neighborNode.z && n.time === neighborNode.time
+          n.x === nx && n.y === ny && n.z === nz && n.time === nextTime
         );
 
         if (existingIdx !== -1) {
@@ -178,8 +183,7 @@ export class NaivePlanner extends PathFindingStrategy {
 
         if (isRoundTrip) {
             const leg1Time = path1.length - 1;
-            // Estimate remaining battery for leg 2 check? Not perfect but sufficient for naive
-            const path2 = this.findPath(drone.goal, drone.start, leg1Time, world, emptySet, drone.maxBattery, deadline); // Simplified battery check
+            const path2 = this.findPath(drone.goal, drone.start, leg1Time, world, emptySet, drone.maxBattery, deadline);
             
             if (path2) {
                 fullPath = [...path1, ...path2.slice(1)];
@@ -193,7 +197,7 @@ export class NaivePlanner extends PathFindingStrategy {
         drone.status = 'finished';
       } else {
         drone.setPath([drone.start]);
-        drone.status = 'out_of_battery'; // Often due to energy limit in findPath
+        drone.status = 'out_of_battery';
       }
     }
   }
@@ -233,7 +237,7 @@ export class CooperativePlanner extends PathFindingStrategy {
 
       if (isRoundTrip) {
           const leg1Time = path1.length - 1;
-          const path2 = this.findPath(drone.goal, drone.start, leg1Time, world, reservedSpaceTime, drone.maxBattery, deadline); // Simplified
+          const path2 = this.findPath(drone.goal, drone.start, leg1Time, world, reservedSpaceTime, drone.maxBattery, deadline);
           
           if (path2) {
               fullPath = [...path1, ...path2.slice(1)];
@@ -250,7 +254,6 @@ export class CooperativePlanner extends PathFindingStrategy {
         reservedSpaceTime.add(this.key(pos, t));
       });
       
-      // Reserve post-arrival to prevent rear-end collisions
       const lastPos = fullPath[fullPath.length - 1];
       const arrivalTime = fullPath.length - 1;
       for (let t = 1; t < 20; t++) {
@@ -293,11 +296,15 @@ export class EnergySaverPlanner extends PathFindingStrategy {
 
     const openList: PathNode[] = [startNode];
     const closedSet = new Set<number>();
+    let nodesExpanded = 0;
 
     while (openList.length > 0) {
-      if (performance.now() > deadline) {
-        throw new Error("Pathfinding Timeout");
+      if ((nodesExpanded & 63) === 0) {
+        if (performance.now() > deadline) {
+          throw new Error("Pathfinding Timeout");
+        }
       }
+      nodesExpanded++;
 
       openList.sort((a, b) => a.f - b.f);
       const current = openList.shift()!;
@@ -312,15 +319,20 @@ export class EnergySaverPlanner extends PathFindingStrategy {
       if (closedSet.has(closedKey)) continue;
       closedSet.add(closedKey);
 
-      const neighbors = this.getNeighbors(current, world);
+      // Optimized neighbor generation
+      for (const dir of DIRECTIONS) {
+        const nx = current.x + dir.x;
+        const ny = current.y + dir.y;
+        const nz = current.z + dir.z;
 
-      for (const nextPos of neighbors) {
+        if (world.isBlocked(nx, ny, nz)) continue;
+
         const nextTime = current.time + 1;
+        const nextPos = { x: nx, y: ny, z: nz };
 
-        if (world.isPositionBlocked(nextPos)) continue;
         if (reserved.size > 0 && reserved.has(this.key(nextPos, nextTime))) continue;
 
-        const isWait = nextPos.x === current.x && nextPos.y === current.y && nextPos.z === current.z;
+        const isWait = nx === current.x && ny === current.y && nz === current.z;
         const stepCost = isWait ? ENERGY_COSTS.WAIT : ENERGY_COSTS.MOVE;
 
         const newEnergy = current.energy + stepCost;
@@ -332,16 +344,15 @@ export class EnergySaverPlanner extends PathFindingStrategy {
         const f = g + h;
 
         const neighborNode: PathNode = {
-          ...nextPos,
+          x: nx, y: ny, z: nz,
           g, h, f,
           parent: current,
           time: nextTime,
           energy: newEnergy
         };
 
-        // Check if we found a better path to this state (Pos + Time) in terms of ENERGY
         const existingIdx = openList.findIndex(n =>
-          n.x === neighborNode.x && n.y === neighborNode.y && n.z === neighborNode.z && n.time === neighborNode.time
+          n.x === nx && n.y === ny && n.z === nz && n.time === nextTime
         );
 
         if (existingIdx !== -1) {
@@ -381,13 +392,9 @@ export class EnergySaverPlanner extends PathFindingStrategy {
       let fullPath = path1;
       let deliveryTick = path1.length - 1;
 
-      // For simplicty, leg 2 just uses regular path finding but checks energy constraints
       if (isRoundTrip) {
           const leg1Time = path1.length - 1;
-          // Calculate energy consumed in leg 1 to pass as start energy for leg 2? 
-          // The current simplified findPath doesn't take "startEnergy" param easily without refactor.
-          // We'll approximate by reducing maxBattery for the second leg.
-          // Energy used in Leg 1:
+          
           let energyUsed = 0;
           for(let i=1; i<path1.length; i++) {
              const prev = path1[i-1];
@@ -402,9 +409,6 @@ export class EnergySaverPlanner extends PathFindingStrategy {
           
           if (path2) {
               fullPath = [...path1, ...path2.slice(1)];
-          } else {
-              // If can't make it back, just stay at goal? or mark as partial?
-              // For now, commit to leg 1 and mark out of battery later.
           }
           deliveryTick = leg1Time;
       } else {

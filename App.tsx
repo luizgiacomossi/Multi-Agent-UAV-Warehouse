@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { AlertTriangle } from 'lucide-react';
 import VoxelWorld from './components/VoxelWorld';
 import ControlPanel from './components/ControlPanel';
 import StatusPanel from './components/StatusPanel';
@@ -42,6 +43,9 @@ const App: React.FC = () => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [agentCount, setAgentCount] = useState(8);
   const [maxTicks, setMaxTicks] = useState(0);
+  
+  // Error State
+  const [error, setError] = useState<string | null>(null);
 
   // Simulation Objects
   const worldRef = useRef(new World(24));
@@ -55,6 +59,9 @@ const App: React.FC = () => {
     const world = worldRef.current;
     const swarm = swarmRef.current;
     
+    // Clear previous errors
+    setError(null);
+
     try {
         // 1. Get Strategy
         const strategy = ALGORITHMS[algorithmName];
@@ -114,9 +121,9 @@ const App: React.FC = () => {
     } catch (error: any) {
         console.error("Pathfinding Error:", error);
         if (error.message === 'Pathfinding Timeout') {
-            alert("Calculation timed out! The scenario is too complex (large grid or high agent count). Try reducing these parameters.");
+            setError("The calculation took too long. The scenario might be too complex for the browser to handle. Try reducing the Grid Size or Agent Count.");
         } else {
-            alert("An error occurred during pathfinding.");
+            setError("An unexpected error occurred during pathfinding.");
         }
         setIsGenerating(false);
     }
@@ -158,6 +165,7 @@ const App: React.FC = () => {
     setIsGenerating(true);
     setTick(0);
     setCollisions([]); 
+    setError(null);
     
     setGridSize({ x: gridSizeVal, y: gridSizeVal, z: gridSizeVal });
 
@@ -183,6 +191,7 @@ const App: React.FC = () => {
 
         } catch (error) {
             console.error("Generation failed:", error);
+            setError("Failed to generate scenario.");
         } finally {
             setIsGenerating(false);
         }
@@ -193,6 +202,7 @@ const App: React.FC = () => {
       setIsPlaying(false);
       setTick(0); 
       setIsGenerating(true);
+      setError(null);
 
       setTimeout(async () => {
           const world = worldRef.current;
@@ -263,6 +273,27 @@ const App: React.FC = () => {
         collisions={collisions}
         tick={tick}
       />
+
+      {/* Error Popup Overlay */}
+      {error && (
+        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-slate-800 border border-red-500/50 p-6 rounded-xl shadow-2xl max-w-md w-full flex flex-col items-center text-center animate-in fade-in zoom-in duration-200">
+                <div className="w-14 h-14 rounded-full bg-red-500/20 flex items-center justify-center mb-4 border border-red-500/30">
+                    <AlertTriangle className="text-red-500" size={28} />
+                </div>
+                <h3 className="text-xl font-bold text-white mb-2">Simulation Error</h3>
+                <p className="text-slate-300 text-sm mb-6 leading-relaxed">
+                    {error}
+                </p>
+                <button 
+                    onClick={() => setError(null)}
+                    className="bg-red-600 hover:bg-red-700 text-white px-6 py-2.5 rounded-lg font-semibold transition-colors w-full focus:ring-2 focus:ring-red-500 focus:ring-offset-2 focus:ring-offset-slate-800"
+                >
+                    Dismiss Warning
+                </button>
+            </div>
+        </div>
+      )}
     </div>
   );
 };

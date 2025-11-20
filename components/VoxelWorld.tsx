@@ -44,19 +44,65 @@ interface AgentDroneProps {
 }
 
 const AgentDrone: React.FC<AgentDroneProps> = ({ agent, tick }) => {
-  // Calculate destruction state
-  const isDestroyed = agent.destructionTime !== undefined && tick >= agent.destructionTime;
-  const stopTime = agent.destructionTime !== undefined ? agent.destructionTime : agent.path.length - 1;
-  
-  // Calculate Real-time Battery
-  const currentBattery = useMemo(() => {
-     if (!agent.path || agent.path.length === 0) return agent.maxBattery;
+  // 1. Calculate exactly when battery dies along the path
+  const batteryDeathTick = useMemo(() => {
+     if (!agent.path || agent.path.length <= 1) return undefined;
      
      let consumed = 0;
-     // Only calculate up to current tick or when path ends
-     const currentTickLimit = Math.min(tick, agent.path.length - 1);
+     // Use a small epsilon for floating point comparisons
+     const EPSILON = 0.0001;
+
+     for (let i = 1; i < agent.path.length; i++) {
+         const prev = agent.path[i-1];
+         const curr = agent.path[i];
+         // Match the planner's cost logic
+         if (prev.x === curr.x && prev.y === curr.y && prev.z === curr.z) {
+             consumed += ENERGY_COSTS.WAIT;
+         } else {
+             consumed += ENERGY_COSTS.MOVE;
+         }
+         
+         if (consumed > agent.maxBattery + EPSILON) {
+             return i - 1; // Could not complete move to i, stuck at i-1
+         }
+     }
+     return undefined;
+  }, [agent.path, agent.maxBattery]);
+
+  // 2. Calculate destruction state
+  const isDestroyed = agent.destructionTime !== undefined && tick >= agent.destructionTime;
+  
+  // 3. Determine the effective stop tick
+  const stopTick = useMemo(() => {
+      let t = agent.path.length - 1;
+      
+      // If destroyed, stop at destruction time
+      if (agent.destructionTime !== undefined) {
+          t = Math.min(t, agent.destructionTime);
+      }
+      
+      // If battery died, stop at death time
+      if (batteryDeathTick !== undefined) {
+          t = Math.min(t, batteryDeathTick);
+      }
+      
+      return t;
+  }, [agent.path.length, agent.destructionTime, batteryDeathTick]);
+
+  // 4. Battery Visual Status
+  const isDeadBattery = batteryDeathTick !== undefined && tick >= batteryDeathTick;
+  const showDead = isDeadBattery && !isDestroyed;
+
+  // 5. Calculate Real-time Battery Display
+  const currentBattery = useMemo(() => {
+     if (showDead) return 0;
+     if (!agent.path || agent.path.length === 0) return agent.maxBattery;
      
-     for (let i = 1; i <= currentTickLimit; i++) {
+     // Only calculate up to current tick or where it stopped
+     const calculationLimit = Math.min(tick, stopTick);
+     
+     let consumed = 0;
+     for (let i = 1; i <= calculationLimit; i++) {
          const prev = agent.path[i-1];
          const curr = agent.path[i];
          if (prev.x === curr.x && prev.y === curr.y && prev.z === curr.z) {
@@ -66,27 +112,22 @@ const AgentDrone: React.FC<AgentDroneProps> = ({ agent, tick }) => {
          }
      }
      return Math.max(0, agent.maxBattery - consumed);
-  }, [agent.path, agent.maxBattery, tick]);
+  }, [agent.path, agent.maxBattery, tick, stopTick, showDead]);
 
-  const isDeadBattery = currentBattery <= 0;
-  const showDead = isDeadBattery && !isDestroyed;
-
-  // Determine package visibility: Visible if not delivered yet and not destroyed
+  // 6. Determine package visibility
   const hasPackage = useMemo(() => {
      if (isDestroyed) return false;
-     if (agent.deliveryTime === undefined) return true; // Blocked or moving indefinitely
+     if (agent.deliveryTime === undefined) return true; 
+     // If battery died before delivery, package is still there (technically stuck on drone)
      return tick < agent.deliveryTime;
   }, [agent.deliveryTime, tick, isDestroyed]);
 
+  // 7. Determine Current Position
   const currentPos = useMemo(() => {
     if (!agent.path || agent.path.length === 0) return agent.start;
-    // Stop moving if destroyed or out of battery
-    let t = tick;
-    if (isDestroyed) t = stopTime;
-    else if (isDeadBattery) t = Math.min(t, agent.path.length - 1); // It stops where it is
-    
-    return agent.path[Math.min(t, agent.path.length - 1)];
-  }, [agent, tick, isDestroyed, stopTime, isDeadBattery]);
+    const t = Math.min(tick, stopTick);
+    return agent.path[t];
+  }, [agent, tick, stopTick]);
 
   if (isDestroyed) {
       return (

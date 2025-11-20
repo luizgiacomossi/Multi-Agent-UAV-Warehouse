@@ -1,3 +1,4 @@
+
 # Multi-Agent Path Finding (MAPF) via Prioritized Planning on Time-Expanded Graphs
 
 ## 1. Introduction
@@ -89,6 +90,33 @@ This is significantly more efficient than the coupled approach complexity of $O(
 2.  **Suboptimality**: The sum of costs (flowtime) is not guaranteed to be minimal. High-priority agents do not "cooperate" to clear the way for others.
 3.  **Deadlocks**: While rare in open spaces, deadlocks can occur in highly constrained tunnel environments where $a_i$ blocks $a_j$ and $a_j$ blocks $a_i$ (though strictly hierarchical priority usually prevents circular dependencies, geometry can still trap agents).
 
-**Potential Enhancements**:
-*   **PBS (Priority-Based Search)**: To dynamically adjust priorities to resolve deadlocks.
-*   **CBS (Conflict-Based Search)**: A two-level algorithm that guarantees optimality by resolving specific conflicts in a constraint tree.
+## 6. Energy-Aware Path Planning ("Energy Saver" Strategy)
+
+Real-world drones are constrained by battery life, where physical movement consumes significantly more energy than hovering in place. The **Energy Saver** strategy modifies the A* cost function to optimize for power consumption rather than pure travel time.
+
+### 6.1 Energy Cost Model
+Unlike the standard planner where $g(n) = time$, this strategy defines $g(n)$ as the accumulated energy consumption:
+
+$$
+g(n) = \sum_{i=0}^{t} Cost(action_i)
+$$
+
+The simulation uses differential costs for actions:
+*   **Move Cost ($C_{move} = 1.0$)**: High energy consumption for moving to an adjacent voxel.
+*   **Wait Cost ($C_{wait} = 0.1$)**: Low energy consumption for hovering (idling) in the same voxel.
+
+### 6.2 Heuristic Adaptation
+To maintain A* admissibility (ensuring optimality), the heuristic $h(n)$ is scaled to match the minimum possible energy cost to reach the goal:
+$$ h(n) = (\text{ManhattanDist}) \times C_{move} $$
+
+### 6.3 Behavioral Differences
+This change in cost function radically alters agent behavior in congested environments:
+
+*   **Time-Optimal Agent**: If a corridor is blocked for 10 seconds, but a 5-second detour exists, the agent takes the detour ($5 < 10$).
+*   **Energy-Optimal Agent**: The agent compares the energy cost.
+    *   Energy(Detour) = $5 \text{ steps} \times 1.0 = 5.0$ units.
+    *   Energy(Wait) = $10 \text{ steps} \times 0.1 = 1.0$ units.
+    *   The agent chooses to **wait** because it consumes less battery, even though it takes longer.
+
+### 6.4 Battery Constraints
+A hard constraint is applied during the search. Any node $n$ where $g(n) > MaxBattery$ is pruned from the search tree. If no path reaches the goal within the battery budget, the agent enters an `out_of_battery` state.
