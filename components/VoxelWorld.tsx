@@ -47,6 +47,13 @@ const AgentDrone: React.FC<AgentDroneProps> = ({ agent, tick }) => {
   const isDestroyed = agent.destructionTime !== undefined && tick >= agent.destructionTime;
   const stopTime = agent.destructionTime !== undefined ? agent.destructionTime : agent.path.length - 1;
   
+  // Determine package visibility: Visible if not delivered yet and not destroyed
+  const hasPackage = useMemo(() => {
+     if (isDestroyed) return false;
+     if (agent.deliveryTime === undefined) return true; // Blocked or moving indefinitely
+     return tick < agent.deliveryTime;
+  }, [agent.deliveryTime, tick, isDestroyed]);
+
   const currentPos = useMemo(() => {
     if (!agent.path || agent.path.length === 0) return agent.start;
     // Stop moving if destroyed
@@ -90,9 +97,22 @@ const AgentDrone: React.FC<AgentDroneProps> = ({ agent, tick }) => {
       {/* Drone Body */}
       <mesh scale={0.4}>
         <sphereGeometry args={[1, 16, 16]} />
-        <meshStandardMaterial color={agent.color} emissive={agent.color} emissiveIntensity={2} />
+        <meshStandardMaterial color={agent.color} emissive={agent.color} emissiveIntensity={0.5} />
       </mesh>
       
+      {/* The Package */}
+      {hasPackage && (
+        <mesh position={[0, -0.45, 0]}>
+            <boxGeometry args={[0.4, 0.3, 0.4]} />
+            <meshStandardMaterial color="#8B4513" roughness={0.8} />
+            {/* Tape */}
+            <mesh position={[0, 0, 0.201]} scale={[1.01, 0.2, 1]}>
+                <planeGeometry args={[0.4, 0.3]} />
+                <meshBasicMaterial color="#d4b483" />
+            </mesh>
+        </mesh>
+      )}
+
       {/* Propellers */}
       <mesh position={[0.3, 0.1, 0.3]} rotation={[Math.PI/2, 0, 0]}>
         <ringGeometry args={[0.1, 0.15, 8]} />
@@ -114,7 +134,7 @@ const AgentDrone: React.FC<AgentDroneProps> = ({ agent, tick }) => {
       {/* Label */}
       <Text
         position={[0, 0.8, 0]}
-        fontSize={0.3}
+        fontSize={0.25}
         color="white"
         anchorX="center"
         anchorY="middle"
@@ -122,7 +142,7 @@ const AgentDrone: React.FC<AgentDroneProps> = ({ agent, tick }) => {
         {agent.name}
       </Text>
       
-      <pointLight intensity={1} distance={3} color={agent.color} />
+      <pointLight intensity={0.5} distance={3} color={agent.color} />
     </group>
   );
 };
@@ -150,8 +170,8 @@ const PathLine: React.FC<PathLineProps> = ({ path, color, destructionTime }) => 
     <Line
       points={points}
       color={color}
-      lineWidth={3}
-      opacity={0.4}
+      lineWidth={2}
+      opacity={0.2}
       transparent
       depthTest={true}
     />
@@ -164,15 +184,35 @@ interface GoalMarkerProps {
 }
 
 const GoalMarker: React.FC<GoalMarkerProps> = ({ position, color }) => {
+  const ref = useRef<THREE.Group>(null);
+  useFrame((state) => {
+    if (ref.current) {
+        ref.current.rotation.y = state.clock.elapsedTime;
+    }
+  });
+
   return (
-    <mesh position={[position.x, position.y, position.z]}>
-       <boxGeometry args={[0.8, 0.8, 0.8]} />
-       <meshStandardMaterial color={color} wireframe opacity={0.3} transparent />
-       <mesh scale={0.2}>
-         <octahedronGeometry />
-         <meshBasicMaterial color={color} />
+    <group position={[position.x, position.y, position.z]}>
+       {/* Drop Zone Ring */}
+       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.4, 0]}>
+           <ringGeometry args={[0.3, 0.4, 32]} />
+           <meshBasicMaterial color={color} side={THREE.DoubleSide} transparent opacity={0.6} />
        </mesh>
-    </mesh>
+       
+       {/* Holographic Box Area */}
+       <mesh position={[0, 0, 0]}>
+          <boxGeometry args={[0.6, 0.6, 0.6]} />
+          <meshStandardMaterial color={color} wireframe transparent opacity={0.3} />
+       </mesh>
+
+       {/* Floating Icon */}
+       <group ref={ref}>
+          <mesh position={[0, 0.5, 0]} scale={0.2}>
+             <octahedronGeometry />
+             <meshBasicMaterial color={color} />
+          </mesh>
+       </group>
+    </group>
   );
 };
 
@@ -232,27 +272,49 @@ const WarehouseBase: React.FC<WarehouseBaseProps> = ({ agentCount }) => {
     const centerX = (baseSize - 1) / 2;
     const centerZ = (baseSize - 1) / 2;
 
+    // Generate some static crates
+    const crates = useMemo(() => {
+        const items = [];
+        for(let i=0; i<5; i++) {
+            items.push({
+                x: (Math.random() - 0.5) * baseSize,
+                z: (Math.random() - 0.5) * baseSize,
+                rot: Math.random() * Math.PI,
+                color: Math.random() > 0.5 ? '#cd853f' : '#8b4513'
+            });
+        }
+        return items;
+    }, [baseSize]);
+
     return (
         <group position={[centerX, -0.45, centerZ]}>
             {/* Main Platform */}
             <mesh rotation={[-Math.PI / 2, 0, 0]}>
-                <planeGeometry args={[baseSize + 0.5, baseSize + 0.5]} />
+                <planeGeometry args={[baseSize + 1, baseSize + 1]} />
                 <meshStandardMaterial color="#f59e0b" roughness={0.8} />
             </mesh>
-            {/* Stripes or markings could be added here */}
             <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, 0]}>
-                 <planeGeometry args={[baseSize, baseSize]} />
+                 <planeGeometry args={[baseSize + 0.2, baseSize + 0.2]} />
                  <meshStandardMaterial color="#1e293b" />
             </mesh>
+
+            {/* Cargo Crates */}
+            {crates.map((crate, i) => (
+                <mesh key={i} position={[crate.x, 0.3, crate.z]} rotation={[0, crate.rot, 0]}>
+                    <boxGeometry args={[0.5, 0.5, 0.5]} />
+                    <meshStandardMaterial color={crate.color} />
+                </mesh>
+            ))}
+
             <Text
-                position={[0, 0.1, 0]}
+                position={[0, 0.1, baseSize/2 + 0.5]}
                 rotation={[-Math.PI / 2, 0, 0]}
-                fontSize={baseSize * 0.2}
+                fontSize={0.4}
                 color="#f59e0b"
                 anchorX="center"
                 anchorY="middle"
             >
-                BASE
+                DISTRIBUTION CENTER
             </Text>
         </group>
     );
@@ -302,7 +364,7 @@ const VoxelWorld: React.FC<VoxelWorldProps> = ({
         dpr={[1, 2]}
       >
         <OrbitControls target={center} makeDefault />
-        <ambientLight intensity={0.4} />
+        <ambientLight intensity={0.6} />
         <pointLight position={[gridSize.x, gridSize.y * 2, gridSize.z]} intensity={0.8} castShadow />
         <Environment preset="city" />
         <Stars radius={200} depth={50} count={5000} factor={4} saturation={0} fade speed={1} />
@@ -320,14 +382,6 @@ const VoxelWorld: React.FC<VoxelWorldProps> = ({
                     <AgentDrone agent={agent} tick={tick} />
                     <PathLine path={agent.path} color={agent.color} destructionTime={agent.destructionTime} />
                     <GoalMarker position={agent.goal} color={agent.color} />
-                    
-                    {/* Start Marker (ghost) - only show if not base mode to avoid clutter on the base */}
-                    {!isBaseEnabled && (
-                        <mesh position={[agent.start.x, agent.start.y, agent.start.z]} scale={0.3}>
-                            <sphereGeometry />
-                            <meshStandardMaterial color={agent.color} opacity={0.3} transparent />
-                        </mesh>
-                    )}
                 </React.Fragment>
             ))}
             

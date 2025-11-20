@@ -13,6 +13,7 @@ export interface Agent {
   path: Position3D[];
   status: 'idle' | 'moving' | 'finished' | 'blocked' | 'destroyed';
   destructionTime?: number;
+  deliveryTime?: number;
 }
 
 export interface CollisionEvent {

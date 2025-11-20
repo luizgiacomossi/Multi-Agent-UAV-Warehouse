@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { CheckCircle2, AlertTriangle, Activity, ShieldAlert, Skull, Zap, Flag, TrendingUp, Navigation } from 'lucide-react';
+import { CheckCircle2, AlertTriangle, Activity, ShieldAlert, Skull, Zap, Package, TrendingUp, Navigation, Truck, Undo2 } from 'lucide-react';
 import { Agent, CollisionEvent } from '../types';
 
 interface StatusPanelProps {
@@ -12,7 +12,7 @@ const StatusPanel: React.FC<StatusPanelProps> = ({ agents, collisions, tick }) =
 
   const stats = useMemo(() => {
     let active = 0;
-    let finished = 0;
+    let delivered = 0;
     let destroyed = 0;
     let distance = 0;
     let blocked = 0;
@@ -24,8 +24,7 @@ const StatusPanel: React.FC<StatusPanelProps> = ({ agents, collisions, tick }) =
         }
 
         const limit = agent.destructionTime ?? agent.path.length - 1;
-        const arrival = agent.path.length - 1;
-
+        
         // Calculate distance flown so far based on current tick
         const effectiveTick = Math.min(tick, limit);
         distance += Math.max(0, effectiveTick);
@@ -33,30 +32,33 @@ const StatusPanel: React.FC<StatusPanelProps> = ({ agents, collisions, tick }) =
         // Check current state relative to tick
         const isDestroyedNow = agent.destructionTime !== undefined && tick >= agent.destructionTime;
         
+        const deliveryTime = agent.deliveryTime ?? agent.path.length - 1;
+        const hasDelivered = tick >= deliveryTime;
+
         if (isDestroyedNow) {
             destroyed++;
-        } else if (tick >= arrival) {
-            finished++;
+        } else if (hasDelivered) {
+            delivered++;
         } else {
             active++;
         }
     });
 
-    return { active, finished, destroyed, distance, blocked };
+    return { active, delivered, destroyed, distance, blocked };
   }, [agents, tick]);
 
-  const completionPct = agents.length > 0 ? Math.round((stats.finished / agents.length) * 100) : 0;
+  const completionPct = agents.length > 0 ? Math.round((stats.delivered / agents.length) * 100) : 0;
 
   return (
     <div className="absolute top-4 right-4 w-80 bg-slate-900/90 backdrop-blur-md p-4 rounded-xl border border-slate-700 shadow-xl text-slate-100 flex flex-col gap-4 z-10 max-h-[90vh] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent">
       
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-bold text-slate-300 flex items-center gap-2 uppercase tracking-wider">
-            <Activity size={14} className="text-cyan-400" />
-            Live Telemetry
+            <Truck size={14} className="text-cyan-400" />
+            Logistics Ops
         </h2>
         <div className="text-[10px] font-mono text-slate-500">
-            {agents.length} UNITS
+            {agents.length} FLEET
         </div>
       </div>
 
@@ -65,7 +67,7 @@ const StatusPanel: React.FC<StatusPanelProps> = ({ agents, collisions, tick }) =
         {/* Active Drones */}
         <div className="bg-slate-800/60 p-2 rounded border border-slate-700/50 flex flex-col relative overflow-hidden">
            <div className="flex items-center gap-1.5 text-[10px] text-slate-400 uppercase mb-1">
-              <Navigation size={10} /> Active
+              <Navigation size={10} /> In Transit
            </div>
            <div className="text-xl font-mono text-blue-400 font-semibold relative z-10">
               {stats.active}
@@ -76,7 +78,7 @@ const StatusPanel: React.FC<StatusPanelProps> = ({ agents, collisions, tick }) =
         {/* Distance */}
         <div className="bg-slate-800/60 p-2 rounded border border-slate-700/50 flex flex-col relative overflow-hidden">
            <div className="flex items-center gap-1.5 text-[10px] text-slate-400 uppercase mb-1">
-              <TrendingUp size={10} /> Distance
+              <TrendingUp size={10} /> Range
            </div>
            <div className="text-xl font-mono text-emerald-400 font-semibold relative z-10">
               {stats.distance} <span className="text-xs text-slate-600">m</span>
@@ -87,11 +89,11 @@ const StatusPanel: React.FC<StatusPanelProps> = ({ agents, collisions, tick }) =
         {/* Completion */}
         <div className="bg-slate-800/60 p-2 rounded border border-slate-700/50 flex flex-col relative overflow-hidden">
            <div className="flex items-center gap-1.5 text-[10px] text-slate-400 uppercase mb-1">
-              <Flag size={10} /> Goal Rate
+              <Package size={10} /> Delivered
            </div>
            <div className="text-xl font-mono text-purple-400 font-semibold relative z-10 flex items-end gap-2">
               {completionPct}% 
-              <span className="text-xs text-slate-500 mb-1 font-normal">{stats.finished} Done</span>
+              <span className="text-xs text-slate-500 mb-1 font-normal">{stats.delivered} Pkgs</span>
            </div>
            {/* Progress Bar */}
            <div className="w-full h-1 bg-slate-700/50 mt-2 rounded-full overflow-hidden">
@@ -102,7 +104,7 @@ const StatusPanel: React.FC<StatusPanelProps> = ({ agents, collisions, tick }) =
         {/* Casualties */}
         <div className={`bg-slate-800/60 p-2 rounded border flex flex-col relative overflow-hidden transition-colors ${stats.destroyed > 0 ? 'border-red-900/50 bg-red-950/10' : 'border-slate-700/50'}`}>
            <div className="flex items-center gap-1.5 text-[10px] text-slate-400 uppercase mb-1">
-              <Skull size={10} className={stats.destroyed > 0 ? "text-red-400" : ""} /> Crashes
+              <Skull size={10} className={stats.destroyed > 0 ? "text-red-400" : ""} /> Lost Units
            </div>
            <div className={`text-xl font-mono font-semibold relative z-10 ${stats.destroyed > 0 ? 'text-red-500' : 'text-slate-500'}`}>
               {stats.destroyed}
@@ -116,15 +118,15 @@ const StatusPanel: React.FC<StatusPanelProps> = ({ agents, collisions, tick }) =
       {/* Collision Log Section */}
       <div className="bg-slate-800/40 rounded-lg p-3 border border-slate-700/50">
         <h3 className="text-[10px] font-bold text-slate-500 mb-2 flex items-center justify-between uppercase tracking-wider">
-          <span>Conflict Log</span>
+          <span>Alert Log</span>
           <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold border ${collisions.length > 0 ? 'bg-red-500/10 text-red-400 border-red-500/20' : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'}`}>
-            {collisions.length} EVENTS
+            {collisions.length} INCIDENTS
           </span>
         </h3>
         
         {collisions.length === 0 ? (
           <div className="text-xs text-slate-600 italic text-center py-2">
-            No conflicts detected.
+            Operations nominal.
           </div>
         ) : (
           <div className="space-y-1.5 max-h-28 overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-slate-700">
@@ -163,30 +165,43 @@ const StatusPanel: React.FC<StatusPanelProps> = ({ agents, collisions, tick }) =
 
       {/* Drone List Section */}
       <div className="space-y-1.5">
-        <h3 className="text-[10px] font-bold text-slate-500 mb-1 uppercase tracking-wider">Unit Status</h3>
+        <h3 className="text-[10px] font-bold text-slate-500 mb-1 uppercase tracking-wider">Delivery Manifest</h3>
         
         {agents.map((agent) => {
-          const arrivalTime = agent.path.length > 0 ? agent.path.length - 1 : 0;
-          const hasArrived = agent.path.length > 0 && tick >= arrivalTime && agent.status !== 'destroyed' && agent.status !== 'blocked';
-          const isBlocked = (agent.path.length <= 1 || agent.status === 'blocked') && agent.status !== 'destroyed';
+          const deliveryTime = agent.deliveryTime ?? agent.path.length - 1;
+          const finishTime = agent.path.length - 1;
+          
           const isDestroyed = agent.status === 'destroyed' && (agent.destructionTime !== undefined && tick >= agent.destructionTime);
-          const isMoving = !hasArrived && !isBlocked && !isDestroyed;
+          const isBlocked = (agent.path.length <= 1 || agent.status === 'blocked') && !isDestroyed;
+          
+          // Delivery Status
+          const hasDelivered = !isDestroyed && !isBlocked && tick >= deliveryTime;
+          
+          // Mission Status (Round Trip Complete)
+          const isFinished = !isDestroyed && !isBlocked && tick >= finishTime;
+          
+          // Returning Status (Delivered but not yet Finished)
+          const isReturning = hasDelivered && !isFinished;
+
+          // Delivering Status (Moving, Has Package)
+          const isDelivering = !isDestroyed && !isBlocked && !hasDelivered && tick < deliveryTime;
 
           return (
             <div 
               key={agent.id} 
               className={`flex items-center justify-between p-2 rounded-lg border transition-colors ${
                   isDestroyed ? 'bg-red-900/10 border-red-900/30' : 
-                  hasArrived ? 'bg-emerald-900/10 border-emerald-900/30' :
+                  isFinished ? 'bg-slate-700/30 border-slate-600' :
+                  isReturning ? 'bg-purple-900/10 border-purple-900/30' :
                   'bg-slate-800 border-slate-700'
               }`}
             >
               <div className="flex items-center gap-2">
                 <div 
-                  className={`w-1.5 h-1.5 rounded-full ${isMoving ? 'animate-pulse' : ''}`}
+                  className={`w-1.5 h-1.5 rounded-full ${isDelivering || isReturning ? 'animate-pulse' : ''}`}
                   style={{ 
                     backgroundColor: isDestroyed ? '#ef4444' : agent.color,
-                    boxShadow: isMoving ? `0 0 8px ${agent.color}` : 'none'
+                    boxShadow: (isDelivering || isReturning) ? `0 0 8px ${agent.color}` : 'none'
                   }} 
                 />
                 <div className="flex flex-col">
@@ -197,7 +212,7 @@ const StatusPanel: React.FC<StatusPanelProps> = ({ agents, collisions, tick }) =
               <div className="text-right">
                 {isDestroyed && (
                    <span className="flex items-center gap-1 text-[9px] text-red-400 font-bold uppercase">
-                        <Skull size={10} /> Crashed T+{agent.destructionTime}
+                        <Skull size={10} /> Crashed
                    </span>
                 )}
 
@@ -207,15 +222,21 @@ const StatusPanel: React.FC<StatusPanelProps> = ({ agents, collisions, tick }) =
                   </span>
                 )}
                 
-                {hasArrived && (
-                  <span className="flex items-center gap-1 text-[9px] text-emerald-400 font-bold uppercase">
-                    <CheckCircle2 size={10} /> Arrived
+                {isFinished && (
+                  <span className="flex items-center gap-1 text-[9px] text-slate-400 font-bold uppercase">
+                    <CheckCircle2 size={10} /> Complete
                   </span>
                 )}
 
-                {isMoving && (
+                {isReturning && (
+                   <span className="flex items-center gap-1 text-[9px] text-purple-400 font-bold uppercase">
+                     <Undo2 size={10} /> Returning
+                   </span>
+                )}
+
+                {isDelivering && (
                   <span className="flex items-center gap-1 text-[9px] text-blue-400 font-bold uppercase">
-                    <Navigation size={10} /> Moving
+                    <Package size={10} /> Delivering
                   </span>
                 )}
               </div>

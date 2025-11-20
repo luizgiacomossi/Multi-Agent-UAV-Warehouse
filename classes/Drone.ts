@@ -9,6 +9,7 @@ export class Drone implements Agent {
   color: string;
   path: Position3D[];
   status: 'idle' | 'moving' | 'finished' | 'blocked';
+  deliveryTime?: number;
 
   constructor(id: string, name: string, color: string) {
     this.id = id;
@@ -18,6 +19,7 @@ export class Drone implements Agent {
     this.goal = { x: 0, y: 0, z: 0 };
     this.path = [];
     this.status = 'idle';
+    this.deliveryTime = undefined;
   }
 
   setMission(start: Position3D, goal: Position3D) {
@@ -25,11 +27,24 @@ export class Drone implements Agent {
     this.goal = { ...goal };
     this.path = [];
     this.status = 'idle';
+    this.deliveryTime = undefined;
   }
 
-  setPath(path: Position3D[]) {
+  setPath(path: Position3D[], deliveryTick?: number) {
     this.path = path;
-    this.status = path.length > 0 ? 'idle' : 'blocked'; // Will be set to moving by simulation
+    
+    if (path.length > 0) {
+        // If a specific delivery time is provided (e.g. midpoint of round trip), use it.
+        // Otherwise, default to the end of the path (single trip).
+        this.deliveryTime = deliveryTick !== undefined ? deliveryTick : path.length - 1;
+        
+        // Status is usually updated by the Planner immediately after, 
+        // but we default to idle/moving here.
+        this.status = 'idle'; 
+    } else {
+        this.deliveryTime = undefined;
+        this.status = 'blocked';
+    }
   }
 }
 

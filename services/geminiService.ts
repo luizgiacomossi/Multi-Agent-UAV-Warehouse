@@ -100,10 +100,31 @@ export const generateScenario = async (
     const minDistance = Math.max(4, Math.floor(gridSize / 3));
     
     while (attempts < 1000) {
+      
+      // DELIVERY LOGIC: Bias towards Ground (porch) or just above an obstacle (rooftop)
+      let targetY = 0;
+      const deliveryType = Math.random();
+      const targetX = Math.floor(Math.random() * gridSize);
+      const targetZ = Math.floor(Math.random() * gridSize);
+
+      if (deliveryType > 0.7) { 
+          // Rooftop Delivery attempt
+          // Find the highest block at this X,Z
+          for(let h = gridSize - 1; h >= 0; h--) {
+              if (obstacleSet.has(`${targetX},${h},${targetZ}`)) {
+                  targetY = h + 1;
+                  break;
+              }
+          }
+          // Ensure we aren't out of bounds
+          if (targetY >= gridSize) targetY = 0; 
+      } 
+      // Else Ground Delivery (targetY = 0)
+
       goal = {
-        x: Math.floor(Math.random() * gridSize),
-        y: Math.floor(Math.random() * gridSize),
-        z: Math.floor(Math.random() * gridSize)
+        x: targetX,
+        y: targetY,
+        z: targetZ
       };
       
       const dist = Math.abs(start!.x - goal.x) + Math.abs(start!.y - goal.y) + Math.abs(start!.z - goal.z);

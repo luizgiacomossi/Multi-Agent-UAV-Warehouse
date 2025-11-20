@@ -161,18 +161,24 @@ export class NaivePlanner extends PathFindingStrategy {
       const path1 = this.findPath(drone.start, drone.goal, 0, world, emptySet);
 
       if (path1) {
+        let fullPath = path1;
+        let deliveryTick = path1.length - 1;
+
         if (isRoundTrip) {
             const leg1Time = path1.length - 1;
             const path2 = this.findPath(drone.goal, drone.start, leg1Time, world, emptySet);
             
             if (path2) {
-                drone.setPath([...path1, ...path2.slice(1)]);
-            } else {
-                drone.setPath(path1);
+                fullPath = [...path1, ...path2.slice(1)];
             }
+            // Delivery happens at the end of Leg 1 (the Goal)
+            deliveryTick = leg1Time;
         } else {
-            drone.setPath(path1);
+            // Delivery happens at the end
+            deliveryTick = fullPath.length - 1;
         }
+        
+        drone.setPath(fullPath, deliveryTick);
         drone.status = 'finished';
       } else {
         drone.setPath([drone.start]);
@@ -210,6 +216,7 @@ export class CooperativePlanner extends PathFindingStrategy {
       }
 
       let fullPath = path1;
+      let deliveryTick = path1.length - 1;
 
       if (isRoundTrip) {
           const leg1Time = path1.length - 1;
@@ -218,9 +225,13 @@ export class CooperativePlanner extends PathFindingStrategy {
           if (path2) {
               fullPath = [...path1, ...path2.slice(1)];
           }
+          // Delivery happens at the end of Leg 1
+          deliveryTick = leg1Time;
+      } else {
+          deliveryTick = fullPath.length - 1;
       }
 
-      drone.setPath(fullPath);
+      drone.setPath(fullPath, deliveryTick);
       drone.status = 'finished';
 
       // Reserve path
@@ -228,7 +239,7 @@ export class CooperativePlanner extends PathFindingStrategy {
         reservedSpaceTime.add(this.key(pos, t));
       });
 
-      // Reserve final position
+      // Reserve final position for a bit after finishing
       const lastPos = fullPath[fullPath.length - 1];
       const arrivalTime = fullPath.length - 1;
       for (let t = 1; t < 20; t++) {
