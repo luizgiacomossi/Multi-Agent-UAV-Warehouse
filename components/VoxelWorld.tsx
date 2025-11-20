@@ -1,6 +1,6 @@
 import React, { useMemo, useRef, useLayoutEffect } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
-import { OrbitControls, Text, Environment, ContactShadows, Stars, Float } from '@react-three/drei';
+import { OrbitControls, Text, Environment, ContactShadows, Stars, Float, Line } from '@react-three/drei';
 import * as THREE from 'three';
 import { Agent, Position3D, CollisionEvent } from '../types';
 
@@ -134,32 +134,27 @@ interface PathLineProps {
 }
 
 const PathLine: React.FC<PathLineProps> = ({ path, color, destructionTime }) => {
-  if (path.length < 2) return null;
-  
-  // If destroyed, only show path up to destruction
   const visiblePath = useMemo(() => {
+     if (!path || path.length < 2) return [];
      if (destructionTime !== undefined) {
          return path.slice(0, destructionTime + 1);
      }
      return path;
   }, [path, destructionTime]);
 
-  const points = useMemo(() => visiblePath.map(p => new THREE.Vector3(p.x, p.y, p.z)), [visiblePath]);
+  const points = useMemo(() => visiblePath.map(p => [p.x, p.y, p.z] as [number, number, number]), [visiblePath]);
   
   if (points.length < 2) return null;
 
   return (
-    <line>
-      <bufferGeometry>
-        <bufferAttribute
-          attach="attributes-position"
-          count={points.length}
-          array={new Float32Array(points.flatMap(p => [p.x, p.y, p.z]))}
-          itemSize={3}
-        />
-      </bufferGeometry>
-      <lineBasicMaterial color={color} opacity={0.4} transparent linewidth={1} />
-    </line>
+    <Line
+      points={points}
+      color={color}
+      lineWidth={3}
+      opacity={0.4}
+      transparent
+      depthTest={true}
+    />
   );
 };
 

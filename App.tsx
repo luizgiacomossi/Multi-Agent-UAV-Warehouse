@@ -100,8 +100,9 @@ const App: React.FC = () => {
   // Real-time Strategy Update
   useEffect(() => {
       // If we aren't currently generating a new world, and we have agents, re-plan immediately
+      // NOTE: We do NOT reset tick to 0 here, per user request. 
+      // We allow the user to see the difference at the current timestamp.
       if (!isGenerating && agents.length > 0) {
-          setTick(0);
           setIsPlaying(false);
           runPathfinding(useNaiveMode);
       }
@@ -169,6 +170,24 @@ const App: React.FC = () => {
     }, 50);
   };
 
+  const handleNewMissions = () => {
+      setIsPlaying(false);
+      setTick(0); // New mission implies new timeline
+      setIsGenerating(true);
+
+      setTimeout(() => {
+          const world = worldRef.current;
+          const swarm = swarmRef.current;
+          
+          // Re-roll positions/goals on the existing world
+          swarm.resize(agentCount);
+          swarm.initializeScenario(world, deployFromBase);
+          
+          runPathfinding(useNaiveMode);
+          setIsGenerating(false);
+      }, 50);
+  };
+
   const handleTogglePlay = () => {
     if (tick >= maxTicks) {
       setTick(0);
@@ -200,6 +219,7 @@ const App: React.FC = () => {
         onTogglePlay={handleTogglePlay}
         onReset={handleReset}
         onGenerate={handleGenerate}
+        onNewMissions={handleNewMissions}
         isGenerating={isGenerating}
         agentCount={agentCount}
         setAgentCount={setAgentCount}

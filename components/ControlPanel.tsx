@@ -1,5 +1,5 @@
 import React from 'react';
-import { Play, Pause, RotateCcw, Box, Grid3X3, Settings, Building2, ShieldCheck, Skull } from 'lucide-react';
+import { Play, Pause, RotateCcw, Box, Grid3X3, Settings, Building2, ShieldCheck, Skull, Shuffle } from 'lucide-react';
 import { GenerationTheme } from '../types';
 
 interface ControlPanelProps {
@@ -9,6 +9,7 @@ interface ControlPanelProps {
   onTogglePlay: () => void;
   onReset: () => void;
   onGenerate: (theme: string) => void;
+  onNewMissions: () => void;
   isGenerating: boolean;
   agentCount: number;
   setAgentCount: (n: number) => void;
@@ -27,6 +28,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   onTogglePlay,
   onReset,
   onGenerate,
+  onNewMissions,
   isGenerating,
   agentCount,
   setAgentCount,
@@ -171,13 +173,23 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
           ))}
         </div>
         
-        <button
-             onClick={() => onGenerate("Random")}
-             disabled={isGenerating}
-             className="mt-1 w-full py-2 text-xs flex items-center justify-center gap-1 bg-slate-700/50 hover:bg-slate-700 rounded border border-dashed border-slate-600 text-slate-400 hover:text-white disabled:opacity-50"
-        >
-            <Box size={12} /> Random Noise
-        </button>
+        <div className="flex gap-2 mt-1">
+            <button
+                 onClick={() => onGenerate("Random")}
+                 disabled={isGenerating}
+                 className="flex-1 py-2 text-xs flex items-center justify-center gap-1 bg-slate-700/50 hover:bg-slate-700 rounded border border-dashed border-slate-600 text-slate-400 hover:text-white disabled:opacity-50"
+            >
+                <Box size={12} /> Random Noise
+            </button>
+            <button
+                 onClick={onNewMissions}
+                 disabled={isGenerating}
+                 className="flex-1 py-2 text-xs flex items-center justify-center gap-1 bg-blue-600/20 hover:bg-blue-600/30 rounded border border-blue-500/50 text-blue-300 hover:text-blue-200 disabled:opacity-50"
+                 title="Assign new random goals on current map"
+            >
+                <Shuffle size={12} /> New Missions
+            </button>
+        </div>
       </div>
 
       <div className="text-[10px] text-slate-500 leading-tight mt-1">
