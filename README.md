@@ -1,43 +1,51 @@
-# VoxelSwarm AI: 3D Multi-Agent Path Planning Visualizer
+# VoxelSwarm: High-Fidelity 3D Multi-Agent Path Finding Visualizer
 
-VoxelSwarm AI is an interactive 3D simulation designed to visualize complex pathfinding behaviors in drone swarms. It utilizes a voxel-based world engine to simulate diverse environments—from dense city blocks to underground tunnels—and demonstrates how autonomous agents navigate these spaces while avoiding static obstacles and dynamic collisions with one another.
+**Abstract**
 
-## Key Features
+VoxelSwarm is a web-based visualization environment designed to simulate and analyze **Multi-Agent Path Finding (MAPF)** behaviors in discretized 3D spaces. The system employs **Prioritized Planning (Cooperative A*)** on **Time-Expanded Graphs (TEG)** to resolve inter-agent conflicts in polynomial time. It features a custom voxel rendering engine capable of simulating complex environments—ranging from dense urban lattices to subterranean tunnel networks—and provides real-time telemetry on agent kinematics and energy consumption.
 
-*   **3D Voxel Engine**: A high-performance rendering engine built with React Three Fiber and InstancedMesh optimization to handle large grids and obstacle fields.
-*   **Procedural Environment Generation**:
-    *   **City**: Generates city blocks with streets and skyscrapers of varying heights.
-    *   **Tunnels**: Creates solid subterranean blocks carved with procedural tunnels and caverns.
-    *   **Open Field**: A sparse environment with pillars, ideal for testing long-range navigation.
-*   **Multi-Agent Path Finding (MAPF)**: Implements **Cooperative A*** (also known as Prioritized Planning) to solve collision-free paths for multiple agents simultaneously.
-*   **Collision Visualization**:
-    *   **Projected Collisions**: The system pre-calculates where naive (non-cooperative) agents would have crashed and visualizes these "near-miss" events in the timeline.
-    *   **Dynamic Re-routing**: Agents wait or take detours to respect the space-time reservations of higher-priority peers.
-*   **Base Deployment Mode**: Simulates a realistic warehouse deployment scenario where agents launch sequentially from a designated zone.
+## Research Objectives
 
-## Controls & Usage
+This platform serves as a testbed for the following computer science concepts:
+1.  **Decoupled Path Planning**: Analyzing the trade-offs between optimality and computational tractability in swarm coordination.
+2.  **Time-Expanded Search Spaces**: Visualizing 4D (Space-Time) trajectories to solve vertex and edge collision constraints.
+3.  **Energy-Constrained Heuristics**: Implementing non-uniform cost functions ($g(n)$) to simulate battery-aware navigation logic.
 
-### Camera
-*   **Left Click + Drag**: Rotate the camera around the center.
-*   **Right Click + Drag**: Pan the camera.
-*   **Scroll**: Zoom in/out.
+## Core Capabilities
 
-### Simulation Control Panel
-*   **Play/Pause**: Toggles the simulation timeline.
-*   **Slider**: Scrub through the simulation timeline manually.
-*   **Grid Size**: Adjust the volumetric size of the world (from $8^3$ to $40^3$).
-*   **Agents**: Set the swarm size (2 to 20 drones).
-*   **Deploy from Base**: Toggles between random start locations and a structured warehouse deployment.
-*   **Themes**: Generate new environments (City, Tunnels, Random, etc.).
+### 1. Simulation Engine
+*   **Algorithm**: Hierarchical Cooperative A* (HCA*) with variable time horizons.
+*   **Conflict Resolution**: Space-Time Reservation Tables for dynamic obstacle avoidance.
+*   **Heuristics**: $\ell_1$ (Manhattan) Norm with admissibility modifications for energy states.
+*   **Complexity**: $O(k \cdot |V| \cdot T \log(|V| \cdot T))$, scaling linearly with agent count ($k$).
 
-## Technical Stack
+### 2. Procedural Environments
+The system utilizes stochastic cellular generation to create distinct topological challenges:
+*   **$\mathbb{R}^3$ Lattice (City)**: High-density vertical obstacles simulating urban canyons.
+*   **Perlin-Noise Analogues (Tunnel)**: Constrained, non-convex navigation spaces.
+*   **Sparse Fields**: Testing grounds for long-horizon trajectory optimization.
 
-*   **Frontend**: React 19, TypeScript, Tailwind CSS
-*   **3D Graphics**: Three.js, @react-three/fiber, @react-three/drei
-*   **Algorithms**: A* Search Algorithm, Cooperative Prioritized Planning, Space-Time Hashing
+### 3. Visualization Pipeline
+*   **Rendering**: React Three Fiber (WebGL) with InstancedMesh optimization for $O(1)$ draw calls on static geometry.
+*   **Telemetry**: Real-time computation of flowtime, makespan, and aggregate energy flux.
 
-## Running Locally
+## Documentation
 
-1.  Install dependencies: `npm install`
-2.  Start the development server: `npm start`
-3.  Open http://localhost:3000 in your browser.
+For detailed mathematical and technical specifications, please refer to:
+
+*   [**Algorithmic Formulation**](./ALGORITHMIC_FORMULATION.md): Mathematical definitions, graph theory, and complexity analysis.
+*   [**System Architecture**](./SYSTEM_ARCHITECTURE.md): Software design patterns, rendering loop, and state management.
+
+## Installation & Execution
+
+```bash
+# Install dependencies
+npm install
+
+# Initialize development server
+npm start
+```
+
+## License
+
+MIT License. Designed for educational and research purposes in the field of Autonomous Systems and Swarm Intelligence.
