@@ -1,5 +1,5 @@
 {
-  "name": "Cooperative Path Planning - Drone Swarm",
+  "name": "Cooperative Path Planning - Last Mile Delivery Drone Swarm",
   "description": "A 3D Voxel-based Multi-Agent Path Planning visualizer for drone swarms. Features AI-generated environments and prioritized pathfinding.",
   "requestFramePermissions": []
 }

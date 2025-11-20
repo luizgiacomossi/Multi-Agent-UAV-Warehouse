@@ -1,149 +1,115 @@
-
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import VoxelWorld from './components/VoxelWorld';
 import ControlPanel from './components/ControlPanel';
 import StatusPanel from './components/StatusPanel';
 import { Agent, Position3D, GenerationTheme, CollisionEvent } from './types';
-import { World } from './classes/World';
-import { Swarm } from './classes/Drone';
-import { 
-  PathFindingStrategy, 
-  NaivePlanner, 
-  CooperativePlanner, 
-  EnergySaverPlanner,
-  CollisionAnalyzer 
-} from './classes/PathPlanner';
-
-// -- ALGORITHM REGISTRY --
-const ALGORITHMS: Record<string, PathFindingStrategy> = {
-  'Naive': new NaivePlanner(),
-  'Cooperative': new CooperativePlanner(),
-  'Energy Saver': new EnergySaverPlanner(),
-};
+import { SimulationManager } from './classes/SimulationManager';
 
 const App: React.FC = () => {
-  // UI State
+  // -- UI Config State --
   const [gridSizeVal, setGridSizeVal] = useState(24);
-  const [gridSize, setGridSize] = useState<Position3D>({ x: 24, y: 24, z: 24 });
   const [deployFromBase, setDeployFromBase] = useState(false);
   const [isRoundTrip, setIsRoundTrip] = useState(false);
   const [batteryCapacity, setBatteryCapacity] = useState(80);
-  
-  // Strategy Selection
+  const [enableCharging, setEnableCharging] = useState(false);
   const [selectedAlgorithm, setSelectedAlgorithm] = useState<string>('Cooperative');
   
-  // Serializable State
+  // -- Simulation Data State --
+  // We store snapshots of the simulation data for rendering
   const [obstacles, setObstacles] = useState<Position3D[]>([]);
+  const [chargeStations, setChargeStations] = useState<Position3D[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [collisions, setCollisions] = useState<CollisionEvent[]>([]);
   
+  // -- Flow Control --
   const [tick, setTick] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [agentCount, setAgentCount] = useState(8);
   const [maxTicks, setMaxTicks] = useState(0);
-  
-  // Error State
   const [error, setError] = useState<string | null>(null);
 
-  // Simulation Objects
-  const worldRef = useRef(new World(24));
-  const swarmRef = useRef(new Swarm(8));
+  // -- Engine --
+  const engineRef = useRef(new SimulationManager(24, 8));
 
-  /**
-   * Core Pathfinding Logic
-   * Dynamically uses the selected strategy from the registry.
-   */
-  const runPathfinding = useCallback(async (algorithmName: string, batCap: number) => {
-    const world = worldRef.current;
-    const swarm = swarmRef.current;
-    
-    // Clear previous errors
-    setError(null);
-
-    try {
-        // 1. Get Strategy
-        const strategy = ALGORITHMS[algorithmName];
-        if (!strategy) {
-            console.error(`Algorithm ${algorithmName} not found`);
-            return;
-        }
-
-        // 2. Reset Agent Status & Update Battery Config
-        swarm.drones.forEach(d => {
-            d.destructionTime = undefined;
-            d.status = 'idle';
-            d.path = [];
-            d.maxBattery = batCap;
-        });
-
-        // 3. Set Configs
-        // If round trip, allow more time steps
-        const baseMaxTime = Math.max(200, world.size * world.size / 2);
-        strategy.setMaxTimeSteps(isRoundTrip ? baseMaxTime * 2 : baseMaxTime);
-
-        // Small yield to allow UI to update spinner if needed
-        await new Promise(resolve => setTimeout(resolve, 0));
-
-        // 4. Execute Plan
-        strategy.plan(swarm, world, isRoundTrip);
-        
-        // 5. Detect Collisions
-        // We always run detection to verify the paths, even for "safe" algorithms
-        let calculatedCollisions = CollisionAnalyzer.detect(swarm);
-
-        // 6. Handle Destruction Logic (Only for unsafe algorithms)
-        if (!strategy.isSafe) {
-            calculatedCollisions.sort((a, b) => a.time - b.time);
-            const destroyedIds = new Set<string>();
-            
-            calculatedCollisions.forEach(col => {
-            col.agentIds.forEach(id => {
-                if(destroyedIds.has(id)) return;
-                
-                const drone = swarm.drones.find(d => d.id === id);
-                if (drone) {
-                    drone.destructionTime = col.time;
-                    drone.status = 'destroyed';
-                    destroyedIds.add(id);
-                }
-            });
-            });
-        }
-
-        // 7. Sync to UI
-        setAgents(JSON.parse(JSON.stringify(swarm.getAgents())));
-        setCollisions(calculatedCollisions);
-
-        const longestPath = Math.max(...swarm.drones.map(a => a.path.length), 0);
-        setMaxTicks(longestPath);
-    } catch (error: any) {
-        console.error("Pathfinding Error:", error);
-        if (error.message === 'Pathfinding Timeout') {
-            setError("The calculation took too long. The scenario might be too complex for the browser to handle. Try reducing the Grid Size or Agent Count.");
-        } else {
-            setError("An unexpected error occurred during pathfinding.");
-        }
-        setIsGenerating(false);
-    }
-  }, [isRoundTrip]);
+  // Core Update Function
+  const updateSimulation = async (algo: string, roundTrip: boolean) => {
+      try {
+          setError(null);
+          const result = await engineRef.current.runPathfinding(algo, roundTrip);
+          
+          setAgents(result.agents);
+          setCollisions(result.collisions);
+          setMaxTicks(result.maxTicks);
+      } catch (e: any) {
+          console.error("Sim Error", e);
+          if (e.message === 'Pathfinding Timeout') {
+              setError("The calculation took too long. Try reducing Grid Size or Agent Count.");
+          } else {
+              setError("An unexpected error occurred.");
+          }
+      }
+  };
 
   // Initial Load
   useEffect(() => {
     handleGenerate(GenerationTheme.CITY);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Real-time Strategy Update (Or Battery/Mode change)
+  // Strategy/Config Update Effect
   useEffect(() => {
       if (!isGenerating && agents.length > 0) {
           setIsPlaying(false);
-          runPathfinding(selectedAlgorithm, batteryCapacity);
+          updateSimulation(selectedAlgorithm, isRoundTrip);
       }
-  }, [selectedAlgorithm, isRoundTrip, batteryCapacity, runPathfinding]); 
+  }, [selectedAlgorithm, isRoundTrip]);
 
-  // Simulation Loop
+  const handleGenerate = async (theme: string) => {
+      setIsPlaying(false);
+      setIsGenerating(true);
+      setTick(0);
+      setError(null);
+
+      // Allow UI to render loading state
+      setTimeout(async () => {
+          try {
+              const engine = engineRef.current;
+              
+              // 1. Generate World
+              engine.generateWorld(theme, gridSizeVal, enableCharging);
+              setObstacles([...engine.world.obstacleList]);
+              setChargeStations([...engine.world.chargeStations]);
+
+              // 2. Initialize Agents
+              engine.initializeAgents(agentCount, batteryCapacity, deployFromBase);
+
+              // 3. Run Pathfinding
+              await updateSimulation(selectedAlgorithm, isRoundTrip);
+
+          } catch (e) {
+              console.error(e);
+              setError("Generation failed.");
+          } finally {
+              setIsGenerating(false);
+          }
+      }, 50);
+  };
+
+  const handleNewMissions = async () => {
+      setIsPlaying(false);
+      setTick(0);
+      setIsGenerating(true);
+      
+      setTimeout(async () => {
+          const engine = engineRef.current;
+          engine.initializeAgents(agentCount, batteryCapacity, deployFromBase);
+          await updateSimulation(selectedAlgorithm, isRoundTrip);
+          setIsGenerating(false);
+      }, 50);
+  };
+
+  // Playback Loop
   useEffect(() => {
     let interval: number;
     if (isPlaying) {
@@ -160,87 +126,22 @@ const App: React.FC = () => {
     return () => clearInterval(interval);
   }, [isPlaying, maxTicks]);
 
-  const handleGenerate = async (theme: string) => {
-    setIsPlaying(false);
-    setIsGenerating(true);
-    setTick(0);
-    setCollisions([]); 
-    setError(null);
-    
-    setGridSize({ x: gridSizeVal, y: gridSizeVal, z: gridSizeVal });
-
-    setTimeout(async () => {
-        try {
-            const world = worldRef.current;
-            const swarm = swarmRef.current;
-
-            world.setSize(gridSizeVal);
-            world.generate(theme);
-
-            if (deployFromBase) {
-              const baseSize = Math.ceil(Math.sqrt(agentCount));
-              world.clearZone(0, 0, 0, baseSize + 1, 3, baseSize + 1);
-            }
-
-            swarm.resize(agentCount, batteryCapacity);
-            swarm.initializeScenario(world, deployFromBase);
-            
-            await runPathfinding(selectedAlgorithm, batteryCapacity);
-
-            setObstacles([...world.obstacleList]); 
-
-        } catch (error) {
-            console.error("Generation failed:", error);
-            setError("Failed to generate scenario.");
-        } finally {
-            setIsGenerating(false);
-        }
-    }, 50);
-  };
-
-  const handleNewMissions = async () => {
-      setIsPlaying(false);
-      setTick(0); 
-      setIsGenerating(true);
-      setError(null);
-
-      setTimeout(async () => {
-          const world = worldRef.current;
-          const swarm = swarmRef.current;
-          
-          swarm.resize(agentCount, batteryCapacity);
-          swarm.initializeScenario(world, deployFromBase);
-          
-          await runPathfinding(selectedAlgorithm, batteryCapacity);
-          setIsGenerating(false);
-      }, 50);
-  };
-
   const handleTogglePlay = () => {
-    if (tick >= maxTicks) {
-      setTick(0);
-    }
+    if (tick >= maxTicks) setTick(0);
     setIsPlaying(!isPlaying);
   };
-
-  const handleReset = () => {
-    setIsPlaying(false);
-    setTick(0);
-  };
-
-  // Helper to get current algorithm description for UI
-  const currentAlgoDesc = ALGORITHMS[selectedAlgorithm]?.description || "";
 
   return (
     <div className="w-full h-full overflow-hidden relative bg-slate-950">
       <VoxelWorld
-        gridSize={gridSize}
+        gridSize={{ x: gridSizeVal, y: gridSizeVal, z: gridSizeVal }}
         obstacles={obstacles}
         agents={agents}
         collisions={collisions}
         tick={tick}
         isBaseEnabled={deployFromBase}
         agentCount={agentCount}
+        chargeStations={chargeStations}
       />
       
       <ControlPanel
@@ -248,7 +149,7 @@ const App: React.FC = () => {
         tick={tick}
         maxTicks={maxTicks}
         onTogglePlay={handleTogglePlay}
-        onReset={handleReset}
+        onReset={() => { setIsPlaying(false); setTick(0); }}
         onGenerate={handleGenerate}
         onNewMissions={handleNewMissions}
         isGenerating={isGenerating}
@@ -260,35 +161,27 @@ const App: React.FC = () => {
         setDeployFromBase={setDeployFromBase}
         selectedAlgorithm={selectedAlgorithm}
         setSelectedAlgorithm={setSelectedAlgorithm}
-        availableAlgorithms={Object.keys(ALGORITHMS)}
-        currentAlgoDesc={currentAlgoDesc}
+        availableAlgorithms={engineRef.current.getAvailableAlgorithms()}
+        currentAlgoDesc={engineRef.current.getAlgorithmDescription(selectedAlgorithm)}
         isRoundTrip={isRoundTrip}
         setIsRoundTrip={setIsRoundTrip}
         batteryCapacity={batteryCapacity}
         setBatteryCapacity={setBatteryCapacity}
+        enableCharging={enableCharging}
+        setEnableCharging={setEnableCharging}
       />
 
-      <StatusPanel 
-        agents={agents}
-        collisions={collisions}
-        tick={tick}
-      />
+      <StatusPanel agents={agents} collisions={collisions} tick={tick} />
 
-      {/* Error Popup Overlay */}
       {error && (
         <div className="absolute inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-slate-800 border border-red-500/50 p-6 rounded-xl shadow-2xl max-w-md w-full flex flex-col items-center text-center animate-in fade-in zoom-in duration-200">
+            <div className="bg-slate-800 border border-red-500/50 p-6 rounded-xl shadow-2xl max-w-md w-full flex flex-col items-center text-center">
                 <div className="w-14 h-14 rounded-full bg-red-500/20 flex items-center justify-center mb-4 border border-red-500/30">
                     <AlertTriangle className="text-red-500" size={28} />
                 </div>
                 <h3 className="text-xl font-bold text-white mb-2">Simulation Error</h3>
-                <p className="text-slate-300 text-sm mb-6 leading-relaxed">
-                    {error}
-                </p>
-                <button 
-                    onClick={() => setError(null)}
-                    className="bg-red-600 hover:bg-red-700 text-white px-6 py-2.5 rounded-lg font-semibold transition-colors w-full focus:ring-2 focus:ring-red-500 focus:ring-offset-2 focus:ring-offset-slate-800"
-                >
+                <p className="text-slate-300 text-sm mb-6 leading-relaxed">{error}</p>
+                <button onClick={() => setError(null)} className="bg-red-600 hover:bg-red-700 text-white px-6 py-2.5 rounded-lg font-semibold w-full">
                     Dismiss Warning
                 </button>
             </div>

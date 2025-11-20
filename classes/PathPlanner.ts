@@ -1,28 +1,21 @@
-
-import { Position3D, PathNode, Agent, CollisionEvent, ENERGY_COSTS } from '../types';
+import { Position3D, PathNode, CollisionEvent, ENERGY_COSTS } from '../types';
 import { World } from './World';
-import { Swarm, Drone } from './Drone';
+import { Swarm } from './Drone';
 
 const TIMEOUT_MS = 30000;
+const RECHARGE_TICKS = 20;
 
 const DIRECTIONS = [
-  { x: 1, y: 0, z: 0 },
-  { x: -1, y: 0, z: 0 },
-  { x: 0, y: 1, z: 0 },
-  { x: 0, y: -1, z: 0 },
-  { x: 0, y: 0, z: 1 },
-  { x: 0, y: 0, z: -1 },
-  { x: 0, y: 0, z: 0 }, // Wait
+  { x: 1, y: 0, z: 0 }, { x: -1, y: 0, z: 0 },
+  { x: 0, y: 1, z: 0 }, { x: 0, y: -1, z: 0 },
+  { x: 0, y: 0, z: 1 }, { x: 0, y: 0, z: -1 },
+  { x: 0, y: 0, z: 0 }, 
 ];
 
-/**
- * Abstract Base Strategy for Path Planning.
- */
 export abstract class PathFindingStrategy {
   abstract name: string;
   abstract description: string;
   abstract isSafe: boolean;
-
   protected maxTimeSteps: number;
 
   constructor(maxTimeSteps: number = 200) {
@@ -63,13 +56,7 @@ export abstract class PathFindingStrategy {
     deadline?: number
   ): Position3D[] | null {
     const startNode: PathNode = {
-      ...start,
-      g: 0,
-      h: this.heuristic(start, goal),
-      f: 0,
-      parent: null,
-      time: startTime,
-      energy: 0
+      ...start, g: 0, h: this.heuristic(start, goal), f: 0, parent: null, time: startTime, energy: 0
     };
     startNode.f = startNode.g + startNode.h;
 
@@ -78,11 +65,8 @@ export abstract class PathFindingStrategy {
     let nodesExpanded = 0;
 
     while (openList.length > 0) {
-      // Check timeout every 64 iterations to reduce overhead
       if ((nodesExpanded & 63) === 0) {
-        if (deadline && performance.now() > deadline) {
-          throw new Error("Pathfinding Timeout");
-        }
+        if (deadline && performance.now() > deadline) throw new Error("Pathfinding Timeout");
       }
       nodesExpanded++;
 
@@ -100,41 +84,29 @@ export abstract class PathFindingStrategy {
       if (closedSet.has(closedKey)) continue;
       closedSet.add(closedKey);
 
-      // Direct neighbor generation (Optimized)
       for (const dir of DIRECTIONS) {
         const nx = current.x + dir.x;
         const ny = current.y + dir.y;
         const nz = current.z + dir.z;
 
-        // Fast boundary and obstacle check
-        // World.isBlocked handles boundary checks implicitly
         if (world.isBlocked(nx, ny, nz)) continue;
 
         const nextTime = current.time + 1;
-        
-        // Create temp position object only for reservation key generation if needed
-        // Ideally we optimize key generation to take x,y,z,t directly, but for now:
         const nextPos: Position3D = { x: nx, y: ny, z: nz };
         
         if (reserved.size > 0 && reserved.has(this.key(nextPos, nextTime))) continue;
 
-        const isWait = nx === current.x && ny === current.y && nz === current.z;
-        const stepCost = isWait ? ENERGY_COSTS.WAIT : ENERGY_COSTS.MOVE;
-        
-        const g = current.g + 1; 
+        const stepCost = (nx === current.x && ny === current.y && nz === current.z) ? ENERGY_COSTS.WAIT : ENERGY_COSTS.MOVE;
         const energy = current.energy + stepCost;
         
         if (maxEnergy !== undefined && energy > maxEnergy) continue;
 
+        const g = current.g + 1;
         const h = this.heuristic(nextPos, goal);
         const f = g + h;
 
         const neighborNode: PathNode = {
-          x: nx, y: ny, z: nz,
-          g, h, f,
-          parent: current,
-          time: nextTime,
-          energy
+          x: nx, y: ny, z: nz, g, h, f, parent: current, time: nextTime, energy
         };
 
         const existingIdx = openList.findIndex(n =>
@@ -142,9 +114,7 @@ export abstract class PathFindingStrategy {
         );
 
         if (existingIdx !== -1) {
-          if (openList[existingIdx].g > g) {
-            openList[existingIdx] = neighborNode;
-          }
+          if (openList[existingIdx].g > g) openList[existingIdx] = neighborNode;
         } else {
           openList.push(neighborNode);
         }
@@ -154,20 +124,16 @@ export abstract class PathFindingStrategy {
   }
 }
 
-/**
- * Strategy 1: Naive Planning
- */
 export class NaivePlanner extends PathFindingStrategy {
   name = "Naive (Unsafe)";
   description = "Agents plan selfishly. Collisions result in destruction.";
   isSafe = false;
 
   plan(swarm: Swarm, world: World, isRoundTrip: boolean = false) {
-    const drones = swarm.drones;
     const emptySet = new Set<number>();
     const deadline = performance.now() + TIMEOUT_MS;
 
-    for (const drone of drones) {
+    for (const drone of swarm.drones) {
       if (performance.now() > deadline) throw new Error("Pathfinding Timeout");
 
       if (world.isPositionBlocked(drone.start)) {
@@ -184,13 +150,8 @@ export class NaivePlanner extends PathFindingStrategy {
         if (isRoundTrip) {
             const leg1Time = path1.length - 1;
             const path2 = this.findPath(drone.goal, drone.start, leg1Time, world, emptySet, drone.maxBattery, deadline);
-            
-            if (path2) {
-                fullPath = [...path1, ...path2.slice(1)];
-            }
+            if (path2) fullPath = [...path1, ...path2.slice(1)];
             deliveryTick = leg1Time;
-        } else {
-            deliveryTick = fullPath.length - 1;
         }
         
         drone.setPath(fullPath, deliveryTick);
@@ -203,20 +164,16 @@ export class NaivePlanner extends PathFindingStrategy {
   }
 }
 
-/**
- * Strategy 2: Cooperative A*
- */
 export class CooperativePlanner extends PathFindingStrategy {
   name = "Cooperative A*";
   description = "Prioritized planning. Agents avoid each other's future paths.";
   isSafe = true;
 
   plan(swarm: Swarm, world: World, isRoundTrip: boolean = false) {
-    const drones = swarm.drones;
     const reservedSpaceTime = new Set<number>();
     const deadline = performance.now() + TIMEOUT_MS;
 
-    for (const drone of drones) {
+    for (const drone of swarm.drones) {
       if (performance.now() > deadline) throw new Error("Pathfinding Timeout");
 
       if (world.isPositionBlocked(drone.start)) {
@@ -224,7 +181,43 @@ export class CooperativePlanner extends PathFindingStrategy {
         continue;
       }
 
-      const path1 = this.findPath(drone.start, drone.goal, 0, world, reservedSpaceTime, drone.maxBattery, deadline);
+      // 1. Try direct Path
+      let path1 = this.findPath(drone.start, drone.goal, 0, world, reservedSpaceTime, drone.maxBattery, deadline);
+      
+      // 2. If out of battery, try via Station
+      if (!path1 && world.chargeStations.length > 0) {
+          const sortedStations = [...world.chargeStations].sort((a, b) => 
+             this.heuristic(drone.start, a) - this.heuristic(drone.start, b)
+          );
+
+          for (const station of sortedStations) {
+              const toStation = this.findPath(drone.start, station, 0, world, reservedSpaceTime, drone.maxBattery, deadline);
+              if (!toStation) continue;
+
+              const arrivalTime = toStation.length - 1;
+              const departureTime = arrivalTime + RECHARGE_TICKS;
+
+              // Check availability of station
+              let stationBlocked = false;
+              for(let t = arrivalTime; t < departureTime; t++) {
+                  if (reservedSpaceTime.has(this.key(station, t))) {
+                      stationBlocked = true;
+                      break;
+                  }
+              }
+              if (stationBlocked) continue;
+
+              // Plan from Station to Goal
+              const fromStation = this.findPath(station, drone.goal, departureTime, world, reservedSpaceTime, drone.maxBattery, deadline);
+              
+              if (fromStation) {
+                  const waitFrames: Position3D[] = [];
+                  for(let i=0; i<RECHARGE_TICKS; i++) waitFrames.push({ ...station });
+                  path1 = [...toStation, ...waitFrames, ...fromStation.slice(1)];
+                  break;
+              }
+          }
+      }
 
       if (!path1) {
         drone.setPath([drone.start]);
@@ -236,43 +229,30 @@ export class CooperativePlanner extends PathFindingStrategy {
       let deliveryTick = path1.length - 1;
 
       if (isRoundTrip) {
-          const leg1Time = path1.length - 1;
+          const leg1Time = fullPath.length - 1;
           const path2 = this.findPath(drone.goal, drone.start, leg1Time, world, reservedSpaceTime, drone.maxBattery, deadline);
           
-          if (path2) {
-              fullPath = [...path1, ...path2.slice(1)];
-          }
+          if (path2) fullPath = [...fullPath, ...path2.slice(1)];
           deliveryTick = leg1Time;
-      } else {
-          deliveryTick = fullPath.length - 1;
       }
 
       drone.setPath(fullPath, deliveryTick);
       drone.status = 'finished';
 
-      fullPath.forEach((pos, t) => {
-        reservedSpaceTime.add(this.key(pos, t));
-      });
+      fullPath.forEach((pos, t) => reservedSpaceTime.add(this.key(pos, t)));
       
       const lastPos = fullPath[fullPath.length - 1];
       const arrivalTime = fullPath.length - 1;
-      for (let t = 1; t < 20; t++) {
-        reservedSpaceTime.add(this.key(lastPos, arrivalTime + t));
-      }
+      for (let t = 1; t < 20; t++) reservedSpaceTime.add(this.key(lastPos, arrivalTime + t));
     }
   }
 }
 
-/**
- * Strategy 3: Energy Saver (Custom A*)
- * Prioritizes low energy consumption over speed.
- */
 export class EnergySaverPlanner extends PathFindingStrategy {
   name = "Energy Saver";
   description = "Prioritizes battery conservation. Waiting is cheaper than moving.";
   isSafe = true;
 
-  // Override findPath to use Energy as G-cost instead of Time
   protected findPathEnergyOptimized(
     start: Position3D,
     goal: Position3D,
@@ -284,13 +264,7 @@ export class EnergySaverPlanner extends PathFindingStrategy {
   ): Position3D[] | null {
     
     const startNode: PathNode = {
-      ...start,
-      g: 0, // G is now ENERGY
-      h: this.heuristic(start, goal) * ENERGY_COSTS.MOVE, // Heuristic in Energy units
-      f: 0,
-      parent: null,
-      time: startTime,
-      energy: 0
+      ...start, g: 0, h: this.heuristic(start, goal) * ENERGY_COSTS.MOVE, f: 0, parent: null, time: startTime, energy: 0
     };
     startNode.f = startNode.g + startNode.h;
 
@@ -300,9 +274,7 @@ export class EnergySaverPlanner extends PathFindingStrategy {
 
     while (openList.length > 0) {
       if ((nodesExpanded & 63) === 0) {
-        if (performance.now() > deadline) {
-          throw new Error("Pathfinding Timeout");
-        }
+        if (performance.now() > deadline) throw new Error("Pathfinding Timeout");
       }
       nodesExpanded++;
 
@@ -319,7 +291,6 @@ export class EnergySaverPlanner extends PathFindingStrategy {
       if (closedSet.has(closedKey)) continue;
       closedSet.add(closedKey);
 
-      // Optimized neighbor generation
       for (const dir of DIRECTIONS) {
         const nx = current.x + dir.x;
         const ny = current.y + dir.y;
@@ -332,23 +303,17 @@ export class EnergySaverPlanner extends PathFindingStrategy {
 
         if (reserved.size > 0 && reserved.has(this.key(nextPos, nextTime))) continue;
 
-        const isWait = nx === current.x && ny === current.y && nz === current.z;
-        const stepCost = isWait ? ENERGY_COSTS.WAIT : ENERGY_COSTS.MOVE;
+        const stepCost = (nx === current.x && ny === current.y && nz === current.z) ? ENERGY_COSTS.WAIT : ENERGY_COSTS.MOVE;
 
         const newEnergy = current.energy + stepCost;
         if (newEnergy > maxEnergy) continue;
 
-        // G cost is ENERGY, not time steps
         const g = current.g + stepCost; 
         const h = this.heuristic(nextPos, goal) * ENERGY_COSTS.MOVE;
         const f = g + h;
 
         const neighborNode: PathNode = {
-          x: nx, y: ny, z: nz,
-          g, h, f,
-          parent: current,
-          time: nextTime,
-          energy: newEnergy
+          x: nx, y: ny, z: nz, g, h, f, parent: current, time: nextTime, energy: newEnergy
         };
 
         const existingIdx = openList.findIndex(n =>
@@ -356,9 +321,7 @@ export class EnergySaverPlanner extends PathFindingStrategy {
         );
 
         if (existingIdx !== -1) {
-          if (openList[existingIdx].g > g) {
-            openList[existingIdx] = neighborNode;
-          }
+          if (openList[existingIdx].g > g) openList[existingIdx] = neighborNode;
         } else {
           openList.push(neighborNode);
         }
@@ -368,11 +331,10 @@ export class EnergySaverPlanner extends PathFindingStrategy {
   }
 
   plan(swarm: Swarm, world: World, isRoundTrip: boolean = false) {
-    const drones = swarm.drones;
     const reservedSpaceTime = new Set<number>();
     const deadline = performance.now() + TIMEOUT_MS;
 
-    for (const drone of drones) {
+    for (const drone of swarm.drones) {
       if (performance.now() > deadline) throw new Error("Pathfinding Timeout");
 
       if (world.isPositionBlocked(drone.start)) {
@@ -380,8 +342,39 @@ export class EnergySaverPlanner extends PathFindingStrategy {
         continue;
       }
 
-      // Use Energy Optimized Finder
-      const path1 = this.findPathEnergyOptimized(drone.start, drone.goal, 0, world, reservedSpaceTime, drone.maxBattery, deadline);
+      let path1 = this.findPathEnergyOptimized(drone.start, drone.goal, 0, world, reservedSpaceTime, drone.maxBattery, deadline);
+
+      if (!path1 && world.chargeStations.length > 0) {
+          const sortedStations = [...world.chargeStations].sort((a, b) => 
+             this.heuristic(drone.start, a) - this.heuristic(drone.start, b)
+          );
+
+          for (const station of sortedStations) {
+              const toStation = this.findPathEnergyOptimized(drone.start, station, 0, world, reservedSpaceTime, drone.maxBattery, deadline);
+              if (!toStation) continue;
+
+              const arrivalTime = toStation.length - 1;
+              const departureTime = arrivalTime + RECHARGE_TICKS;
+
+              let stationBlocked = false;
+              for(let t = arrivalTime; t < departureTime; t++) {
+                  if (reservedSpaceTime.has(this.key(station, t))) {
+                      stationBlocked = true;
+                      break;
+                  }
+              }
+              if (stationBlocked) continue;
+
+              const fromStation = this.findPathEnergyOptimized(station, drone.goal, departureTime, world, reservedSpaceTime, drone.maxBattery, deadline);
+              
+              if (fromStation) {
+                  const waitFrames: Position3D[] = [];
+                  for(let i=0; i<RECHARGE_TICKS; i++) waitFrames.push({ ...station });
+                  path1 = [...toStation, ...waitFrames, ...fromStation.slice(1)];
+                  break;
+              }
+          }
+      }
 
       if (!path1) {
         drone.setPath([drone.start]);
@@ -393,40 +386,20 @@ export class EnergySaverPlanner extends PathFindingStrategy {
       let deliveryTick = path1.length - 1;
 
       if (isRoundTrip) {
-          const leg1Time = path1.length - 1;
+          const leg1Time = fullPath.length - 1;
+          const path2 = this.findPathEnergyOptimized(drone.goal, drone.start, leg1Time, world, reservedSpaceTime, drone.maxBattery, deadline);
           
-          let energyUsed = 0;
-          for(let i=1; i<path1.length; i++) {
-             const prev = path1[i-1];
-             const curr = path1[i];
-             if(prev.x === curr.x && prev.y === curr.y && prev.z === curr.z) energyUsed += ENERGY_COSTS.WAIT;
-             else energyUsed += ENERGY_COSTS.MOVE;
-          }
-          
-          const remainingBat = drone.maxBattery - energyUsed;
-          
-          const path2 = this.findPathEnergyOptimized(drone.goal, drone.start, leg1Time, world, reservedSpaceTime, remainingBat, deadline);
-          
-          if (path2) {
-              fullPath = [...path1, ...path2.slice(1)];
-          }
+          if (path2) fullPath = [...fullPath, ...path2.slice(1)];
           deliveryTick = leg1Time;
-      } else {
-          deliveryTick = fullPath.length - 1;
       }
 
       drone.setPath(fullPath, deliveryTick);
       drone.status = 'finished';
 
-      fullPath.forEach((pos, t) => {
-        reservedSpaceTime.add(this.key(pos, t));
-      });
-       
+      fullPath.forEach((pos, t) => reservedSpaceTime.add(this.key(pos, t)));
       const lastPos = fullPath[fullPath.length - 1];
       const arrivalTime = fullPath.length - 1;
-      for (let t = 1; t < 20; t++) {
-        reservedSpaceTime.add(this.key(lastPos, arrivalTime + t));
-      }
+      for (let t = 1; t < 20; t++) reservedSpaceTime.add(this.key(lastPos, arrivalTime + t));
     }
   }
 }
@@ -439,9 +412,7 @@ export class CollisionAnalyzer {
     for (const drone of swarm.drones) {
       drone.path.forEach((pos, t) => {
         const key = `${t},${pos.x},${pos.y},${pos.z}`;
-        if (!timeLocationMap.has(key)) {
-          timeLocationMap.set(key, []);
-        }
+        if (!timeLocationMap.has(key)) timeLocationMap.set(key, []);
         timeLocationMap.get(key)!.push(drone.id);
       });
     }
@@ -451,16 +422,11 @@ export class CollisionAnalyzer {
         const [tStr, xStr, yStr, zStr] = key.split(',');
         collisions.push({
           time: parseInt(tStr),
-          position: {
-            x: parseInt(xStr),
-            y: parseInt(yStr),
-            z: parseInt(zStr)
-          },
+          position: { x: parseInt(xStr), y: parseInt(yStr), z: parseInt(zStr) },
           agentIds
         });
       }
     });
-
     return collisions;
   }
 }
