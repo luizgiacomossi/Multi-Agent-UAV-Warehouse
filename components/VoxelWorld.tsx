@@ -4,6 +4,7 @@ import { OrbitControls, Text, Environment, ContactShadows, Stars, Float, Line, B
 import * as THREE from 'three';
 import { Agent, Position3D, CollisionEvent } from '../types';
 import { Drone } from '../classes/Drone';
+import { Warehouse } from '../classes/Warehouse';
 
 // -- Subcomponents --
 
@@ -211,16 +212,21 @@ const GridBase: React.FC<{ size: Position3D }> = ({ size }) => (
     <gridHelper args={[size.x, size.x, 0x444444, 0x222222]} position={[(size.x-1)/2, -0.51, (size.z-1)/2]} />
 );
 
-const WarehouseBase: React.FC<{ agentCount: number }> = ({ agentCount }) => {
-    const baseSize = Math.ceil(Math.sqrt(agentCount));
-    const centerX = (baseSize - 1) / 2;
-    const centerZ = (baseSize - 1) / 2;
-    const crates = useMemo(() => Array.from({length:5}).map(() => ({
+interface WarehouseBaseProps {
+    warehouse: Warehouse;
+}
+
+const WarehouseBase: React.FC<WarehouseBaseProps> = ({ warehouse }) => {
+    const { baseSize, position } = warehouse;
+    const centerX = position.x + (baseSize - 1) / 2;
+    const centerZ = position.z + (baseSize - 1) / 2;
+    
+    const crates = useMemo(() => Array.from({length: Math.floor(warehouse.capacity * 0.7)}).map(() => ({
         x: (Math.random() - 0.5) * baseSize,
         z: (Math.random() - 0.5) * baseSize,
         rot: Math.random() * Math.PI,
         color: Math.random() > 0.5 ? '#cd853f' : '#8b4513'
-    })), [baseSize]);
+    })), [baseSize, warehouse.capacity]);
 
     return (
         <group position={[centerX, -0.45, centerZ]}>
@@ -245,13 +251,12 @@ interface VoxelWorldProps {
   agents: Agent[];
   collisions: CollisionEvent[];
   tick: number;
-  isBaseEnabled?: boolean;
-  agentCount?: number;
+  warehouse: Warehouse | null;
   chargeStations?: Position3D[];
 }
 
 const VoxelWorld: React.FC<VoxelWorldProps> = ({ 
-    gridSize, obstacles, agents, collisions, tick, isBaseEnabled = false, agentCount = 8, chargeStations = []
+    gridSize, obstacles, agents, collisions, tick, warehouse, chargeStations = []
 }) => {
   const camPos = useMemo(() => new THREE.Vector3(gridSize.x * 1.5, gridSize.y * 1.2, gridSize.z * 1.5), [gridSize]);
   const center = useMemo(() => new THREE.Vector3((gridSize.x-1)/2, (gridSize.y-1)/2, (gridSize.z-1)/2), [gridSize]);
@@ -269,7 +274,7 @@ const VoxelWorld: React.FC<VoxelWorldProps> = ({
         <group>
             <ObstacleField obstacles={obstacles} />
             <ChargingStation positions={chargeStations} />
-            {isBaseEnabled && <WarehouseBase agentCount={agentCount} />}
+            {warehouse && <WarehouseBase warehouse={warehouse} />}
 
             {agents.map((agent) => (
                 <React.Fragment key={agent.id}>

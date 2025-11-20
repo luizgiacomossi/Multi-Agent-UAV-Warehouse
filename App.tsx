@@ -5,6 +5,7 @@ import ControlPanel from './components/ControlPanel';
 import StatusPanel from './components/StatusPanel';
 import { Agent, Position3D, GenerationTheme, CollisionEvent } from './types';
 import { SimulationManager } from './classes/SimulationManager';
+import { Warehouse } from './classes/Warehouse';
 
 const App: React.FC = () => {
   // -- UI Config State --
@@ -21,6 +22,7 @@ const App: React.FC = () => {
   const [chargeStations, setChargeStations] = useState<Position3D[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [collisions, setCollisions] = useState<CollisionEvent[]>([]);
+  const [warehouse, setWarehouse] = useState<Warehouse | null>(null);
   
   // -- Flow Control --
   const [tick, setTick] = useState(0);
@@ -81,8 +83,11 @@ const App: React.FC = () => {
               setObstacles([...engine.world.obstacleList]);
               setChargeStations([...engine.world.chargeStations]);
 
-              // 2. Initialize Agents
+              // 2. Initialize Agents (creates warehouse if needed)
               engine.initializeAgents(agentCount, batteryCapacity, deployFromBase);
+              
+              // Sync Warehouse state
+              setWarehouse(engine.world.warehouse); // Reference copy is fine here since Warehouse is immutable-ish
 
               // 3. Run Pathfinding
               await updateSimulation(selectedAlgorithm, isRoundTrip);
@@ -103,7 +108,12 @@ const App: React.FC = () => {
       
       setTimeout(async () => {
           const engine = engineRef.current;
+          // Re-init agents (keeps world, updates warehouse if needed)
           engine.initializeAgents(agentCount, batteryCapacity, deployFromBase);
+          
+          // Sync Warehouse state
+          setWarehouse(engine.world.warehouse);
+
           await updateSimulation(selectedAlgorithm, isRoundTrip);
           setIsGenerating(false);
       }, 50);
@@ -139,8 +149,7 @@ const App: React.FC = () => {
         agents={agents}
         collisions={collisions}
         tick={tick}
-        isBaseEnabled={deployFromBase}
-        agentCount={agentCount}
+        warehouse={warehouse}
         chargeStations={chargeStations}
       />
       

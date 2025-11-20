@@ -45,12 +45,13 @@ export class SimulationManager {
 
     public initializeAgents(count: number, battery: number, deployFromBase: boolean) {
         if (deployFromBase) {
-             const baseSize = Math.ceil(Math.sqrt(count));
-             this.world.clearZone(0, 0, 0, baseSize + 1, 3, baseSize + 1);
+             this.world.setupWarehouse(count);
+        } else {
+             this.world.removeWarehouse();
         }
 
         this.swarm.resize(count, battery);
-        this.swarm.initializeScenario(this.world, deployFromBase);
+        this.swarm.initializeScenario(this.world);
     }
 
     public async runPathfinding(

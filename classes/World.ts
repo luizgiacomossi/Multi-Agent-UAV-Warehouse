@@ -1,11 +1,13 @@
 import { Position3D } from '../types';
 import { WorldGenerator } from './WorldGenerator';
+import { Warehouse } from './Warehouse';
 
 export class World {
   size: number;
   grid: Uint8Array;
   obstacleList: Position3D[];
   chargeStations: Position3D[];
+  warehouse: Warehouse | null = null;
 
   constructor(size: number = 24) {
     this.size = size;
@@ -19,6 +21,7 @@ export class World {
     this.grid = new Uint8Array(size * size * size);
     this.obstacleList = [];
     this.chargeStations = [];
+    this.warehouse = null;
   }
 
   private getIndex(x: number, y: number, z: number): number {
@@ -29,6 +32,19 @@ export class World {
     this.grid.fill(0);
     this.obstacleList = [];
     this.chargeStations = [];
+    this.warehouse = null;
+  }
+
+  public setupWarehouse(capacity: number) {
+      this.warehouse = new Warehouse(capacity, { x: 0, y: 0, z: 0 });
+      
+      // Automatically clear the zone required by the warehouse
+      const bounds = this.warehouse.getBounds();
+      this.clearZone(bounds.minX, bounds.minY, bounds.minZ, bounds.maxX, bounds.maxY, bounds.maxZ);
+  }
+
+  public removeWarehouse() {
+      this.warehouse = null;
   }
 
   public addObstacle(x: number, y: number, z: number) {
@@ -90,7 +106,7 @@ export class World {
             }
         }
     }
-    // Rebuild list
+    // Rebuild list to sync with grid state
     this.obstacleList = [];
     for (let x = 0; x < this.size; x++) {
       for (let y = 0; y < this.size; y++) {

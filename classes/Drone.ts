@@ -178,10 +178,10 @@ export class Swarm {
     this.drones.forEach(d => d.maxBattery = maxBattery);
   }
 
-  initializeScenario(world: World, deployFromBase: boolean = false) {
+  initializeScenario(world: World) {
     const occupied = new Set<string>();
     const posKey = (p: Position3D) => `${p.x},${p.y},${p.z}`;
-    const baseSide = Math.ceil(Math.sqrt(this.drones.length));
+    const warehouse = world.warehouse;
 
     for (let i = 0; i < this.drones.length; i++) {
       const drone = this.drones[i];
@@ -189,12 +189,12 @@ export class Swarm {
       let goal: Position3D;
       let attempts = 0;
 
-      if (deployFromBase) {
-        const row = Math.floor(i / baseSide);
-        const col = i % baseSide;
-        start = { x: row, y: 0, z: col };
+      if (warehouse) {
+        // Deployment mode: Start from Warehouse
+        start = warehouse.getSpawnLocation(i);
         occupied.add(posKey(start));
       } else {
+        // Random Deployment
         while (attempts < 1000) {
           start = {
             x: Math.floor(Math.random() * world.size),
@@ -222,10 +222,18 @@ export class Swarm {
         const key = posKey(goal);
         const dist = Math.abs(start!.x - goal.x) + Math.abs(start!.y - goal.y) + Math.abs(start!.z - goal.z);
 
+        // Avoid placing goals inside the warehouse or obstacles
+        const inWarehouse = warehouse ? 
+            (goal.x >= warehouse.position.x && goal.x < warehouse.position.x + warehouse.baseSize && 
+             goal.z >= warehouse.position.z && goal.z < warehouse.position.z + warehouse.baseSize && 
+             goal.y < 3) 
+            : false;
+
         if (!world.isBlocked(goal.x, goal.y, goal.z) && 
             !occupied.has(key) && 
             dist > minDist && 
-            (!deployFromBase || (goal.x > baseSide || goal.z > baseSide || goal.y > 2))
+            !inWarehouse &&
+            !(start!.x === goal.x && start!.y === goal.y && start!.z === goal.z)
             ) {
           occupied.add(key); 
           break;
