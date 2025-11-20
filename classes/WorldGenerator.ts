@@ -1,27 +1,40 @@
 import { World } from './World';
 import { GenerationTheme } from '../types';
 
+export interface ReservedZone {
+  minX: number; maxX: number;
+  minY: number; maxY: number;
+  minZ: number; maxZ: number;
+}
+
 export class WorldGenerator {
-  static generate(world: World, theme: string) {
+  static generate(world: World, theme: string, reservedZone?: ReservedZone) {
     world.clear();
 
     switch (theme) {
       case GenerationTheme.CITY:
-        this.generateCity(world);
+        this.generateCity(world, reservedZone);
         break;
       case GenerationTheme.TUNNEL:
-        this.generateTunnel(world);
+        this.generateTunnel(world, reservedZone);
         break;
       case GenerationTheme.OPEN:
-        this.generateOpen(world);
+        this.generateOpen(world, reservedZone);
         break;
       default:
-        this.generateRandom(world);
+        this.generateRandom(world, reservedZone);
         break;
     }
   }
 
-  private static generateCity(world: World) {
+  private static isRestricted(x: number, y: number, z: number, zone?: ReservedZone): boolean {
+      if (!zone) return false;
+      return x >= zone.minX && x <= zone.maxX &&
+             y >= zone.minY && y <= zone.maxY &&
+             z >= zone.minZ && z <= zone.maxZ;
+  }
+
+  private static generateCity(world: World, reservedZone?: ReservedZone) {
     const centerX = Math.floor(world.size / 2);
     const centerZ = Math.floor(world.size / 2);
     const blockSize = 4;
@@ -30,6 +43,9 @@ export class WorldGenerator {
 
     for (let x = 0; x < world.size; x++) {
       for (let z = 0; z < world.size; z++) {
+        // Check restriction
+        if (this.isRestricted(x, 0, z, reservedZone)) continue;
+
         // Streets
         const isMainAveX = Math.abs(x - centerX) <= 1;
         const isMainAveZ = Math.abs(z - centerZ) <= 1;
@@ -46,8 +62,8 @@ export class WorldGenerator {
         if (blockSeed > 0.90) {
            // Parks
            if (blockSeed > 0.95 && (x % (blockSize+roadWidth)) === 2 && (z % (blockSize+roadWidth)) === 2) {
-             world.addObstacle(x, 0, z);
-             world.addObstacle(x, 1, z);
+             if (!this.isRestricted(x, 0, z, reservedZone)) world.addObstacle(x, 0, z);
+             if (!this.isRestricted(x, 1, z, reservedZone)) world.addObstacle(x, 1, z);
            }
            continue;
         }
@@ -66,6 +82,8 @@ export class WorldGenerator {
         const isEdgeOfBlock = localX === 0 || localZ === 0 || localX === blockSize-1 || localZ === blockSize-1;
 
         for (let y = 0; y < buildingHeight; y++) {
+            if (this.isRestricted(x, y, z, reservedZone)) continue;
+
             if (buildingHeight > 10 && y > buildingHeight * 0.7 && isEdgeOfBlock) continue;
             if (blockSeed < 0.2 && buildingHeight > 8 && localX === Math.floor(blockSize/2)) continue;
             world.addObstacle(x, y, z);
@@ -74,13 +92,15 @@ export class WorldGenerator {
     }
   }
 
-  private static generateTunnel(world: World) {
+  private static generateTunnel(world: World, reservedZone?: ReservedZone) {
     const density = 0.7; 
     const mid = world.size / 2;
     
     for (let x = 0; x < world.size; x++) {
         for (let y = 0; y < world.size; y++) {
             for (let z = 0; z < world.size; z++) {
+                if (this.isRestricted(x, y, z, reservedZone)) continue;
+
                 const dist = Math.sqrt((x-mid)**2 + (y-mid)**2 + (z-mid)**2);
                 if (dist < world.size / 4) continue; 
 
@@ -98,25 +118,29 @@ export class WorldGenerator {
     }
   }
 
-  private static generateOpen(world: World) {
+  private static generateOpen(world: World, reservedZone?: ReservedZone) {
     const spacing = 4;
     for (let x = 0; x < world.size; x++) {
         for (let z = 0; z < world.size; z++) {
             if (x % spacing === 0 && z % spacing === 0) {
                 const height = Math.floor(Math.random() * (world.size - 2)) + 2;
                 for(let y=0; y<height; y++) {
-                    world.addObstacle(x, y, z);
+                    if (!this.isRestricted(x, y, z, reservedZone)) {
+                        world.addObstacle(x, y, z);
+                    }
                 }
             }
         }
     }
   }
 
-  private static generateRandom(world: World) {
+  private static generateRandom(world: World, reservedZone?: ReservedZone) {
     const density = 0.15;
     for (let x = 0; x < world.size; x++) {
         for (let y = 0; y < world.size; y++) {
             for (let z = 0; z < world.size; z++) {
+                if (this.isRestricted(x, y, z, reservedZone)) continue;
+
                 if (Math.random() < density) {
                     world.addObstacle(x, y, z);
                 }

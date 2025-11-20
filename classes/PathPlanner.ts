@@ -1,9 +1,10 @@
+
 import { Position3D, PathNode, CollisionEvent, ENERGY_COSTS } from '../types';
 import { World } from './World';
 import { Swarm } from './Drone';
 
 const TIMEOUT_MS = 30000;
-const RECHARGE_TICKS = 20;
+const INSTANT_REFUEL_TICKS = 10; // Time spent at base in Infinite Mode to pick up new package & "refuel"
 
 const DIRECTIONS = [
   { x: 1, y: 0, z: 0 }, { x: -1, y: 0, z: 0 },
@@ -26,7 +27,7 @@ export abstract class PathFindingStrategy {
     this.maxTimeSteps = steps;
   }
 
-  abstract plan(swarm: Swarm, world: World, isRoundTrip?: boolean): void;
+  abstract plan(swarm: Swarm, world: World, isRoundTrip?: boolean, missionQueues?: Map<string, Position3D[]>, maxAltitude?: number, batteryEnabled?: boolean): void;
 
   protected heuristic(a: Position3D, b: Position3D): number {
     return Math.abs(a.x - b.x) + Math.abs(a.y - b.y) + Math.abs(a.z - b.z);
@@ -53,8 +54,9 @@ export abstract class PathFindingStrategy {
     world: World,
     reserved: Set<number>,
     maxEnergy?: number,
-    deadline?: number
-  ): Position3D[] | null {
+    deadline?: number,
+    maxAltitude?: number
+  ): { path: Position3D[], finalEnergy: number } | null {
     const startNode: PathNode = {
       ...start, g: 0, h: this.heuristic(start, goal), f: 0, parent: null, time: startTime, energy: 0
     };
@@ -74,10 +76,12 @@ export abstract class PathFindingStrategy {
       const current = openList.shift()!;
 
       if (current.x === goal.x && current.y === goal.y && current.z === goal.z) {
-        return this.reconstructPath(current);
+        return { path: this.reconstructPath(current), finalEnergy: current.energy };
       }
 
       if (current.time >= this.maxTimeSteps) continue;
+      
+      // Energy check: If maxEnergy is provided (battery enabled), prune if exceeded
       if (maxEnergy !== undefined && current.energy > maxEnergy) continue;
 
       const closedKey = this.key(current, current.time);
@@ -89,7 +93,11 @@ export abstract class PathFindingStrategy {
         const ny = current.y + dir.y;
         const nz = current.z + dir.z;
 
+        // Check World bounds and obstacles
         if (world.isBlocked(nx, ny, nz)) continue;
+        
+        // Check Altitude constraint
+        if (maxAltitude !== undefined && ny > maxAltitude) continue;
 
         const nextTime = current.time + 1;
         const nextPos: Position3D = { x: nx, y: ny, z: nz };
@@ -129,7 +137,7 @@ export class NaivePlanner extends PathFindingStrategy {
   description = "Agents plan selfishly. Collisions result in destruction.";
   isSafe = false;
 
-  plan(swarm: Swarm, world: World, isRoundTrip: boolean = false) {
+  plan(swarm: Swarm, world: World, isRoundTrip: boolean = false, missionQueues?: Map<string, Position3D[]>, maxAltitude?: number, batteryEnabled: boolean = true) {
     const emptySet = new Set<number>();
     const deadline = performance.now() + TIMEOUT_MS;
 
@@ -141,25 +149,64 @@ export class NaivePlanner extends PathFindingStrategy {
         continue;
       }
 
-      const path1 = this.findPath(drone.start, drone.goal, 0, world, emptySet, drone.maxBattery, deadline);
+      const missions = missionQueues?.get(drone.id) || [drone.goal];
+      let currentStart = drone.start;
+      let currentTime = 0;
+      let fullPath: Position3D[] = [];
+      const deliveryTicks: number[] = [];
+      // If battery disabled, pass undefined to findPath so it ignores energy limits
+      const maxEnergy = batteryEnabled ? drone.maxBattery : undefined; 
 
-      if (path1) {
-        let fullPath = path1;
-        let deliveryTick = path1.length - 1;
+      for (let i = 0; i < missions.length; i++) {
+          const missionGoal = missions[i];
+          
+          // 1. Outbound
+          const resultOut = this.findPath(currentStart, missionGoal, currentTime, world, emptySet, maxEnergy, deadline, maxAltitude);
+          if (!resultOut) {
+              drone.status = 'out_of_battery';
+              break;
+          }
+          
+          const pathOut = resultOut.path;
+          
+          // Append PathOut
+          if (fullPath.length > 0) fullPath.push(...pathOut.slice(1));
+          else fullPath = pathOut;
 
-        if (isRoundTrip) {
-            const leg1Time = path1.length - 1;
-            const path2 = this.findPath(drone.goal, drone.start, leg1Time, world, emptySet, drone.maxBattery, deadline);
-            if (path2) fullPath = [...path1, ...path2.slice(1)];
-            deliveryTick = leg1Time;
-        }
-        
-        drone.setPath(fullPath, deliveryTick);
-        drone.status = 'finished';
-      } else {
-        drone.setPath([drone.start]);
-        drone.status = 'out_of_battery';
+          currentTime = fullPath.length - 1;
+          deliveryTicks.push(currentTime);
+          currentStart = missionGoal;
+
+          // 2. Inbound (if round trip or infinite)
+          if (isRoundTrip || missionQueues) {
+              // Calculate remaining energy for return trip? 
+              // In Naive simple implementation we treat battery as per-trip or total? 
+              // Let's assume naive planner just tries to get back.
+              
+              const resultBack = this.findPath(currentStart, drone.start, currentTime, world, emptySet, maxEnergy, deadline, maxAltitude);
+              if (!resultBack) {
+                  drone.status = 'out_of_battery';
+                  break;
+              }
+              
+              const pathBack = resultBack.path;
+              fullPath.push(...pathBack.slice(1));
+              currentTime = fullPath.length - 1;
+              currentStart = drone.start; // Back at base
+
+              // Wait at base for "refuel" and "loading" if there are more missions
+              if (i < missions.length - 1) {
+                 for(let w=0; w<INSTANT_REFUEL_TICKS; w++) {
+                     fullPath.push({...currentStart});
+                     currentTime++;
+                 }
+                 // Note: The next findPath call starts with energy=0, simulating a full recharge
+              }
+          }
       }
+
+      drone.setPath(fullPath.length > 0 ? fullPath : [drone.start], deliveryTicks);
+      if (fullPath.length > 0 && drone.status !== 'out_of_battery') drone.status = 'finished';
     }
   }
 }
@@ -169,7 +216,7 @@ export class CooperativePlanner extends PathFindingStrategy {
   description = "Prioritized planning. Agents avoid each other's future paths.";
   isSafe = true;
 
-  plan(swarm: Swarm, world: World, isRoundTrip: boolean = false) {
+  plan(swarm: Swarm, world: World, isRoundTrip: boolean = false, missionQueues?: Map<string, Position3D[]>, maxAltitude?: number, batteryEnabled: boolean = true) {
     const reservedSpaceTime = new Set<number>();
     const deadline = performance.now() + TIMEOUT_MS;
 
@@ -181,69 +228,88 @@ export class CooperativePlanner extends PathFindingStrategy {
         continue;
       }
 
-      // 1. Try direct Path
-      let path1 = this.findPath(drone.start, drone.goal, 0, world, reservedSpaceTime, drone.maxBattery, deadline);
-      
-      // 2. If out of battery, try via Station
-      if (!path1 && world.chargeStations.length > 0) {
-          const sortedStations = [...world.chargeStations].sort((a, b) => 
-             this.heuristic(drone.start, a) - this.heuristic(drone.start, b)
-          );
+      const missions = missionQueues?.get(drone.id) || [drone.goal];
+      let currentStart = drone.start;
+      let currentTime = 0;
+      let fullPath: Position3D[] = [];
+      const deliveryTicks: number[] = [];
+      let isDead = false;
+      const maxEnergy = batteryEnabled ? drone.maxBattery : undefined;
 
-          for (const station of sortedStations) {
-              const toStation = this.findPath(drone.start, station, 0, world, reservedSpaceTime, drone.maxBattery, deadline);
-              if (!toStation) continue;
+      for (let i = 0; i < missions.length; i++) {
+          const missionGoal = missions[i];
 
-              const arrivalTime = toStation.length - 1;
-              const departureTime = arrivalTime + RECHARGE_TICKS;
+          // --- LEG 1: Base -> Goal ---
+          // Note: findPath initializes node energy to 0. This effectively simulates a full battery/reset 
+          // if we are coming from a previous iteration where we returned to base.
+          // Ideally, for non-base-return multi-stops, we should pass current energy, but our logic returns to base.
+          
+          const resultOut = this.findPath(currentStart, missionGoal, currentTime, world, reservedSpaceTime, maxEnergy, deadline, maxAltitude);
+          
+          if (!resultOut) {
+               isDead = true;
+               break;
+          }
+          const pathOut = resultOut.path;
 
-              // Check availability of station
-              let stationBlocked = false;
-              for(let t = arrivalTime; t < departureTime; t++) {
-                  if (reservedSpaceTime.has(this.key(station, t))) {
-                      stationBlocked = true;
-                      break;
-                  }
-              }
-              if (stationBlocked) continue;
+          if (fullPath.length > 0) fullPath.push(...pathOut.slice(1));
+          else fullPath = pathOut;
+          
+          currentTime = fullPath.length - 1;
+          deliveryTicks.push(currentTime);
+          currentStart = missionGoal;
 
-              // Plan from Station to Goal
-              const fromStation = this.findPath(station, drone.goal, departureTime, world, reservedSpaceTime, drone.maxBattery, deadline);
+          // Register reservations for Leg 1
+          pathOut.forEach((p, idx) => reservedSpaceTime.add(this.key(p, pathOut[0] === fullPath[0] ? idx : (currentTime - pathOut.length + 1 + idx))));
+
+          // --- LEG 2: Goal -> Base ---
+          if (isRoundTrip || missionQueues) {
+              // For round trip, we should consider the energy consumed in Leg 1 IF we are not recharging at goal.
+              // But in our logic, we check energy per-leg vs maxBattery. 
+              // If strictly enforcing battery for roundtrip without recharge at goal, maxEnergy should be (maxBattery - Leg1Cost).
+              // However, to keep it simple and playable, we assume "maxEnergy" constraint applies per leg search or allow recharge at goal?
+              // No, let's assume per-leg check ensures the leg is possible, but doesn't guarantee total trip.
+              // To do it right:
+              const energyLeft = maxEnergy !== undefined ? (maxEnergy - resultOut.finalEnergy) : undefined;
               
-              if (fromStation) {
-                  const waitFrames: Position3D[] = [];
-                  for(let i=0; i<RECHARGE_TICKS; i++) waitFrames.push({ ...station });
-                  path1 = [...toStation, ...waitFrames, ...fromStation.slice(1)];
+              const resultBack = this.findPath(currentStart, drone.start, currentTime, world, reservedSpaceTime, energyLeft, deadline, maxAltitude);
+              
+              if (!resultBack) {
+                  isDead = true;
                   break;
+              }
+              const pathBack = resultBack.path;
+
+              fullPath.push(...pathBack.slice(1));
+              
+              pathBack.forEach((p, idx) => reservedSpaceTime.add(this.key(p, currentTime + idx)));
+
+              currentTime = fullPath.length - 1;
+              currentStart = drone.start;
+
+              // If continuing, wait at base and Refuel 
+              if (i < missions.length - 1) {
+                  for(let w=0; w<INSTANT_REFUEL_TICKS; w++) {
+                      fullPath.push({...currentStart});
+                      currentTime++;
+                      reservedSpaceTime.add(this.key(currentStart, currentTime));
+                  }
               }
           }
       }
 
-      if (!path1) {
-        drone.setPath([drone.start]);
+      if (fullPath.length === 0 || isDead) {
+        drone.setPath(fullPath.length > 0 ? fullPath : [drone.start]);
         drone.status = 'out_of_battery';
-        continue;
+      } else {
+        drone.setPath(fullPath, deliveryTicks);
+        drone.status = 'finished';
+        
+        // Reserve end spot
+        const lastPos = fullPath[fullPath.length - 1];
+        const arrivalTime = fullPath.length - 1;
+        for (let t = 1; t < 20; t++) reservedSpaceTime.add(this.key(lastPos, arrivalTime + t));
       }
-
-      let fullPath = path1;
-      let deliveryTick = path1.length - 1;
-
-      if (isRoundTrip) {
-          const leg1Time = fullPath.length - 1;
-          const path2 = this.findPath(drone.goal, drone.start, leg1Time, world, reservedSpaceTime, drone.maxBattery, deadline);
-          
-          if (path2) fullPath = [...fullPath, ...path2.slice(1)];
-          deliveryTick = leg1Time;
-      }
-
-      drone.setPath(fullPath, deliveryTick);
-      drone.status = 'finished';
-
-      fullPath.forEach((pos, t) => reservedSpaceTime.add(this.key(pos, t)));
-      
-      const lastPos = fullPath[fullPath.length - 1];
-      const arrivalTime = fullPath.length - 1;
-      for (let t = 1; t < 20; t++) reservedSpaceTime.add(this.key(lastPos, arrivalTime + t));
     }
   }
 }
@@ -259,9 +325,10 @@ export class EnergySaverPlanner extends PathFindingStrategy {
     startTime: number,
     world: World,
     reserved: Set<number>,
-    maxEnergy: number,
-    deadline: number
-  ): Position3D[] | null {
+    maxEnergy: number | undefined,
+    deadline: number,
+    maxAltitude?: number
+  ): { path: Position3D[], finalEnergy: number } | null {
     
     const startNode: PathNode = {
       ...start, g: 0, h: this.heuristic(start, goal) * ENERGY_COSTS.MOVE, f: 0, parent: null, time: startTime, energy: 0
@@ -282,7 +349,7 @@ export class EnergySaverPlanner extends PathFindingStrategy {
       const current = openList.shift()!;
 
       if (current.x === goal.x && current.y === goal.y && current.z === goal.z) {
-        return this.reconstructPath(current);
+        return { path: this.reconstructPath(current), finalEnergy: current.energy };
       }
 
       if (current.time >= this.maxTimeSteps) continue;
@@ -297,6 +364,7 @@ export class EnergySaverPlanner extends PathFindingStrategy {
         const nz = current.z + dir.z;
 
         if (world.isBlocked(nx, ny, nz)) continue;
+        if (maxAltitude !== undefined && ny > maxAltitude) continue;
 
         const nextTime = current.time + 1;
         const nextPos = { x: nx, y: ny, z: nz };
@@ -306,7 +374,7 @@ export class EnergySaverPlanner extends PathFindingStrategy {
         const stepCost = (nx === current.x && ny === current.y && nz === current.z) ? ENERGY_COSTS.WAIT : ENERGY_COSTS.MOVE;
 
         const newEnergy = current.energy + stepCost;
-        if (newEnergy > maxEnergy) continue;
+        if (maxEnergy !== undefined && newEnergy > maxEnergy) continue;
 
         const g = current.g + stepCost; 
         const h = this.heuristic(nextPos, goal) * ENERGY_COSTS.MOVE;
@@ -330,7 +398,7 @@ export class EnergySaverPlanner extends PathFindingStrategy {
     return null;
   }
 
-  plan(swarm: Swarm, world: World, isRoundTrip: boolean = false) {
+  plan(swarm: Swarm, world: World, isRoundTrip: boolean = false, missionQueues?: Map<string, Position3D[]>, maxAltitude?: number, batteryEnabled: boolean = true) {
     const reservedSpaceTime = new Set<number>();
     const deadline = performance.now() + TIMEOUT_MS;
 
@@ -342,64 +410,68 @@ export class EnergySaverPlanner extends PathFindingStrategy {
         continue;
       }
 
-      let path1 = this.findPathEnergyOptimized(drone.start, drone.goal, 0, world, reservedSpaceTime, drone.maxBattery, deadline);
+      const missions = missionQueues?.get(drone.id) || [drone.goal];
+      let currentStart = drone.start;
+      let currentTime = 0;
+      let fullPath: Position3D[] = [];
+      const deliveryTicks: number[] = [];
+      let isDead = false;
+      const maxEnergy = batteryEnabled ? drone.maxBattery : undefined;
 
-      if (!path1 && world.chargeStations.length > 0) {
-          const sortedStations = [...world.chargeStations].sort((a, b) => 
-             this.heuristic(drone.start, a) - this.heuristic(drone.start, b)
-          );
+      for (let i = 0; i < missions.length; i++) {
+          const missionGoal = missions[i];
 
-          for (const station of sortedStations) {
-              const toStation = this.findPathEnergyOptimized(drone.start, station, 0, world, reservedSpaceTime, drone.maxBattery, deadline);
-              if (!toStation) continue;
+          // --- LEG 1 ---
+          const resultOut = this.findPathEnergyOptimized(currentStart, missionGoal, currentTime, world, reservedSpaceTime, maxEnergy, deadline, maxAltitude);
+          if (!resultOut) { isDead = true; break; }
+          const pathOut = resultOut.path;
 
-              const arrivalTime = toStation.length - 1;
-              const departureTime = arrivalTime + RECHARGE_TICKS;
+          if (fullPath.length > 0) fullPath.push(...pathOut.slice(1));
+          else fullPath = pathOut;
 
-              let stationBlocked = false;
-              for(let t = arrivalTime; t < departureTime; t++) {
-                  if (reservedSpaceTime.has(this.key(station, t))) {
-                      stationBlocked = true;
-                      break;
-                  }
-              }
-              if (stationBlocked) continue;
+          currentTime = fullPath.length - 1;
+          deliveryTicks.push(currentTime);
+          currentStart = missionGoal;
 
-              const fromStation = this.findPathEnergyOptimized(station, drone.goal, departureTime, world, reservedSpaceTime, drone.maxBattery, deadline);
+          // Reserve Leg 1
+          pathOut.forEach((p, idx) => reservedSpaceTime.add(this.key(p, pathOut[0] === fullPath[0] ? idx : (currentTime - pathOut.length + 1 + idx))));
+
+          // --- LEG 2 ---
+          if (isRoundTrip || missionQueues) {
+              const energyLeft = maxEnergy !== undefined ? (maxEnergy - resultOut.finalEnergy) : undefined;
+              const resultBack = this.findPathEnergyOptimized(currentStart, drone.start, currentTime, world, reservedSpaceTime, energyLeft, deadline, maxAltitude);
+              if (!resultBack) { isDead = true; break; }
+              const pathBack = resultBack.path;
+
+              fullPath.push(...pathBack.slice(1));
               
-              if (fromStation) {
-                  const waitFrames: Position3D[] = [];
-                  for(let i=0; i<RECHARGE_TICKS; i++) waitFrames.push({ ...station });
-                  path1 = [...toStation, ...waitFrames, ...fromStation.slice(1)];
-                  break;
+              pathBack.forEach((p, idx) => reservedSpaceTime.add(this.key(p, currentTime + idx)));
+
+              currentTime = fullPath.length - 1;
+              currentStart = drone.start;
+
+               // If continuing, wait and Refuel
+              if (i < missions.length - 1) {
+                  for(let w=0; w<INSTANT_REFUEL_TICKS; w++) {
+                      fullPath.push({...currentStart});
+                      currentTime++;
+                      reservedSpaceTime.add(this.key(currentStart, currentTime));
+                  }
               }
           }
       }
 
-      if (!path1) {
-        drone.setPath([drone.start]);
+      if (fullPath.length === 0 || isDead) {
+        drone.setPath(fullPath.length > 0 ? fullPath : [drone.start]);
         drone.status = 'out_of_battery';
-        continue;
+      } else {
+        drone.setPath(fullPath, deliveryTicks);
+        drone.status = 'finished';
+        
+        const lastPos = fullPath[fullPath.length - 1];
+        const arrivalTime = fullPath.length - 1;
+        for (let t = 1; t < 20; t++) reservedSpaceTime.add(this.key(lastPos, arrivalTime + t));
       }
-
-      let fullPath = path1;
-      let deliveryTick = path1.length - 1;
-
-      if (isRoundTrip) {
-          const leg1Time = fullPath.length - 1;
-          const path2 = this.findPathEnergyOptimized(drone.goal, drone.start, leg1Time, world, reservedSpaceTime, drone.maxBattery, deadline);
-          
-          if (path2) fullPath = [...fullPath, ...path2.slice(1)];
-          deliveryTick = leg1Time;
-      }
-
-      drone.setPath(fullPath, deliveryTick);
-      drone.status = 'finished';
-
-      fullPath.forEach((pos, t) => reservedSpaceTime.add(this.key(pos, t)));
-      const lastPos = fullPath[fullPath.length - 1];
-      const arrivalTime = fullPath.length - 1;
-      for (let t = 1; t < 20; t++) reservedSpaceTime.add(this.key(lastPos, arrivalTime + t));
     }
   }
 }
@@ -420,10 +492,17 @@ export class CollisionAnalyzer {
     timeLocationMap.forEach((agentIds, key) => {
       if (agentIds.length > 1) {
         const [tStr, xStr, yStr, zStr] = key.split(',');
+        // Map IDs to Names for logging
+        const agentNames = agentIds.map(id => {
+            const d = swarm.drones.find(a => a.id === id);
+            return d ? d.name : id;
+        });
+
         collisions.push({
           time: parseInt(tStr),
           position: { x: parseInt(xStr), y: parseInt(yStr), z: parseInt(zStr) },
-          agentIds
+          agentIds,
+          agentNames
         });
       }
     });

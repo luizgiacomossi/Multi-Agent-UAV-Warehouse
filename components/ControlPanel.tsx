@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { Play, Pause, RotateCcw, Box, Grid3X3, Settings, Building2, ShieldCheck, Skull, Shuffle, Cpu, Repeat, Battery, Zap } from 'lucide-react';
+import { Play, Pause, RotateCcw, Box, Grid3X3, Settings, Building2, ShieldCheck, Skull, Shuffle, Cpu, Repeat, Battery, Zap, Infinity as InfinityIcon, ArrowUpToLine, Power } from 'lucide-react';
 import { GenerationTheme } from '../types';
 
 interface ControlPanelProps {
@@ -26,12 +26,20 @@ interface ControlPanelProps {
 
   isRoundTrip: boolean;
   setIsRoundTrip: (b: boolean) => void;
+
+  isInfiniteMode: boolean;
+  setIsInfiniteMode: (b: boolean) => void;
   
   batteryCapacity: number;
   setBatteryCapacity: (n: number) => void;
+  batteryEnabled: boolean;
+  setBatteryEnabled: (b: boolean) => void;
   
   enableCharging: boolean;
   setEnableCharging: (b: boolean) => void;
+
+  maxAltitude: number;
+  setMaxAltitude: (n: number) => void;
 }
 
 const ControlPanel: React.FC<ControlPanelProps> = ({
@@ -55,10 +63,16 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   currentAlgoDesc,
   isRoundTrip,
   setIsRoundTrip,
+  isInfiniteMode,
+  setIsInfiniteMode,
   batteryCapacity,
   setBatteryCapacity,
+  batteryEnabled,
+  setBatteryEnabled,
   enableCharging,
-  setEnableCharging
+  setEnableCharging,
+  maxAltitude,
+  setMaxAltitude
 }) => {
   return (
     <div className="absolute top-4 left-4 w-80 bg-slate-800/90 backdrop-blur-md p-4 rounded-xl border border-slate-700 shadow-xl text-slate-100 flex flex-col gap-4 z-10 max-h-[90vh] overflow-y-auto">
@@ -144,22 +158,55 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                 className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-cyan-500"
              />
         </div>
-        
-        {/* Battery Slider */}
+
+        {/* Max Altitude Slider */}
         <div className="space-y-1">
              <div className="flex items-center justify-between text-xs text-slate-400">
-                <span className="flex items-center gap-1"><Battery size={12}/> Max Battery</span>
-                <span className="font-mono text-emerald-400">{batteryCapacity}</span>
+                <span className="flex items-center gap-1"><ArrowUpToLine size={12}/> Flight Ceiling</span>
+                <span className="font-mono text-cyan-400">Y={maxAltitude}</span>
              </div>
              <input 
                 type="range" 
-                min="10" 
-                max="200" 
-                step="10"
-                value={batteryCapacity} 
-                onChange={(e) => setBatteryCapacity(Number(e.target.value))}
-                className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                min="2" 
+                max={gridSizeValue} 
+                step="1"
+                value={maxAltitude} 
+                onChange={(e) => setMaxAltitude(Number(e.target.value))}
+                className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-cyan-500"
              />
+        </div>
+        
+        {/* Battery Controls */}
+        <div className="p-2 bg-slate-900/50 rounded border border-slate-700/50 flex flex-col gap-2">
+             <div className="flex items-center justify-between">
+                 <div className="flex items-center gap-1 text-xs text-slate-300">
+                    <Battery size={12} /> Battery Constraints
+                 </div>
+                 <button 
+                    onClick={() => setBatteryEnabled(!batteryEnabled)}
+                    className={`w-8 h-4 rounded-full relative transition-colors ${batteryEnabled ? 'bg-emerald-500' : 'bg-slate-600'}`}
+                 >
+                    <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all ${batteryEnabled ? 'left-4.5' : 'left-0.5'}`} />
+                 </button>
+             </div>
+             
+             {batteryEnabled && (
+                <div className="space-y-1">
+                    <div className="flex items-center justify-between text-[10px] text-slate-500">
+                        <span>Capacity</span>
+                        <span className="font-mono text-emerald-400">{batteryCapacity}</span>
+                    </div>
+                    <input 
+                        type="range" 
+                        min="10" 
+                        max="200" 
+                        step="10"
+                        value={batteryCapacity} 
+                        onChange={(e) => setBatteryCapacity(Number(e.target.value))}
+                        className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                    />
+                </div>
+             )}
         </div>
 
         <div className="flex gap-2 flex-wrap">
@@ -174,7 +221,19 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                 </span>
             </div>
 
+            {/* Infinite Mode Toggle */}
+             <div className="flex-1 min-w-[100px] flex items-center gap-2 cursor-pointer hover:bg-slate-700/50 p-1.5 rounded transition-colors border border-transparent hover:border-slate-700" onClick={() => setIsInfiniteMode(!isInfiniteMode)}>
+                <div className={`w-4 h-4 rounded border border-slate-500 flex items-center justify-center ${isInfiniteMode ? 'bg-pink-500 border-pink-500' : 'bg-slate-800'}`}>
+                    {isInfiniteMode && <div className="w-2 h-2 bg-white rounded-[1px]" />}
+                </div>
+                <span className="text-xs text-slate-300 flex items-center gap-1">
+                    <InfinityIcon size={12} />
+                    Infinite
+                </span>
+            </div>
+
             {/* Round Trip Toggle */}
+            {!isInfiniteMode && (
             <div className="flex-1 min-w-[100px] flex items-center gap-2 cursor-pointer hover:bg-slate-700/50 p-1.5 rounded transition-colors border border-transparent hover:border-slate-700" onClick={() => setIsRoundTrip(!isRoundTrip)}>
                 <div className={`w-4 h-4 rounded border border-slate-500 flex items-center justify-center ${isRoundTrip ? 'bg-purple-500 border-purple-500' : 'bg-slate-800'}`}>
                     {isRoundTrip && <div className="w-2 h-2 bg-white rounded-[1px]" />}
@@ -184,6 +243,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                     Return
                 </span>
             </div>
+            )}
 
             {/* Charging Stations Toggle */}
             <div className="flex-1 min-w-[100px] flex items-center gap-2 cursor-pointer hover:bg-slate-700/50 p-1.5 rounded transition-colors border border-transparent hover:border-slate-700" onClick={() => setEnableCharging(!enableCharging)}>

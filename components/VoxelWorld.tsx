@@ -62,12 +62,10 @@ interface AgentDroneProps {
 
 const AgentDrone: React.FC<AgentDroneProps> = ({ agent, tick, chargeStations = [] }) => {
   
-  // Use Class method if available (preserving OOP), else fallback to defaults
   const snapshot = useMemo(() => {
       if (agent instanceof Drone) {
           return agent.getSnapshotAt(tick, chargeStations);
       }
-      // Fallback for plain objects (should not happen with new architecture but safe to have)
       const t = Math.min(tick, agent.path.length - 1);
       return {
           position: agent.path[t] || agent.start,
@@ -80,6 +78,16 @@ const AgentDrone: React.FC<AgentDroneProps> = ({ agent, tick, chargeStations = [
   }, [agent, tick, chargeStations]);
 
   const { position, battery, isDestroyed, isDeadBattery, isRecharging, hasPackage } = snapshot;
+
+  // Ref for falling animation
+  const groupRef = useRef<THREE.Group>(null);
+  useFrame((state, delta) => {
+      if (isDeadBattery && groupRef.current && position.y > 0) {
+          // Add spin while falling
+          groupRef.current.rotation.x += delta * 2;
+          groupRef.current.rotation.z += delta * 3;
+      }
+  });
 
   if (isDestroyed) {
       return (
@@ -101,10 +109,12 @@ const AgentDrone: React.FC<AgentDroneProps> = ({ agent, tick, chargeStations = [
 
   const batPct = Math.max(0, battery / agent.maxBattery);
   const batColor = batPct > 0.5 ? '#22c55e' : batPct > 0.2 ? '#eab308' : '#ef4444';
+  
+  // If falling/dead, color it dark red or grey
   const showDead = isDeadBattery;
 
   return (
-    <group position={[position.x, position.y, position.z]}>
+    <group ref={groupRef} position={[position.x, position.y, position.z]}>
       <Billboard position={[0, 1.2, 0]}>
           <mesh position={[-0.5 + (batPct/2), 0, 0]}>
              <planeGeometry args={[batPct, 0.15]} />
@@ -114,7 +124,7 @@ const AgentDrone: React.FC<AgentDroneProps> = ({ agent, tick, chargeStations = [
               <planeGeometry args={[1.02, 0.17]} />
               <meshBasicMaterial color="#000" />
           </mesh>
-          {showDead && <Text position={[0, 0.4, 0]} fontSize={0.4} color="#ef4444">NO POWER</Text>}
+          {showDead && <Text position={[0, 0.4, 0]} fontSize={0.4} color="#ef4444">FAILURE</Text>}
           {isRecharging && <Text position={[0, 0.4, 0]} fontSize={0.3} color="#3b82f6">CHARGING</Text>}
       </Billboard>
 
@@ -122,8 +132,8 @@ const AgentDrone: React.FC<AgentDroneProps> = ({ agent, tick, chargeStations = [
         <sphereGeometry args={[1, 16, 16]} />
         <meshStandardMaterial 
             color={showDead ? "#333" : agent.color} 
-            emissive={showDead ? "#000" : isRecharging ? "#3b82f6" : agent.color} 
-            emissiveIntensity={showDead ? 0 : isRecharging ? 1 : 0.5} 
+            emissive={showDead ? "#ef4444" : isRecharging ? "#3b82f6" : agent.color} 
+            emissiveIntensity={showDead ? 0.5 : isRecharging ? 1 : 0.5} 
         />
       </mesh>
       
@@ -142,7 +152,7 @@ const AgentDrone: React.FC<AgentDroneProps> = ({ agent, tick, chargeStations = [
         {[1, -1].map(i => [1, -1].map(j => (
             <mesh key={`${i}-${j}`} position={[0.3 * i, 0.1, 0.3 * j]} rotation={[Math.PI/2, 0, 0]}>
                 <ringGeometry args={[0.1, 0.15, 8]} />
-                <meshBasicMaterial color={showDead ? "#555" : "white"} side={THREE.DoubleSide} opacity={0.5} transparent />
+                <meshBasicMaterial color={showDead ? "#ef4444" : "white"} side={THREE.DoubleSide} opacity={0.5} transparent />
             </mesh>
         )))}
       </group>

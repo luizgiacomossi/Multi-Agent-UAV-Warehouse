@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import VoxelWorld from './components/VoxelWorld';
@@ -12,9 +13,12 @@ const App: React.FC = () => {
   const [gridSizeVal, setGridSizeVal] = useState(24);
   const [deployFromBase, setDeployFromBase] = useState(false);
   const [isRoundTrip, setIsRoundTrip] = useState(false);
+  const [isInfiniteMode, setIsInfiniteMode] = useState(false);
   const [batteryCapacity, setBatteryCapacity] = useState(80);
+  const [batteryEnabled, setBatteryEnabled] = useState(true);
   const [enableCharging, setEnableCharging] = useState(false);
   const [selectedAlgorithm, setSelectedAlgorithm] = useState<string>('Cooperative');
+  const [maxAltitude, setMaxAltitude] = useState(24);
   
   // -- Simulation Data State --
   // We store snapshots of the simulation data for rendering
@@ -36,10 +40,10 @@ const App: React.FC = () => {
   const engineRef = useRef(new SimulationManager(24, 8));
 
   // Core Update Function
-  const updateSimulation = async (algo: string, roundTrip: boolean) => {
+  const updateSimulation = async (algo: string, roundTrip: boolean, infinite: boolean, altitude: number, batEnabled: boolean) => {
       try {
           setError(null);
-          const result = await engineRef.current.runPathfinding(algo, roundTrip);
+          const result = await engineRef.current.runPathfinding(algo, roundTrip, infinite, altitude, batEnabled);
           
           setAgents(result.agents);
           setCollisions(result.collisions);
@@ -54,6 +58,11 @@ const App: React.FC = () => {
       }
   };
 
+  // Ensure altitude doesn't exceed grid size
+  useEffect(() => {
+    if (maxAltitude > gridSizeVal) setMaxAltitude(gridSizeVal);
+  }, [gridSizeVal]);
+
   // Initial Load
   useEffect(() => {
     handleGenerate(GenerationTheme.CITY);
@@ -63,9 +72,9 @@ const App: React.FC = () => {
   useEffect(() => {
       if (!isGenerating && agents.length > 0) {
           setIsPlaying(false);
-          updateSimulation(selectedAlgorithm, isRoundTrip);
+          updateSimulation(selectedAlgorithm, isRoundTrip, isInfiniteMode, maxAltitude, batteryEnabled);
       }
-  }, [selectedAlgorithm, isRoundTrip]);
+  }, [selectedAlgorithm, isRoundTrip, isInfiniteMode, maxAltitude, batteryEnabled]);
 
   const handleGenerate = async (theme: string) => {
       setIsPlaying(false);
@@ -78,19 +87,25 @@ const App: React.FC = () => {
           try {
               const engine = engineRef.current;
               
-              // 1. Generate World
-              engine.generateWorld(theme, gridSizeVal, enableCharging);
+              // 1. Generate World (Pass deployment config to avoid obstacles in base area)
+              // Force deployFromBase if infinite mode is on for logic consistency (drones need to return to 'base')
+              const effectiveDeployFromBase = isInfiniteMode ? true : deployFromBase;
+              if (isInfiniteMode && !deployFromBase) {
+                  setDeployFromBase(true); // Sync UI
+              }
+
+              engine.generateWorld(theme, gridSizeVal, enableCharging, effectiveDeployFromBase, agentCount);
               setObstacles([...engine.world.obstacleList]);
               setChargeStations([...engine.world.chargeStations]);
 
               // 2. Initialize Agents (creates warehouse if needed)
-              engine.initializeAgents(agentCount, batteryCapacity, deployFromBase);
+              engine.initializeAgents(agentCount, batteryCapacity, effectiveDeployFromBase, maxAltitude);
               
               // Sync Warehouse state
               setWarehouse(engine.world.warehouse); // Reference copy is fine here since Warehouse is immutable-ish
 
               // 3. Run Pathfinding
-              await updateSimulation(selectedAlgorithm, isRoundTrip);
+              await updateSimulation(selectedAlgorithm, isRoundTrip, isInfiniteMode, maxAltitude, batteryEnabled);
 
           } catch (e) {
               console.error(e);
@@ -109,12 +124,12 @@ const App: React.FC = () => {
       setTimeout(async () => {
           const engine = engineRef.current;
           // Re-init agents (keeps world, updates warehouse if needed)
-          engine.initializeAgents(agentCount, batteryCapacity, deployFromBase);
+          engine.initializeAgents(agentCount, batteryCapacity, deployFromBase, maxAltitude);
           
           // Sync Warehouse state
           setWarehouse(engine.world.warehouse);
 
-          await updateSimulation(selectedAlgorithm, isRoundTrip);
+          await updateSimulation(selectedAlgorithm, isRoundTrip, isInfiniteMode, maxAltitude, batteryEnabled);
           setIsGenerating(false);
       }, 50);
   };
@@ -126,6 +141,9 @@ const App: React.FC = () => {
       interval = window.setInterval(() => {
         setTick((t) => {
           if (t >= maxTicks + 10) { 
+            // If infinite mode, we could auto-regenerate here, but for now we just stop or loop
+            // Logic for true "Infinite Streaming" would involve appending paths here.
+            // Given the current implementation uses "5 Loops", we just stop at the end of the 5th loop.
             setIsPlaying(false);
             return 0; 
           }
@@ -174,10 +192,16 @@ const App: React.FC = () => {
         currentAlgoDesc={engineRef.current.getAlgorithmDescription(selectedAlgorithm)}
         isRoundTrip={isRoundTrip}
         setIsRoundTrip={setIsRoundTrip}
+        isInfiniteMode={isInfiniteMode}
+        setIsInfiniteMode={setIsInfiniteMode}
         batteryCapacity={batteryCapacity}
         setBatteryCapacity={setBatteryCapacity}
+        batteryEnabled={batteryEnabled}
+        setBatteryEnabled={setBatteryEnabled}
         enableCharging={enableCharging}
         setEnableCharging={setEnableCharging}
+        maxAltitude={maxAltitude}
+        setMaxAltitude={setMaxAltitude}
       />
 
       <StatusPanel agents={agents} collisions={collisions} tick={tick} />

@@ -1,5 +1,5 @@
 import { Position3D } from '../types';
-import { WorldGenerator } from './WorldGenerator';
+import { WorldGenerator, ReservedZone } from './WorldGenerator';
 import { Warehouse } from './Warehouse';
 
 export class World {
@@ -38,7 +38,8 @@ export class World {
   public setupWarehouse(capacity: number) {
       this.warehouse = new Warehouse(capacity, { x: 0, y: 0, z: 0 });
       
-      // Automatically clear the zone required by the warehouse
+      // Automatically clear the zone required by the warehouse as a safety measure
+      // even if generation avoided it.
       const bounds = this.warehouse.getBounds();
       this.clearZone(bounds.minX, bounds.minY, bounds.minZ, bounds.maxX, bounds.maxY, bounds.maxZ);
   }
@@ -64,8 +65,8 @@ export class World {
       }
   }
 
-  public generate(theme: string) {
-      WorldGenerator.generate(this, theme);
+  public generate(theme: string, reservedZone?: ReservedZone) {
+      WorldGenerator.generate(this, theme, reservedZone);
   }
 
   public generateStations(count: number) {
@@ -85,6 +86,15 @@ export class World {
           }
 
           if (y < this.size && !this.isBlocked(x, y, z)) {
+              // Ensure we don't place it inside the warehouse zone if it exists
+              if (this.warehouse) {
+                  const b = this.warehouse.getBounds();
+                  if (x >= b.minX && x <= b.maxX && z >= b.minZ && z <= b.maxZ) {
+                      attempts++;
+                      continue;
+                  }
+              }
+
               const exists = this.chargeStations.some(s => s.x === x && s.y === y && s.z === z);
               if (!exists) {
                   this.addChargeStation(x, y, z);

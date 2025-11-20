@@ -14,7 +14,7 @@ export interface Agent {
   path: Position3D[];
   status: 'idle' | 'moving' | 'finished' | 'blocked' | 'destroyed' | 'out_of_battery';
   destructionTime?: number;
-  deliveryTime?: number;
+  deliveryTimes?: number[]; // Changed from deliveryTime to support multiple drops
   maxBattery: number;
 }
 
@@ -22,6 +22,7 @@ export interface CollisionEvent {
   position: Position3D;
   time: number;
   agentIds: string[];
+  agentNames: string[]; // Added for better logs
 }
 
 export enum GenerationTheme {

@@ -1,3 +1,4 @@
+
 import { Agent, Position3D, ENERGY_COSTS } from '../types';
 import { World } from './World';
 
@@ -9,7 +10,7 @@ export class Drone implements Agent {
   color: string;
   path: Position3D[];
   status: 'idle' | 'moving' | 'finished' | 'blocked' | 'destroyed' | 'out_of_battery';
-  deliveryTime?: number;
+  deliveryTimes?: number[];
   maxBattery: number;
   destructionTime?: number;
 
@@ -21,7 +22,7 @@ export class Drone implements Agent {
     this.goal = { x: 0, y: 0, z: 0 };
     this.path = [];
     this.status = 'idle';
-    this.deliveryTime = undefined;
+    this.deliveryTimes = [];
     this.maxBattery = maxBattery;
   }
 
@@ -31,7 +32,7 @@ export class Drone implements Agent {
     d.goal = { ...this.goal };
     d.path = this.path.map(p => ({ ...p }));
     d.status = this.status;
-    d.deliveryTime = this.deliveryTime;
+    d.deliveryTimes = this.deliveryTimes ? [...this.deliveryTimes] : [];
     d.destructionTime = this.destructionTime;
     return d;
   }
@@ -41,112 +42,144 @@ export class Drone implements Agent {
     this.goal = { ...goal };
     this.path = [];
     this.status = 'idle';
-    this.deliveryTime = undefined;
+    this.deliveryTimes = [];
     this.destructionTime = undefined;
   }
 
-  setPath(path: Position3D[], deliveryTick?: number) {
+  setPath(path: Position3D[], deliveryTimes?: number[]) {
     this.path = path;
+    this.deliveryTimes = deliveryTimes || [];
     if (path.length > 0) {
-        this.deliveryTime = deliveryTick !== undefined ? deliveryTick : path.length - 1;
         this.status = 'idle'; 
     } else {
-        this.deliveryTime = undefined;
         this.status = 'blocked';
     }
   }
 
   /**
    * Returns the drone's physical state at a given time tick.
-   * Handles battery logic, stopping, and destruction.
+   * Handles battery logic (including recharging at base), stopping, destruction, falling physics,
+   * and package visibility (pick up at base, drop at goal).
    */
-  getSnapshotAt(tick: number, chargeStations: Position3D[]) {
-    const stopTick = this.calculateStopTick(chargeStations);
-    
-    const isDestroyed = this.destructionTime !== undefined && tick >= this.destructionTime;
-    const isDeadBattery = stopTick !== undefined && stopTick < (this.path.length - 1) && tick >= stopTick;
-    
-    const effectiveTick = Math.min(tick, stopTick ?? (this.path.length - 1));
+  getSnapshotAt(tick: number, chargeStations: Position3D[], batteryEnabled: boolean = true) {
+    // 1. Check for Collision Destruction
+    if (this.destructionTime !== undefined && tick >= this.destructionTime) {
+         const crashPos = this.path[Math.min(tick, this.path.length-1)] || this.start;
+         return {
+             position: crashPos,
+             battery: 0,
+             isDestroyed: true,
+             isDeadBattery: false,
+             isRecharging: false,
+             hasPackage: false
+         };
+    }
+
+    // 2. Calculate State (Battery & Package) up to this tick
+    const { battery, hasPackage, isRecharging, deathTick } = this.calculateStateAt(tick, chargeStations, batteryEnabled);
+
+    // 3. Check for Battery Death (Falling)
+    if (batteryEnabled && deathTick !== undefined && tick >= deathTick) {
+        // Physics: FALLING LOGIC
+        const deathPos = this.path[Math.min(deathTick, this.path.length - 1)];
+        const timeSinceDeath = tick - deathTick;
+        
+        // Fall speed logic
+        const fallY = Math.max(0, deathPos.y - (timeSinceDeath * 0.8)); 
+        
+        const currentPos = {
+            x: deathPos.x,
+            y: fallY,
+            z: deathPos.z
+        };
+
+        return {
+            position: currentPos,
+            battery: 0,
+            isDestroyed: false,
+            isDeadBattery: true,
+            isRecharging: false,
+            hasPackage: hasPackage // Falls with the package
+        };
+    }
+
+    // 4. Normal Operation
+    const effectiveTick = Math.min(tick, this.path.length - 1);
     const position = (this.path.length > 0) ? this.path[effectiveTick] : this.start;
-    
-    const battery = this.calculateBatteryAt(effectiveTick, chargeStations);
-    const isRecharging = this.checkRecharging(effectiveTick, chargeStations);
 
     return {
         position,
         battery,
-        isDestroyed,
-        isDeadBattery,
+        isDestroyed: false,
+        isDeadBattery: false,
         isRecharging,
-        hasPackage: !isDestroyed && (this.deliveryTime === undefined || tick < this.deliveryTime)
+        hasPackage
     };
   }
 
-  private calculateStopTick(chargeStations: Position3D[]): number {
-      let stopTick = this.path.length - 1;
-      
-      if (this.destructionTime !== undefined) {
-          stopTick = Math.min(stopTick, this.destructionTime);
+  /**
+   * Iterates through the path to calculate battery drain, recharges, and package state.
+   */
+  private calculateStateAt(tick: number, chargeStations: Position3D[], batteryEnabled: boolean) {
+      if (!this.path || this.path.length === 0) {
+          return { battery: this.maxBattery, hasPackage: true, isRecharging: false, deathTick: undefined };
       }
-      
-      const batteryDeathTick = this.getBatteryDeathTick(chargeStations);
-      if (batteryDeathTick !== undefined) {
-          stopTick = Math.min(stopTick, batteryDeathTick);
-      }
-      
-      return Math.max(0, stopTick);
-  }
 
-  private getBatteryDeathTick(chargeStations: Position3D[]): number | undefined {
-      if (!this.path || this.path.length <= 1) return undefined;
-      
-      let consumed = 0;
-      const EPSILON = 0.0001;
+      let battery = this.maxBattery;
+      let hasPackage = true; // Starts with package
+      let deathTick: number | undefined = undefined;
+      let isRecharging = false;
 
-      for (let i = 1; i < this.path.length; i++) {
-          const prev = this.path[i-1];
-          const curr = this.path[i];
+      const maxPathIndex = this.path.length - 1;
+      const deliverySet = new Set(this.deliveryTimes || []);
+
+      for (let i = 0; i <= tick && i <= maxPathIndex; i++) {
+          // -- Package Logic --
           
-          if (this.isAtStation(curr, chargeStations) && this.isWaiting(prev, curr)) {
-              consumed = 0;
-          } else {
-              consumed += this.isWaiting(prev, curr) ? ENERGY_COSTS.WAIT : ENERGY_COSTS.MOVE;
+          // If this tick matches a delivery time, we drop the package
+          if (deliverySet.has(i)) {
+              hasPackage = false;
           }
-          
-          if (consumed > this.maxBattery + EPSILON) {
-              return i - 1;
+
+          // -- Movement & Battery Logic --
+          if (i > 0) {
+              const prev = this.path[i-1];
+              const curr = this.path[i];
+              const isWaiting = this.isWaiting(prev, curr);
+              
+              // Check for Base/Station Recharge
+              // We recharge if we are at a station OR at the starting base
+              const atBase = (curr.x === this.start.x && curr.y === this.start.y && curr.z === this.start.z);
+              const atStation = this.isAtStation(curr, chargeStations);
+
+              if ((atBase || atStation) && isWaiting) {
+                  // Recharging
+                  if (batteryEnabled) battery = this.maxBattery; 
+                  
+                  // If at base and waiting, and we don't have a package, we pick one up (Reloading)
+                  if (atBase && !hasPackage) {
+                      hasPackage = true; 
+                  }
+                  
+                  // Set flag for current tick only
+                  if (i === tick) isRecharging = true;
+              } else {
+                  // Consuming
+                  if (batteryEnabled) {
+                      const cost = isWaiting ? ENERGY_COSTS.WAIT : ENERGY_COSTS.MOVE;
+                      battery -= cost;
+                  }
+              }
+
+              // Death Check
+              if (batteryEnabled && battery <= 0 && deathTick === undefined) {
+                  deathTick = i;
+                  // We don't break here because we need to see if the requested tick is later
+              }
           }
       }
-      return undefined;
-  }
 
-  private calculateBatteryAt(tick: number, chargeStations: Position3D[]): number {
-      if (!this.path || this.path.length === 0) return this.maxBattery;
-      
-      let consumed = 0;
-      for (let i = 1; i <= tick && i < this.path.length; i++) {
-          const prev = this.path[i-1];
-          const curr = this.path[i];
-
-          if (this.isAtStation(curr, chargeStations) && this.isWaiting(prev, curr)) {
-              consumed = 0;
-          } else {
-              consumed += this.isWaiting(prev, curr) ? ENERGY_COSTS.WAIT : ENERGY_COSTS.MOVE;
-          }
-      }
-      return Math.max(0, this.maxBattery - consumed);
-  }
-
-  private checkRecharging(tick: number, chargeStations: Position3D[]): boolean {
-      if (!this.path || tick <= 0 || tick >= this.path.length - 1) return false;
-      const curr = this.path[tick];
-      
-      if (!this.isAtStation(curr, chargeStations)) return false;
-      
-      // Look at neighbors to confirm waiting
-      const prev = this.path[tick-1];
-      const next = this.path[tick+1];
-      return this.isWaiting(prev, curr) || this.isWaiting(curr, next);
+      return { battery: Math.max(0, battery), hasPackage, isRecharging, deathTick };
   }
 
   private isAtStation(pos: Position3D, stations: Position3D[]): boolean {
@@ -178,10 +211,13 @@ export class Swarm {
     this.drones.forEach(d => d.maxBattery = maxBattery);
   }
 
-  initializeScenario(world: World) {
+  initializeScenario(world: World, maxAltitude: number = 24) {
     const occupied = new Set<string>();
     const posKey = (p: Position3D) => `${p.x},${p.y},${p.z}`;
     const warehouse = world.warehouse;
+    
+    // Constraint: Goals cannot be higher than maxAltitude
+    const yLimit = Math.min(world.size - 1, maxAltitude);
 
     for (let i = 0; i < this.drones.length; i++) {
       const drone = this.drones[i];
@@ -190,15 +226,13 @@ export class Swarm {
       let attempts = 0;
 
       if (warehouse) {
-        // Deployment mode: Start from Warehouse
         start = warehouse.getSpawnLocation(i);
         occupied.add(posKey(start));
       } else {
-        // Random Deployment
         while (attempts < 1000) {
           start = {
             x: Math.floor(Math.random() * world.size),
-            y: Math.floor(Math.random() * world.size),
+            y: Math.floor(Math.random() * yLimit),
             z: Math.floor(Math.random() * world.size)
           };
           const key = posKey(start);
@@ -216,13 +250,12 @@ export class Swarm {
       while (attempts < 2000) {
         goal = {
           x: Math.floor(Math.random() * world.size),
-          y: Math.floor(Math.random() * world.size),
+          y: Math.floor(Math.random() * yLimit),
           z: Math.floor(Math.random() * world.size)
         };
         const key = posKey(goal);
         const dist = Math.abs(start!.x - goal.x) + Math.abs(start!.y - goal.y) + Math.abs(start!.z - goal.z);
 
-        // Avoid placing goals inside the warehouse or obstacles
         const inWarehouse = warehouse ? 
             (goal.x >= warehouse.position.x && goal.x < warehouse.position.x + warehouse.baseSize && 
              goal.z >= warehouse.position.z && goal.z < warehouse.position.z + warehouse.baseSize && 
