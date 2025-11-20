@@ -1,0 +1,5 @@
+{
+  "name": "VoxelSwarm AI",
+  "description": "A 3D Voxel-based Multi-Agent Path Planning visualizer for drone swarms. Features AI-generated environments and prioritized pathfinding.",
+  "requestFramePermissions": []
+}
