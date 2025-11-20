@@ -4,12 +4,11 @@ import { Swarm, Drone } from './Drone';
 
 /**
  * Abstract Base Strategy for Path Planning.
- * To add a new algorithm, extend this class and implement the `plan` method.
  */
 export abstract class PathFindingStrategy {
   abstract name: string;
   abstract description: string;
-  abstract isSafe: boolean; // If true, the app assumes paths are valid. If false, app runs physics/destruction logic.
+  abstract isSafe: boolean;
 
   protected maxTimeSteps: number;
 
@@ -21,19 +20,15 @@ export abstract class PathFindingStrategy {
     this.maxTimeSteps = steps;
   }
 
-  /**
-   * The core function that must be implemented by subclasses.
-   * It should modify the agents' paths in place.
-   */
-  abstract plan(swarm: Swarm, world: World): void;
-
-  // -- Shared Helper Methods for A* based algorithms --
+  abstract plan(swarm: Swarm, world: World, isRoundTrip?: boolean): void;
 
   protected heuristic(a: Position3D, b: Position3D): number {
     return Math.abs(a.x - b.x) + Math.abs(a.y - b.y) + Math.abs(a.z - b.z);
   }
 
   protected getNeighbors(node: PathNode, world: World): Position3D[] {
+    // Check bounds manually to avoid object creation if not needed? 
+    // Standard approach is fine, bottleneck is usually the closedSet lookup.
     const candidates = [
       { x: node.x + 1, y: node.y, z: node.z },
       { x: node.x - 1, y: node.y, z: node.z },
@@ -61,35 +56,43 @@ export abstract class PathFindingStrategy {
     return path;
   }
 
-  protected key(p: Position3D, t: number): string {
-    return `${p.x},${p.y},${p.z},${t}`;
+  /**
+   * Packs space-time coordinates into a single 32-bit integer.
+   * Max Grid Size: 64 (6 bits per dim)
+   * Max Time: ~4095 (12 bits)
+   * Format: [Time:12][Z:6][Y:6][X:6]
+   */
+  protected key(p: Position3D, t: number): number {
+    return (p.x) | (p.y << 6) | (p.z << 12) | (t << 18);
   }
 
-  /**
-   * Standard A* implementation that can be used by subclasses.
-   * @param reserved - A Set of "x,y,z,t" strings to avoid.
-   */
-  protected findPath(drone: Drone, world: World, reserved: Set<string>): Position3D[] | null {
+  protected findPath(
+    start: Position3D,
+    goal: Position3D,
+    startTime: number,
+    world: World,
+    reserved: Set<number>
+  ): Position3D[] | null {
     const startNode: PathNode = {
-      ...drone.start,
+      ...start,
       g: 0,
-      h: this.heuristic(drone.start, drone.goal),
+      h: this.heuristic(start, goal),
       f: 0,
       parent: null,
-      time: 0
+      time: startTime
     };
     startNode.f = startNode.g + startNode.h;
 
     const openList: PathNode[] = [startNode];
-    const closedSet = new Set<string>();
+    
+    // Use numeric set for performance (no string allocations)
+    const closedSet = new Set<number>();
 
     while (openList.length > 0) {
-      // Simple priority queue
       openList.sort((a, b) => a.f - b.f);
       const current = openList.shift()!;
 
-      // Goal Check
-      if (current.x === drone.goal.x && current.y === drone.goal.y && current.z === drone.goal.z) {
+      if (current.x === goal.x && current.y === goal.y && current.z === goal.z) {
         return this.reconstructPath(current);
       }
 
@@ -104,14 +107,13 @@ export abstract class PathFindingStrategy {
       for (const nextPos of neighbors) {
         const nextTime = current.time + 1;
 
-        // Collision Check: Static
         if (world.isPositionBlocked(nextPos)) continue;
 
-        // Collision Check: Dynamic (Provided by the Strategy via 'reserved' set)
+        // Dynamic obstacle check using integer Set
         if (reserved.size > 0 && reserved.has(this.key(nextPos, nextTime))) continue;
 
         const g = current.g + 1;
-        const h = this.heuristic(nextPos, drone.goal);
+        const h = this.heuristic(nextPos, goal);
         const f = g + h;
 
         const neighborNode: PathNode = {
@@ -121,7 +123,6 @@ export abstract class PathFindingStrategy {
           time: nextTime
         };
 
-        // Check open list
         const existingIdx = openList.findIndex(n =>
           n.x === neighborNode.x && n.y === neighborNode.y && n.z === neighborNode.z && n.time === neighborNode.time
         );
@@ -141,16 +142,15 @@ export abstract class PathFindingStrategy {
 
 /**
  * Strategy 1: Naive Planning
- * Each agent plans independently, ignoring others. Collisions are expected.
  */
 export class NaivePlanner extends PathFindingStrategy {
   name = "Naive (Unsafe)";
   description = "Agents plan selfishly. Collisions result in destruction.";
   isSafe = false;
 
-  plan(swarm: Swarm, world: World) {
+  plan(swarm: Swarm, world: World, isRoundTrip: boolean = false) {
     const drones = swarm.drones;
-    const emptySet = new Set<string>();
+    const emptySet = new Set<number>();
 
     for (const drone of drones) {
       if (world.isPositionBlocked(drone.start)) {
@@ -158,10 +158,21 @@ export class NaivePlanner extends PathFindingStrategy {
         continue;
       }
 
-      const path = this.findPath(drone, world, emptySet);
+      const path1 = this.findPath(drone.start, drone.goal, 0, world, emptySet);
 
-      if (path) {
-        drone.setPath(path);
+      if (path1) {
+        if (isRoundTrip) {
+            const leg1Time = path1.length - 1;
+            const path2 = this.findPath(drone.goal, drone.start, leg1Time, world, emptySet);
+            
+            if (path2) {
+                drone.setPath([...path1, ...path2.slice(1)]);
+            } else {
+                drone.setPath(path1);
+            }
+        } else {
+            drone.setPath(path1);
+        }
         drone.status = 'finished';
       } else {
         drone.setPath([drone.start]);
@@ -172,17 +183,17 @@ export class NaivePlanner extends PathFindingStrategy {
 }
 
 /**
- * Strategy 2: Cooperative A* (Prioritized Planning)
- * Agents plan sequentially, respecting paths of previous agents. Safe.
+ * Strategy 2: Cooperative A*
  */
 export class CooperativePlanner extends PathFindingStrategy {
   name = "Cooperative A*";
   description = "Prioritized planning. Agents avoid each other's future paths.";
   isSafe = true;
 
-  plan(swarm: Swarm, world: World) {
+  plan(swarm: Swarm, world: World, isRoundTrip: boolean = false) {
     const drones = swarm.drones;
-    const reservedSpaceTime = new Set<string>();
+    // Changed to Set<number> for performance
+    const reservedSpaceTime = new Set<number>();
 
     for (const drone of drones) {
       if (world.isPositionBlocked(drone.start)) {
@@ -190,42 +201,53 @@ export class CooperativePlanner extends PathFindingStrategy {
         continue;
       }
 
-      const path = this.findPath(drone, world, reservedSpaceTime);
+      const path1 = this.findPath(drone.start, drone.goal, 0, world, reservedSpaceTime);
 
-      if (path) {
-        drone.setPath(path);
-        drone.status = 'finished';
-
-        // Reserve path
-        path.forEach((pos, t) => {
-          reservedSpaceTime.add(this.key(pos, t));
-        });
-
-        // Reserve goal for a duration after arrival
-        const lastPos = path[path.length - 1];
-        const arrivalTime = path.length - 1;
-        for (let t = 1; t < 20; t++) {
-          reservedSpaceTime.add(this.key(lastPos, arrivalTime + t));
-        }
-
-      } else {
+      if (!path1) {
         drone.setPath([drone.start]);
         drone.status = 'blocked';
+        continue;
+      }
+
+      let fullPath = path1;
+
+      if (isRoundTrip) {
+          const leg1Time = path1.length - 1;
+          const path2 = this.findPath(drone.goal, drone.start, leg1Time, world, reservedSpaceTime);
+          
+          if (path2) {
+              fullPath = [...path1, ...path2.slice(1)];
+          }
+      }
+
+      drone.setPath(fullPath);
+      drone.status = 'finished';
+
+      // Reserve path
+      fullPath.forEach((pos, t) => {
+        reservedSpaceTime.add(this.key(pos, t));
+      });
+
+      // Reserve final position
+      const lastPos = fullPath[fullPath.length - 1];
+      const arrivalTime = fullPath.length - 1;
+      for (let t = 1; t < 20; t++) {
+        reservedSpaceTime.add(this.key(lastPos, arrivalTime + t));
       }
     }
   }
 }
 
 /**
- * Utility to detect collisions in ANY set of paths.
- * Used by the UI to visualize crashes or verify safety.
+ * Utility to detect collisions
  */
 export class CollisionAnalyzer {
   static detect(swarm: Swarm): CollisionEvent[] {
     const collisions: CollisionEvent[] = [];
-    const timeLocationMap = new Map<string, string[]>(); // key: "t,x,y,z" -> [agentId, agentId]
+    // Using Map<string> here is acceptable as this runs once post-calculation
+    // and string keys are easier to debug/parse for collision reporting
+    const timeLocationMap = new Map<string, string[]>(); 
 
-    // Map positions to time
     for (const drone of swarm.drones) {
       drone.path.forEach((pos, t) => {
         const key = `${t},${pos.x},${pos.y},${pos.z}`;
@@ -236,7 +258,6 @@ export class CollisionAnalyzer {
       });
     }
 
-    // Identify overlaps
     timeLocationMap.forEach((agentIds, key) => {
       if (agentIds.length > 1) {
         const [tStr, xStr, yStr, zStr] = key.split(',');

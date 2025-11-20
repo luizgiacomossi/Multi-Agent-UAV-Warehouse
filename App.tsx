@@ -25,6 +25,7 @@ const App: React.FC = () => {
   const [gridSizeVal, setGridSizeVal] = useState(24);
   const [gridSize, setGridSize] = useState<Position3D>({ x: 24, y: 24, z: 24 });
   const [deployFromBase, setDeployFromBase] = useState(false);
+  const [isRoundTrip, setIsRoundTrip] = useState(false);
   
   // Strategy Selection
   const [selectedAlgorithm, setSelectedAlgorithm] = useState<string>('Cooperative');
@@ -67,11 +68,12 @@ const App: React.FC = () => {
     });
 
     // 3. Set Configs
-    const maxTime = Math.max(200, world.size * world.size / 2);
-    strategy.setMaxTimeSteps(maxTime);
+    // If round trip, allow more time steps
+    const baseMaxTime = Math.max(200, world.size * world.size / 2);
+    strategy.setMaxTimeSteps(isRoundTrip ? baseMaxTime * 2 : baseMaxTime);
 
     // 4. Execute Plan
-    strategy.plan(swarm, world);
+    strategy.plan(swarm, world, isRoundTrip);
     
     // 5. Detect Collisions
     // We always run detection to verify the paths, even for "safe" algorithms
@@ -102,7 +104,7 @@ const App: React.FC = () => {
 
     const longestPath = Math.max(...swarm.drones.map(a => a.path.length), 0);
     setMaxTicks(longestPath);
-  }, []);
+  }, [isRoundTrip]);
 
   // Initial Load
   useEffect(() => {
@@ -116,7 +118,7 @@ const App: React.FC = () => {
           setIsPlaying(false);
           runPathfinding(selectedAlgorithm);
       }
-  }, [selectedAlgorithm, runPathfinding]); 
+  }, [selectedAlgorithm, isRoundTrip, runPathfinding]); 
 
   // Simulation Loop
   useEffect(() => {
@@ -234,6 +236,8 @@ const App: React.FC = () => {
         setSelectedAlgorithm={setSelectedAlgorithm}
         availableAlgorithms={Object.keys(ALGORITHMS)}
         currentAlgoDesc={currentAlgoDesc}
+        isRoundTrip={isRoundTrip}
+        setIsRoundTrip={setIsRoundTrip}
       />
 
       <StatusPanel 

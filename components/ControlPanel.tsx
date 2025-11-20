@@ -1,5 +1,5 @@
 import React from 'react';
-import { Play, Pause, RotateCcw, Box, Grid3X3, Settings, Building2, ShieldCheck, Skull, Shuffle, Cpu } from 'lucide-react';
+import { Play, Pause, RotateCcw, Box, Grid3X3, Settings, Building2, ShieldCheck, Skull, Shuffle, Cpu, Repeat } from 'lucide-react';
 import { GenerationTheme } from '../types';
 
 interface ControlPanelProps {
@@ -22,6 +22,9 @@ interface ControlPanelProps {
   setSelectedAlgorithm: (s: string) => void;
   availableAlgorithms: string[];
   currentAlgoDesc: string;
+
+  isRoundTrip: boolean;
+  setIsRoundTrip: (b: boolean) => void;
 }
 
 const ControlPanel: React.FC<ControlPanelProps> = ({
@@ -42,7 +45,9 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   selectedAlgorithm,
   setSelectedAlgorithm,
   availableAlgorithms,
-  currentAlgoDesc
+  currentAlgoDesc,
+  isRoundTrip,
+  setIsRoundTrip
 }) => {
   return (
     <div className="absolute top-4 left-4 w-80 bg-slate-800/90 backdrop-blur-md p-4 rounded-xl border border-slate-700 shadow-xl text-slate-100 flex flex-col gap-4 z-10 max-h-[90vh] overflow-y-auto">
@@ -129,15 +134,28 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
              />
         </div>
 
-        {/* Deploy from Base Toggle */}
-        <div className="flex items-center gap-2 cursor-pointer hover:bg-slate-700/50 p-1 rounded" onClick={() => setDeployFromBase(!deployFromBase)}>
-             <div className={`w-4 h-4 rounded border border-slate-500 flex items-center justify-center ${deployFromBase ? 'bg-cyan-500 border-cyan-500' : 'bg-slate-800'}`}>
-                {deployFromBase && <div className="w-2 h-2 bg-white rounded-[1px]" />}
-             </div>
-             <span className="text-xs text-slate-300 flex items-center gap-2">
-                <Building2 size={12} />
-                Deploy from Warehouse
-             </span>
+        <div className="flex gap-2">
+             {/* Deploy from Base Toggle */}
+            <div className="flex-1 flex items-center gap-2 cursor-pointer hover:bg-slate-700/50 p-1.5 rounded transition-colors border border-transparent hover:border-slate-700" onClick={() => setDeployFromBase(!deployFromBase)}>
+                <div className={`w-4 h-4 rounded border border-slate-500 flex items-center justify-center ${deployFromBase ? 'bg-cyan-500 border-cyan-500' : 'bg-slate-800'}`}>
+                    {deployFromBase && <div className="w-2 h-2 bg-white rounded-[1px]" />}
+                </div>
+                <span className="text-xs text-slate-300 flex items-center gap-1">
+                    <Building2 size={12} />
+                    Warehouse
+                </span>
+            </div>
+
+            {/* Round Trip Toggle */}
+            <div className="flex-1 flex items-center gap-2 cursor-pointer hover:bg-slate-700/50 p-1.5 rounded transition-colors border border-transparent hover:border-slate-700" onClick={() => setIsRoundTrip(!isRoundTrip)}>
+                <div className={`w-4 h-4 rounded border border-slate-500 flex items-center justify-center ${isRoundTrip ? 'bg-purple-500 border-purple-500' : 'bg-slate-800'}`}>
+                    {isRoundTrip && <div className="w-2 h-2 bg-white rounded-[1px]" />}
+                </div>
+                <span className="text-xs text-slate-300 flex items-center gap-1">
+                    <Repeat size={12} />
+                    Return
+                </span>
+            </div>
         </div>
 
         {/* Algorithm Selection */}
