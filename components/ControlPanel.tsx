@@ -1,5 +1,5 @@
 import React from 'react';
-import { Play, Pause, RotateCcw, Box, Grid3X3, Settings, Building2, ShieldCheck, Skull, Shuffle } from 'lucide-react';
+import { Play, Pause, RotateCcw, Box, Grid3X3, Settings, Building2, ShieldCheck, Skull, Shuffle, Cpu } from 'lucide-react';
 import { GenerationTheme } from '../types';
 
 interface ControlPanelProps {
@@ -17,8 +17,11 @@ interface ControlPanelProps {
   setGridSizeValue: (n: number) => void;
   deployFromBase: boolean;
   setDeployFromBase: (b: boolean) => void;
-  useNaiveMode: boolean;
-  setUseNaiveMode: (b: boolean) => void;
+  
+  selectedAlgorithm: string;
+  setSelectedAlgorithm: (s: string) => void;
+  availableAlgorithms: string[];
+  currentAlgoDesc: string;
 }
 
 const ControlPanel: React.FC<ControlPanelProps> = ({
@@ -36,8 +39,10 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   setGridSizeValue,
   deployFromBase,
   setDeployFromBase,
-  useNaiveMode,
-  setUseNaiveMode
+  selectedAlgorithm,
+  setSelectedAlgorithm,
+  availableAlgorithms,
+  currentAlgoDesc
 }) => {
   return (
     <div className="absolute top-4 left-4 w-80 bg-slate-800/90 backdrop-blur-md p-4 rounded-xl border border-slate-700 shadow-xl text-slate-100 flex flex-col gap-4 z-10 max-h-[90vh] overflow-y-auto">
@@ -135,20 +140,32 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
              </span>
         </div>
 
-        {/* Pathfinding Mode Toggle */}
-        <div className="flex items-center justify-between bg-slate-900 p-1 rounded-lg border border-slate-700">
-            <button 
-                onClick={() => setUseNaiveMode(false)}
-                className={`flex-1 flex items-center justify-center gap-1 py-1.5 text-[10px] rounded-md transition-all ${!useNaiveMode ? 'bg-emerald-900/50 text-emerald-400 shadow-sm' : 'text-slate-500 hover:text-slate-300'}`}
-            >
-                <ShieldCheck size={12} /> Safe (Co-op)
-            </button>
-            <button 
-                onClick={() => setUseNaiveMode(true)}
-                className={`flex-1 flex items-center justify-center gap-1 py-1.5 text-[10px] rounded-md transition-all ${useNaiveMode ? 'bg-red-900/50 text-red-400 shadow-sm' : 'text-slate-500 hover:text-slate-300'}`}
-            >
-                <Skull size={12} /> Naive (Crashes)
-            </button>
+        {/* Algorithm Selection */}
+        <div className="space-y-2">
+            <div className="flex items-center gap-1 text-xs text-slate-400">
+                <Cpu size={12} /> Strategy
+            </div>
+            <div className="flex items-center justify-between bg-slate-900 p-1 rounded-lg border border-slate-700 gap-1">
+                {availableAlgorithms.map(algo => {
+                    const isSelected = algo === selectedAlgorithm;
+                    return (
+                        <button 
+                            key={algo}
+                            onClick={() => setSelectedAlgorithm(algo)}
+                            className={`flex-1 py-1.5 text-[10px] rounded-md transition-all font-medium ${
+                                isSelected 
+                                ? 'bg-slate-700 text-white shadow-sm border border-slate-600' 
+                                : 'text-slate-500 hover:text-slate-300'
+                            }`}
+                        >
+                            {algo}
+                        </button>
+                    )
+                })}
+            </div>
+            <div className="text-[10px] text-slate-500 leading-tight px-1">
+                {currentAlgoDesc}
+            </div>
         </div>
         
         <hr className="border-slate-700 my-1" />
@@ -190,12 +207,6 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                 <Shuffle size={12} /> New Missions
             </button>
         </div>
-      </div>
-
-      <div className="text-[10px] text-slate-500 leading-tight mt-1">
-        {useNaiveMode 
-            ? "Agents plan selfishly. Collisions result in permanent destruction."
-            : "Using Cooperative A* (Prioritized Planning) for collision avoidance."}
       </div>
     </div>
   );

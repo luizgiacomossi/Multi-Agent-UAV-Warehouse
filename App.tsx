@@ -5,16 +5,31 @@ import StatusPanel from './components/StatusPanel';
 import { Agent, Position3D, GenerationTheme, CollisionEvent } from './types';
 import { World } from './classes/World';
 import { Swarm } from './classes/Drone';
-import { PathPlanner } from './classes/PathPlanner';
+import { 
+  PathFindingStrategy, 
+  NaivePlanner, 
+  CooperativePlanner, 
+  CollisionAnalyzer 
+} from './classes/PathPlanner';
+
+// -- ALGORITHM REGISTRY --
+// Add new algorithms here to make them available in the UI
+const ALGORITHMS: Record<string, PathFindingStrategy> = {
+  'Naive': new NaivePlanner(),
+  'Cooperative': new CooperativePlanner(),
+  // 'RRT': new RRTPlanner(), // Example of how to add more
+};
 
 const App: React.FC = () => {
   // UI State
-  const [gridSizeVal, setGridSizeVal] = useState(24); // Default larger for city
+  const [gridSizeVal, setGridSizeVal] = useState(24);
   const [gridSize, setGridSize] = useState<Position3D>({ x: 24, y: 24, z: 24 });
   const [deployFromBase, setDeployFromBase] = useState(false);
-  const [useNaiveMode, setUseNaiveMode] = useState(false);
   
-  // We keep serializable data in state for the React tree
+  // Strategy Selection
+  const [selectedAlgorithm, setSelectedAlgorithm] = useState<string>('Cooperative');
+  
+  // Serializable State
   const [obstacles, setObstacles] = useState<Position3D[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [collisions, setCollisions] = useState<CollisionEvent[]>([]);
@@ -25,46 +40,51 @@ const App: React.FC = () => {
   const [agentCount, setAgentCount] = useState(8);
   const [maxTicks, setMaxTicks] = useState(0);
 
-  // Simulation Objects (Refs to persist across renders without triggering re-renders themselves until ready)
+  // Simulation Objects
   const worldRef = useRef(new World(24));
   const swarmRef = useRef(new Swarm(8));
-  const plannerRef = useRef(new PathPlanner(300));
 
   /**
    * Core Pathfinding Logic
-   * Re-runs the planner on the existing world and swarm state.
+   * Dynamically uses the selected strategy from the registry.
    */
-  const runPathfinding = useCallback((isNaive: boolean) => {
+  const runPathfinding = useCallback((algorithmName: string) => {
     const world = worldRef.current;
     const swarm = swarmRef.current;
-    const planner = plannerRef.current;
+    
+    // 1. Get Strategy
+    const strategy = ALGORITHMS[algorithmName];
+    if (!strategy) {
+      console.error(`Algorithm ${algorithmName} not found`);
+      return;
+    }
 
-    // Reset agents status for replanning (keep start/goal)
+    // 2. Reset Agent Status
     swarm.drones.forEach(d => {
         d.destructionTime = undefined;
         d.status = 'idle';
         d.path = [];
     });
 
-    let calculatedCollisions: CollisionEvent[] = [];
+    // 3. Set Configs
+    const maxTime = Math.max(200, world.size * world.size / 2);
+    strategy.setMaxTimeSteps(maxTime);
 
-    if (isNaive) {
-        // 4a. Plan Naively (Ignore each other)
-        planner.planNaive(swarm, world);
-        
-        // 5a. Detect collisions in these unsafe paths
-        calculatedCollisions = planner.detectProjectedCollisions(swarm, world);
-        
-        // 6a. Apply Destruction Logic
-        // Sort collisions by time to handle early crashes first
+    // 4. Execute Plan
+    strategy.plan(swarm, world);
+    
+    // 5. Detect Collisions
+    // We always run detection to verify the paths, even for "safe" algorithms
+    let calculatedCollisions = CollisionAnalyzer.detect(swarm);
+
+    // 6. Handle Destruction Logic (Only for unsafe algorithms)
+    if (!strategy.isSafe) {
         calculatedCollisions.sort((a, b) => a.time - b.time);
-        
         const destroyedIds = new Set<string>();
         
-        // Map collisions to agents
         calculatedCollisions.forEach(col => {
            col.agentIds.forEach(id => {
-               if(destroyedIds.has(id)) return; // Already destroyed earlier
+               if(destroyedIds.has(id)) return;
                
                const drone = swarm.drones.find(d => d.id === id);
                if (drone) {
@@ -74,13 +94,6 @@ const App: React.FC = () => {
                }
            });
         });
-
-    } else {
-        // 4b. Plan Cooperatively (Safe)
-        planner.plan(swarm, world);
-        
-        // 5b. Calculate collisions (should be 0 for coop)
-        calculatedCollisions = planner.detectProjectedCollisions(swarm, world);
     }
 
     // 7. Sync to UI
@@ -99,14 +112,11 @@ const App: React.FC = () => {
 
   // Real-time Strategy Update
   useEffect(() => {
-      // If we aren't currently generating a new world, and we have agents, re-plan immediately
-      // NOTE: We do NOT reset tick to 0 here, per user request. 
-      // We allow the user to see the difference at the current timestamp.
       if (!isGenerating && agents.length > 0) {
           setIsPlaying(false);
-          runPathfinding(useNaiveMode);
+          runPathfinding(selectedAlgorithm);
       }
-  }, [useNaiveMode, runPathfinding]); // agents.length check prevents running on initial empty mount
+  }, [selectedAlgorithm, runPathfinding]); 
 
   // Simulation Loop
   useEffect(() => {
@@ -129,37 +139,28 @@ const App: React.FC = () => {
     setIsPlaying(false);
     setIsGenerating(true);
     setTick(0);
-    setCollisions([]); // Clear previous collisions
+    setCollisions([]); 
     
     setGridSize({ x: gridSizeVal, y: gridSizeVal, z: gridSizeVal });
 
-    // Allow UI update
     setTimeout(() => {
         try {
             const world = worldRef.current;
             const swarm = swarmRef.current;
-            const planner = plannerRef.current;
 
-            // 1. Configure World
             world.setSize(gridSizeVal);
             world.generate(theme);
 
-            // 2. Clear Base Area if needed
             if (deployFromBase) {
               const baseSize = Math.ceil(Math.sqrt(agentCount));
               world.clearZone(0, 0, 0, baseSize + 1, 3, baseSize + 1);
             }
 
-            // 3. Configure Swarm
             swarm.resize(agentCount);
             swarm.initializeScenario(world, deployFromBase);
             
-            planner.setMaxTimeSteps(Math.max(200, gridSizeVal * gridSizeVal / 2));
+            runPathfinding(selectedAlgorithm);
 
-            // 4-7. Execute Pathfinding
-            runPathfinding(useNaiveMode);
-
-            // Sync Obstacles (runPathfinding syncs agents)
             setObstacles([...world.obstacleList]); 
 
         } catch (error) {
@@ -172,18 +173,17 @@ const App: React.FC = () => {
 
   const handleNewMissions = () => {
       setIsPlaying(false);
-      setTick(0); // New mission implies new timeline
+      setTick(0); 
       setIsGenerating(true);
 
       setTimeout(() => {
           const world = worldRef.current;
           const swarm = swarmRef.current;
           
-          // Re-roll positions/goals on the existing world
           swarm.resize(agentCount);
           swarm.initializeScenario(world, deployFromBase);
           
-          runPathfinding(useNaiveMode);
+          runPathfinding(selectedAlgorithm);
           setIsGenerating(false);
       }, 50);
   };
@@ -199,6 +199,9 @@ const App: React.FC = () => {
     setIsPlaying(false);
     setTick(0);
   };
+
+  // Helper to get current algorithm description for UI
+  const currentAlgoDesc = ALGORITHMS[selectedAlgorithm]?.description || "";
 
   return (
     <div className="w-full h-full overflow-hidden relative bg-slate-950">
@@ -227,8 +230,10 @@ const App: React.FC = () => {
         setGridSizeValue={setGridSizeVal}
         deployFromBase={deployFromBase}
         setDeployFromBase={setDeployFromBase}
-        useNaiveMode={useNaiveMode}
-        setUseNaiveMode={setUseNaiveMode}
+        selectedAlgorithm={selectedAlgorithm}
+        setSelectedAlgorithm={setSelectedAlgorithm}
+        availableAlgorithms={Object.keys(ALGORITHMS)}
+        currentAlgoDesc={currentAlgoDesc}
       />
 
       <StatusPanel 
