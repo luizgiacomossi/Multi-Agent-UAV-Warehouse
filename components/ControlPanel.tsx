@@ -1,5 +1,5 @@
 import React from 'react';
-import { Play, Pause, RotateCcw, Box, Grid3X3, Settings, Building2 } from 'lucide-react';
+import { Play, Pause, RotateCcw, Box, Grid3X3, Settings, Building2, ShieldCheck, Skull } from 'lucide-react';
 import { GenerationTheme } from '../types';
 
 interface ControlPanelProps {
@@ -16,6 +16,8 @@ interface ControlPanelProps {
   setGridSizeValue: (n: number) => void;
   deployFromBase: boolean;
   setDeployFromBase: (b: boolean) => void;
+  useNaiveMode: boolean;
+  setUseNaiveMode: (b: boolean) => void;
 }
 
 const ControlPanel: React.FC<ControlPanelProps> = ({
@@ -31,7 +33,9 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   gridSizeValue,
   setGridSizeValue,
   deployFromBase,
-  setDeployFromBase
+  setDeployFromBase,
+  useNaiveMode,
+  setUseNaiveMode
 }) => {
   return (
     <div className="absolute top-4 left-4 w-80 bg-slate-800/90 backdrop-blur-md p-4 rounded-xl border border-slate-700 shadow-xl text-slate-100 flex flex-col gap-4 z-10 max-h-[90vh] overflow-y-auto">
@@ -119,14 +123,30 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
         </div>
 
         {/* Deploy from Base Toggle */}
-        <div className="flex items-center gap-2 cursor-pointer" onClick={() => setDeployFromBase(!deployFromBase)}>
+        <div className="flex items-center gap-2 cursor-pointer hover:bg-slate-700/50 p-1 rounded" onClick={() => setDeployFromBase(!deployFromBase)}>
              <div className={`w-4 h-4 rounded border border-slate-500 flex items-center justify-center ${deployFromBase ? 'bg-cyan-500 border-cyan-500' : 'bg-slate-800'}`}>
                 {deployFromBase && <div className="w-2 h-2 bg-white rounded-[1px]" />}
              </div>
              <span className="text-xs text-slate-300 flex items-center gap-2">
                 <Building2 size={12} />
-                Deploy from Base (Warehouse)
+                Deploy from Warehouse
              </span>
+        </div>
+
+        {/* Pathfinding Mode Toggle */}
+        <div className="flex items-center justify-between bg-slate-900 p-1 rounded-lg border border-slate-700">
+            <button 
+                onClick={() => setUseNaiveMode(false)}
+                className={`flex-1 flex items-center justify-center gap-1 py-1.5 text-[10px] rounded-md transition-all ${!useNaiveMode ? 'bg-emerald-900/50 text-emerald-400 shadow-sm' : 'text-slate-500 hover:text-slate-300'}`}
+            >
+                <ShieldCheck size={12} /> Safe (Co-op)
+            </button>
+            <button 
+                onClick={() => setUseNaiveMode(true)}
+                className={`flex-1 flex items-center justify-center gap-1 py-1.5 text-[10px] rounded-md transition-all ${useNaiveMode ? 'bg-red-900/50 text-red-400 shadow-sm' : 'text-slate-500 hover:text-slate-300'}`}
+            >
+                <Skull size={12} /> Naive (Crashes)
+            </button>
         </div>
         
         <hr className="border-slate-700 my-1" />
@@ -161,7 +181,9 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
       </div>
 
       <div className="text-[10px] text-slate-500 leading-tight mt-1">
-        Using Cooperative A* (Prioritized Planning) for collision avoidance.
+        {useNaiveMode 
+            ? "Agents plan selfishly. Collisions result in permanent destruction."
+            : "Using Cooperative A* (Prioritized Planning) for collision avoidance."}
       </div>
     </div>
   );

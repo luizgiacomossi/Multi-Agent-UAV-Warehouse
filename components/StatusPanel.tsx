@@ -1,5 +1,5 @@
 import React from 'react';
-import { CheckCircle2, AlertTriangle, Activity, Clock, ShieldAlert } from 'lucide-react';
+import { CheckCircle2, AlertTriangle, Activity, Clock, ShieldAlert, Skull } from 'lucide-react';
 import { Agent, CollisionEvent } from '../types';
 
 interface StatusPanelProps {
@@ -74,9 +74,11 @@ const StatusPanel: React.FC<StatusPanelProps> = ({ agents, collisions, tick }) =
         
         {agents.map((agent) => {
           const arrivalTime = agent.path.length > 0 ? agent.path.length - 1 : 0;
-          const hasArrived = agent.path.length > 0 && tick >= arrivalTime;
-          const isBlocked = agent.path.length === 0 || agent.status === 'blocked';
-          const isMoving = !hasArrived && !isBlocked;
+          const hasArrived = agent.path.length > 0 && tick >= arrivalTime && agent.status !== 'destroyed';
+          const isBlocked = (agent.path.length === 0 || agent.status === 'blocked') && agent.status !== 'destroyed';
+          const isDestroyed = agent.status === 'destroyed' && (agent.destructionTime !== undefined && tick >= agent.destructionTime);
+          // If destroyed status is set but tick hasn't reached destruction time, it's technically moving towards doom
+          const isMoving = !hasArrived && !isBlocked && !isDestroyed;
 
           return (
             <div 
@@ -87,8 +89,8 @@ const StatusPanel: React.FC<StatusPanelProps> = ({ agents, collisions, tick }) =
                 <div 
                   className="w-2 h-2 rounded-full shadow-[0_0_8px]" 
                   style={{ 
-                    backgroundColor: agent.color,
-                    boxShadow: `0 0 8px ${agent.color}`
+                    backgroundColor: isDestroyed ? '#ef4444' : agent.color,
+                    boxShadow: `0 0 8px ${isDestroyed ? '#ef4444' : agent.color}`
                   }} 
                 />
                 <div className="flex flex-col">
@@ -100,8 +102,19 @@ const StatusPanel: React.FC<StatusPanelProps> = ({ agents, collisions, tick }) =
               </div>
 
               <div className="text-right">
+                {isDestroyed && (
+                   <div className="flex flex-col items-end">
+                        <span className="flex items-center gap-1 text-[10px] text-red-500 font-bold bg-red-950/50 px-1.5 py-0.5 rounded border border-red-900">
+                            <Skull size={10} /> DESTROYED
+                        </span>
+                        <span className="text-[9px] text-red-700 font-mono mt-0.5">
+                            T+{agent.destructionTime}
+                        </span>
+                   </div>
+                )}
+
                 {isBlocked && (
-                  <span className="flex items-center gap-1 text-[10px] text-red-400 font-bold bg-red-900/20 px-1.5 py-0.5 rounded border border-red-900/50">
+                  <span className="flex items-center gap-1 text-[10px] text-amber-400 font-bold bg-amber-900/20 px-1.5 py-0.5 rounded border border-amber-900/50">
                     <AlertTriangle size={10} /> BLOCKED
                   </span>
                 )}

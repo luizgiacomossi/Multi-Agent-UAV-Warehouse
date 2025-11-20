@@ -11,7 +11,8 @@ export interface Agent {
   goal: Position3D;
   color: string;
   path: Position3D[];
-  status: 'idle' | 'moving' | 'finished' | 'blocked';
+  status: 'idle' | 'moving' | 'finished' | 'blocked' | 'destroyed';
+  destructionTime?: number;
 }
 
 export interface CollisionEvent {

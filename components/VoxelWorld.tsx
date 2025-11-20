@@ -1,12 +1,12 @@
 import React, { useMemo, useRef, useLayoutEffect } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
-import { OrbitControls, Text, Environment, ContactShadows, Stars } from '@react-three/drei';
+import { OrbitControls, Text, Environment, ContactShadows, Stars, Float } from '@react-three/drei';
 import * as THREE from 'three';
 import { Agent, Position3D, CollisionEvent } from '../types';
 
 // -- Subcomponents --
 
-// Optimized Obstacle Field using InstancedMesh for performance
+// Optimized ObstacleField using InstancedMesh for performance
 interface ObstacleFieldProps {
   obstacles: Position3D[];
 }
@@ -43,10 +43,47 @@ interface AgentDroneProps {
 }
 
 const AgentDrone: React.FC<AgentDroneProps> = ({ agent, tick }) => {
+  // Calculate destruction state
+  const isDestroyed = agent.destructionTime !== undefined && tick >= agent.destructionTime;
+  const stopTime = agent.destructionTime !== undefined ? agent.destructionTime : agent.path.length - 1;
+  
   const currentPos = useMemo(() => {
     if (!agent.path || agent.path.length === 0) return agent.start;
-    return agent.path[Math.min(tick, agent.path.length - 1)];
-  }, [agent, tick]);
+    // Stop moving if destroyed
+    const t = isDestroyed ? stopTime : tick;
+    return agent.path[Math.min(t, agent.path.length - 1)];
+  }, [agent, tick, isDestroyed, stopTime]);
+
+  if (isDestroyed) {
+      return (
+        <group position={[currentPos.x, currentPos.y, currentPos.z]}>
+            <Float speed={2} rotationIntensity={2} floatIntensity={0.5}>
+                <mesh>
+                    <dodecahedronGeometry args={[0.4]} />
+                    <meshStandardMaterial color="#333" roughness={0.8} />
+                </mesh>
+                <mesh scale={1.2}>
+                    <dodecahedronGeometry args={[0.35]} />
+                    <meshBasicMaterial color="#ef4444" wireframe />
+                </mesh>
+            </Float>
+            {/* Smoke particle effect simulation (simple static) */}
+            <mesh position={[0, 0.5, 0]} scale={0.5}>
+                <dodecahedronGeometry args={[0.2]} />
+                <meshStandardMaterial color="#555" transparent opacity={0.5} />
+            </mesh>
+             <Text
+                position={[0, 1, 0]}
+                fontSize={0.3}
+                color="#ef4444"
+                anchorX="center"
+                anchorY="middle"
+            >
+                DESTROYED
+            </Text>
+        </group>
+      );
+  }
 
   return (
     <group position={[currentPos.x, currentPos.y, currentPos.z]}>
@@ -93,13 +130,24 @@ const AgentDrone: React.FC<AgentDroneProps> = ({ agent, tick }) => {
 interface PathLineProps {
   path: Position3D[];
   color: string;
+  destructionTime?: number;
 }
 
-const PathLine: React.FC<PathLineProps> = ({ path, color }) => {
+const PathLine: React.FC<PathLineProps> = ({ path, color, destructionTime }) => {
   if (path.length < 2) return null;
   
-  const points = useMemo(() => path.map(p => new THREE.Vector3(p.x, p.y, p.z)), [path]);
+  // If destroyed, only show path up to destruction
+  const visiblePath = useMemo(() => {
+     if (destructionTime !== undefined) {
+         return path.slice(0, destructionTime + 1);
+     }
+     return path;
+  }, [path, destructionTime]);
+
+  const points = useMemo(() => visiblePath.map(p => new THREE.Vector3(p.x, p.y, p.z)), [visiblePath]);
   
+  if (points.length < 2) return null;
+
   return (
     <line>
       <bufferGeometry>
@@ -161,7 +209,7 @@ const CollisionMarker: React.FC<CollisionMarkerProps> = ({ position }) => {
                 anchorX="center"
                 anchorY="middle"
             >
-                COLLISION AVOIDED
+                COLLISION
             </Text>
         </group>
     );
@@ -275,7 +323,7 @@ const VoxelWorld: React.FC<VoxelWorldProps> = ({
             {agents.map((agent) => (
                 <React.Fragment key={agent.id}>
                     <AgentDrone agent={agent} tick={tick} />
-                    <PathLine path={agent.path} color={agent.color} />
+                    <PathLine path={agent.path} color={agent.color} destructionTime={agent.destructionTime} />
                     <GoalMarker position={agent.goal} color={agent.color} />
                     
                     {/* Start Marker (ghost) - only show if not base mode to avoid clutter on the base */}

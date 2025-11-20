@@ -52,6 +52,33 @@ export class PathPlanner {
   }
 
   /**
+   * Plans paths for all agents ignoring each other (Naive).
+   * This WILL result in collisions.
+   */
+  public planNaive(swarm: Swarm, world: World) {
+    const drones = swarm.drones;
+    const emptySet = new Set<string>();
+
+    for (const drone of drones) {
+        if (world.isPositionBlocked(drone.start)) {
+            drone.setPath([drone.start]);
+            continue;
+        }
+        
+        // Pass empty set so they don't avoid each other
+        const path = this.findPath(drone, world, emptySet);
+        
+        if (path) {
+            drone.setPath(path);
+            drone.status = 'finished';
+        } else {
+            drone.setPath([drone.start]);
+            drone.status = 'blocked';
+        }
+    }
+  }
+
+  /**
    * Runs a simulation of "Naive" pathfinding (ignoring other agents) 
    * to find where collisions WOULD have occurred.
    */
@@ -59,25 +86,19 @@ export class PathPlanner {
       const collisions: CollisionEvent[] = [];
       const timeLocationMap = new Map<string, string[]>(); // key: "t,x,y,z" -> [agentId, agentId]
 
-      // 1. Calculate Naive Paths for all drones
-      const naivePaths: { id: string, path: Position3D[] }[] = [];
+      // 1. Calculate Naive Paths for all drones (if not already set, but we re-calc here to be safe/pure)
+      // Note: To avoid modifying the actual swarm state during 'detect', we clone or just re-run logic.
+      // For performance in this app, we assume the swarm might already have paths, 
+      // but to detect collisions reliably we need to ensure we check the paths.
       
+      // 2. Map positions to time based on current paths
       for (const drone of swarm.drones) {
-          // For naive path, we pass an empty reserved set
-          const path = this.findPath(drone, world, new Set<string>());
-          if (path) {
-              naivePaths.push({ id: drone.id, path });
-          }
-      }
-
-      // 2. Map positions to time
-      for (const { id, path } of naivePaths) {
-          path.forEach((pos, t) => {
+          drone.path.forEach((pos, t) => {
               const key = `${t},${pos.x},${pos.y},${pos.z}`;
               if (!timeLocationMap.has(key)) {
                   timeLocationMap.set(key, []);
               }
-              timeLocationMap.get(key)!.push(id);
+              timeLocationMap.get(key)!.push(drone.id);
           });
       }
 
