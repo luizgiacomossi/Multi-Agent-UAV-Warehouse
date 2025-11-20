@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import VoxelWorld from './components/VoxelWorld';
 import ControlPanel from './components/ControlPanel';
+import StatusPanel from './components/StatusPanel';
 import { Agent, Position3D, GenerationTheme, CollisionEvent } from './types';
 import { World } from './classes/World';
 import { Swarm } from './classes/Drone';
@@ -143,6 +144,12 @@ const App: React.FC = () => {
         setGridSizeValue={setGridSizeVal}
         deployFromBase={deployFromBase}
         setDeployFromBase={setDeployFromBase}
+      />
+
+      <StatusPanel 
+        agents={agents}
+        collisions={collisions}
+        tick={tick}
       />
     </div>
   );
