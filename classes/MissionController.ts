@@ -1,11 +1,19 @@
 
 import { Position3D, MissionState } from '../types';
+import { TaskCluster } from './TaskCluster';
 
 export class MissionController {
     public state: MissionState = 'IDLE';
     public warehouseLocation: Position3D;
     public currentGoal: Position3D | null = null;
-    public isInfiniteMode: boolean = false;
+    public currentPalletId: string | null = null;   // Pallet being scanned
+    public currentScanType: string | null = null;   // 'camera' | 'rfid'
+
+    // mTSP Clustering additions
+    public currentCluster: TaskCluster | null = null;
+    public clusterTaskIndex: number = 0;
+
+    public maxMissions: number = 1;
     public mustReturnToBase: boolean = false;
     public missionsCompleted: number = 0;
 
@@ -13,14 +21,35 @@ export class MissionController {
         this.warehouseLocation = warehouseLocation;
     }
 
-    public configure(isInfinite: boolean, mustReturn: boolean) {
-        this.isInfiniteMode = isInfinite;
+    public configure(maxMissions: number, mustReturn: boolean) {
+        this.maxMissions = maxMissions;
         this.mustReturnToBase = mustReturn;
     }
 
-    public assignNewMission(goal: Position3D) {
+    /**
+     * Assign an inventory inspection mission to a specific pallet.
+     */
+    public assignNewMission(goal: Position3D, palletId?: string, scanType?: string) {
+        this.currentCluster = null;
+        this.clusterTaskIndex = 0;
         this.currentGoal = goal;
-        this.state = 'OUTBOUND';
+        this.currentPalletId = palletId || null;
+        this.currentScanType = scanType || null;
+        this.state = 'OUTBOUND'; // outbound: drone is flying to the pallet
+    }
+
+    /**
+     * Assign a clustered mTSP sequence inspection mission.
+     */
+    public assignClusterMission(cluster: TaskCluster) {
+        this.currentCluster = cluster;
+        this.clusterTaskIndex = 0;
+
+        const firstTask = cluster.tourSequence[0]; // first task in the sequence array
+        this.currentGoal = firstTask.target;
+        this.currentPalletId = firstTask.palletId || null;
+        this.currentScanType = firstTask.req_payload;
+        this.state = 'OUTBOUND'; // outbound: drone is flying to the pallet
     }
 
     /**
@@ -31,7 +60,15 @@ export class MissionController {
         if (this.state === 'OUTBOUND') {
             return this.currentGoal;
         }
-        
+
+        if (this.state === 'EXECUTING_TOUR' && this.currentCluster) {
+            // Next target is the NEXT task in the clustered sequence array
+            const nextTask = this.currentCluster.tourSequence[this.clusterTaskIndex + 1];
+            this.currentPalletId = nextTask.palletId || null;
+            this.currentScanType = nextTask.req_payload;
+            return nextTask.target;
+        }
+
         if (this.state === 'RETURNING') {
             return this.warehouseLocation;
         }
@@ -41,32 +78,65 @@ export class MissionController {
 
     /**
      * Called when a leg of the journey is finished.
-     * Updates the state machine.
-     * Returns true if the drone is ready for a new random mission assignment.
+     * a leg is defined as a single task completion  
+     * a cluster is defined as a single mission dispatch 
+     * relation of leg and cluster: a cluster is composed of multiple legs
      */
     public completeLeg(): boolean {
+
         if (this.state === 'OUTBOUND') {
-            // Finished delivering
-            this.missionsCompleted++;
-            
-            if (this.mustReturnToBase) {
-                this.state = 'RETURNING';
-                return false; // Not ready for new mission yet, must return first
+            if (this.currentCluster && this.currentCluster.tourSequence.length > 1) {
+                // Multi-task cluster execution logic
+                this.state = 'EXECUTING_TOUR';
+                return false;
             } else {
-                // Milk Run logic: If infinite, immediately ready for new mission from current spot
-                if (this.isInfiniteMode) {
-                    this.state = 'IDLE'; 
-                    return true; // Ready for new mission
-                } else {
-                    this.state = 'COMPLETED';
+                this.currentCluster = null;
+                this.clusterTaskIndex = 0;
+                // Baseline 1-to-1 logic (1 leg = 1 mission)
+                this.missionsCompleted++;
+
+                if (this.mustReturnToBase) {
+                    this.state = 'RETURNING';
                     return false;
+                } else {
+                    if (this.missionsCompleted < this.maxMissions) {
+                        this.state = 'IDLE';
+                        return true;
+                    } else {
+                        this.state = 'COMPLETED';
+                        return false;
+                    }
                 }
+            }
+        } else if (this.state === 'EXECUTING_TOUR') {
+            // Multi-task cluster execution logic
+            this.clusterTaskIndex++;
+
+            // Check if we reached the final item in the sequence array
+            if (this.clusterTaskIndex >= this.currentCluster!.tourSequence.length - 1) {
+                this.currentCluster = null;
+                this.clusterTaskIndex = 0;
+                this.missionsCompleted++; // The entire cluster counts as 1 "mission leg" completed, or we can count each one. We count the cluster as 1 mission dispatch.
+                if (this.mustReturnToBase) {
+                    this.state = 'RETURNING';
+                    return false;
+                } else {
+                    if (this.missionsCompleted < this.maxMissions) {
+                        this.state = 'IDLE';
+                        return true;
+                    } else {
+                        this.state = 'COMPLETED';
+                        return false;
+                    }
+                }
+            } else {
+                return false; // Still executing intra-cluster tour
             }
         } else if (this.state === 'RETURNING') {
             // Returned to base
-            if (this.isInfiniteMode) {
+            if (this.missionsCompleted < this.maxMissions) {
                 this.state = 'IDLE';
-                return true; // Ready for new mission starting from base
+                return true;
             } else {
                 this.state = 'COMPLETED';
                 return false;
@@ -79,6 +149,8 @@ export class MissionController {
     public reset() {
         this.state = 'IDLE';
         this.currentGoal = null;
+        this.currentCluster = null;
+        this.clusterTaskIndex = 0;
         this.missionsCompleted = 0;
     }
 }

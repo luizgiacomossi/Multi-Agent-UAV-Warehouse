@@ -3,7 +3,7 @@ import React, { useMemo, useRef, useLayoutEffect } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { OrbitControls, Text, Environment, ContactShadows, Stars, Float, Line, Billboard } from '@react-three/drei';
 import * as THREE from 'three';
-import { Agent, Position3D, SimulationIncident } from '../types';
+import { Agent, Position3D, SimulationIncident, Forklift, ClusterVisualization } from '../types';
 import { Drone } from '../classes/Drone';
 import { Warehouse } from '../classes/Warehouse';
 
@@ -165,16 +165,114 @@ const AgentDrone: React.FC<AgentDroneProps> = ({ agent, tick, chargeStations = [
   );
 };
 
-const PathLine: React.FC<{ path: Position3D[]; color: string; destructionTime?: number }> = ({ path, color, destructionTime }) => {
+interface ForkliftMeshProps {
+    forklift: Forklift;
+    tick: number;
+}
+
+const ForkliftMesh: React.FC<ForkliftMeshProps> = ({ forklift, tick }) => {
+    // Determine current position based on tick, looping if necessary
+    const pathIndex = tick % Math.max(1, forklift.path.length);
+    const position = forklift.path[pathIndex] || { x: 0, y: 0, z: 0 };
+    
+    // Determine heading for rotation
+    const nextIndex = (tick + 1) % Math.max(1, forklift.path.length);
+    const nextPosition = forklift.path[nextIndex] || position;
+    
+    // Calculate rotation angle in radians based on direction
+    let angle = 0;
+    if (nextPosition.x > position.x) angle = -Math.PI / 2;
+    else if (nextPosition.x < position.x) angle = Math.PI / 2;
+    else if (nextPosition.z > position.z) angle = 0;
+    else if (nextPosition.z < position.z) angle = Math.PI;
+
+    return (
+        <group position={[position.x, position.y + 0.5, position.z]} rotation={[0, angle, 0]}>
+            {/* Main Body */}
+            <mesh position={[0, -0.2, 0]}>
+                <boxGeometry args={[0.7, 0.6, 0.9]} />
+                <meshStandardMaterial color={forklift.color} roughness={0.4} metalness={0.2} />
+            </mesh>
+            
+            {/* Safety Cage (Roof) */}
+            <mesh position={[0, 0.3, 0]}>
+                <boxGeometry args={[0.6, 0.1, 0.6]} />
+                <meshStandardMaterial color="#333" />
+            </mesh>
+            {[
+                [-0.25, -0.25], [0.25, -0.25], [-0.25, 0.25], [0.25, 0.25]
+            ].map(([x, z], i) => (
+                <mesh key={i} position={[x, 0.1, z]}>
+                    <cylinderGeometry args={[0.02, 0.02, 0.4]} />
+                    <meshStandardMaterial color="#333" />
+                </mesh>
+            ))}
+
+            {/* Forks */}
+            <mesh position={[0, -0.4, 0.6]}>
+                <boxGeometry args={[0.5, 0.05, 0.4]} />
+                <meshStandardMaterial color="#silver" metalness={0.8} roughness={0.2} />
+            </mesh>
+            <mesh position={[0, -0.1, 0.45]}>
+                 <boxGeometry args={[0.5, 0.6, 0.05]} />
+                 <meshStandardMaterial color="#333" />
+            </mesh>
+
+            {/* Payload on Forks */}
+            <mesh position={[0, -0.15, 0.6]}>
+                <boxGeometry args={[0.4, 0.4, 0.3]} />
+                <meshStandardMaterial color="#8b4513" />
+            </mesh>
+
+            {/* Warning Light */}
+            <mesh position={[0, 0.4, 0]}>
+                <cylinderGeometry args={[0.08, 0.08, 0.1]} />
+                <meshStandardMaterial color="#ef4444" emissive="#ef4444" emissiveIntensity={1} />
+            </mesh>
+            <pointLight position={[0, 0.5, 0]} color="#ef4444" intensity={0.5} distance={2} />
+
+            <Text position={[0, 0.8, 0]} fontSize={0.2} color="white" anchorX="center" anchorY="middle" rotation={[0, -angle, 0]}>
+                {forklift.name}
+            </Text>
+        </group>
+    );
+};
+
+const PathLine: React.FC<{ agent: Agent; tick: number; clusters: ClusterVisualization[] }> = ({ agent, tick, clusters }) => {
   const visiblePath = useMemo(() => {
-     if (!path || path.length < 2) return [];
-     if (destructionTime !== undefined) return path.slice(0, destructionTime + 1);
-     return path;
-  }, [path, destructionTime]);
+     if (!agent.path || agent.path.length < 2) return [];
+     
+     const maxTick = agent.destructionTime !== undefined 
+         ? agent.destructionTime 
+         : agent.path.length - 1;
+
+     const activeCluster = clusters.find(cluster =>
+       cluster.droneId === agent.id &&
+       tick >= cluster.startTick &&
+       tick <= cluster.endTick
+     );
+
+     if (activeCluster) {
+       const startTickLine = Math.max(0, activeCluster.startTick);
+       const endTickLine = Math.min(maxTick, activeCluster.endTick);
+       return agent.path.slice(startTickLine, endTickLine + 1);
+     }
+
+     const activeTask = (agent.assignedTasksLog || []).find(t => tick >= t.startTick && tick <= t.endTick);
+
+     if (!activeTask) {
+       return [];
+     }
+
+     const startTickLine = Math.max(0, activeTask.startTick);
+     const endTickLine = Math.min(maxTick, activeTask.endTick);
+     return agent.path.slice(startTickLine, endTickLine + 1);
+  }, [agent, tick, clusters]);
 
   const points = useMemo(() => visiblePath.map(p => [p.x, p.y, p.z] as [number, number, number]), [visiblePath]);
+  
   if (points.length < 2) return null;
-  return <Line points={points} color={color} lineWidth={2} opacity={0.2} transparent depthTest={true} />;
+  return <Line points={points} color={agent.color} lineWidth={2} opacity={0.6} transparent depthTest={true} />;
 };
 
 const GoalMarker: React.FC<{ position: Position3D; color: string }> = ({ position, color }) => {
@@ -219,6 +317,48 @@ const CollisionMarker: React.FC<{ position: Position3D }> = ({ position }) => {
         </group>
     );
 }
+
+const ClusterOverlay: React.FC<{ cluster: ClusterVisualization }> = ({ cluster }) => {
+  const points = useMemo(() => cluster.positions.map(p => [p.x, p.y + 0.15, p.z] as [number, number, number]), [cluster.positions]);
+
+  return (
+    <group>
+      {points.map((point, idx) => (
+        <Line
+          key={`${cluster.id}-${idx}`}
+          points={[
+            [cluster.centroid.x, cluster.centroid.y + 0.35, cluster.centroid.z],
+            point
+          ]}
+          color={cluster.color}
+          lineWidth={1.5}
+          opacity={0.45}
+          transparent
+        />
+      ))}
+
+      <mesh position={[cluster.centroid.x, cluster.centroid.y + 0.2, cluster.centroid.z]}>
+        <sphereGeometry args={[0.18, 16, 16]} />
+        <meshStandardMaterial color={cluster.color} emissive={cluster.color} emissiveIntensity={0.8} transparent opacity={0.9} />
+      </mesh>
+
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[cluster.centroid.x, cluster.centroid.y - 0.35, cluster.centroid.z]}>
+        <ringGeometry args={[0.55, 0.8, 32]} />
+        <meshBasicMaterial color={cluster.color} transparent opacity={0.28} side={THREE.DoubleSide} />
+      </mesh>
+
+      <Text
+        position={[cluster.centroid.x, cluster.centroid.y + 0.75, cluster.centroid.z]}
+        fontSize={0.2}
+        color={cluster.color}
+        anchorX="center"
+        anchorY="middle"
+      >
+        {`${cluster.droneName} Cluster`}
+      </Text>
+    </group>
+  );
+};
 
 const GridBase: React.FC<{ size: Position3D }> = ({ size }) => (
     <gridHelper args={[size.x, size.x, 0x444444, 0x222222]} position={[(size.x-1)/2, -0.51, (size.z-1)/2]} />
@@ -266,10 +406,16 @@ interface VoxelWorldProps {
   warehouse: Warehouse | null;
   chargeStations?: Position3D[];
   batteryEnabled: boolean;
+  forklifts?: Forklift[];
+  pallets?: { id: string; position: Position3D; weight: number; payload_type: string; }[];
+  clusters?: ClusterVisualization[];
+  scannedPalletIds?: Set<string>;
+  activePalletIds?: Set<string>;
 }
 
 const VoxelWorld: React.FC<VoxelWorldProps> = ({ 
-    gridSize, obstacles, agents, incidents, tick, warehouse, chargeStations = [], batteryEnabled
+    gridSize, obstacles, agents, incidents, tick, warehouse, chargeStations = [], batteryEnabled, forklifts = [], pallets = [], clusters = [],
+    scannedPalletIds = new Set(), activePalletIds = new Set()
 }) => {
   const camPos = useMemo(() => new THREE.Vector3(gridSize.x * 1.5, gridSize.y * 1.2, gridSize.z * 1.5), [gridSize]);
   const center = useMemo(() => new THREE.Vector3((gridSize.x-1)/2, (gridSize.y-1)/2, (gridSize.z-1)/2), [gridSize]);
@@ -278,6 +424,11 @@ const VoxelWorld: React.FC<VoxelWorldProps> = ({
   const visibleCollisions = useMemo(() => 
     incidents.filter(i => i.type === 'collision' && i.time <= tick), 
   [incidents, tick]);
+
+  const visibleClusters = useMemo(
+    () => clusters.filter(cluster => tick >= cluster.startTick && tick <= cluster.endTick),
+    [clusters, tick]
+  );
 
   return (
     <div className="w-full h-full">
@@ -299,10 +450,59 @@ const VoxelWorld: React.FC<VoxelWorldProps> = ({
         <GridBase size={gridSize} />
         
         <ObstacleField obstacles={obstacles} />
+
+        {/* Render pallets with state-based colors */}
+        {pallets.map((plt) => {
+            const isScanned = scannedPalletIds.has(plt.id);
+            const isActive  = activePalletIds.has(plt.id);
+
+            // Box color: green=scanned, cyan=active target, gold=unchecked
+            const boxColor   = isScanned ? '#22c55e' : isActive ? '#06b6d4' : '#cda434';
+            const emissive   = isScanned ? '#166534' : isActive ? '#0e7490' : '#78350f';
+            const emissiveI  = isActive ? 0.6 : isScanned ? 0.3 : 0.1;
+            const baseColor  = isScanned ? '#14532d' : '#8b5a2b';
+
+            return (
+            <group key={plt.id} position={[plt.position.x, plt.position.y, plt.position.z]}>
+                {/* Active glow ring */}
+                {isActive && (
+                  <mesh rotation={[-Math.PI / 2, 0, tick * 0.05]} position={[0, -0.3, 0]}>
+                    <ringGeometry args={[0.55, 0.65, 32]} />
+                    <meshBasicMaterial color="#06b6d4" transparent opacity={0.7} side={2} />
+                  </mesh>
+                )}
+                {/* Wood Base */}
+                <mesh position={[0, -0.4, 0]}>
+                    <boxGeometry args={[0.9, 0.2, 0.9]} />
+                    <meshStandardMaterial color={baseColor} roughness={0.9} />
+                </mesh>
+                {/* Product Box */}
+                <mesh position={[0, 0, 0]}>
+                    <boxGeometry args={[0.8, 0.6, 0.8]} />
+                    <meshStandardMaterial color={boxColor} roughness={0.7} emissive={emissive} emissiveIntensity={emissiveI} />
+                    {/* Sensor type indicator */}
+                    <mesh position={[0, 0, 0.41]}>
+                        <planeGeometry args={[0.4, 0.2]} />
+                        <meshBasicMaterial color={plt.payload_type === 'camera' ? '#3b82f6' : '#a855f7'} />
+                    </mesh>
+                </mesh>
+                {/* Scanned checkmark label */}
+                {isScanned && (
+                  <Text position={[0, 0.6, 0]} fontSize={0.25} color="#4ade80" anchorX="center" anchorY="middle">
+                    ✓
+                  </Text>
+                )}
+            </group>
+            );
+        })}
         
         {chargeStations.length > 0 && <ChargingStation positions={chargeStations} />}
         
         {warehouse && <WarehouseBase warehouse={warehouse} />}
+
+        {visibleClusters.map((cluster) => (
+          <ClusterOverlay key={cluster.id} cluster={cluster} />
+        ))}
 
         {agents.map((agent) => (
           <React.Fragment key={agent.id}>
@@ -313,12 +513,18 @@ const VoxelWorld: React.FC<VoxelWorldProps> = ({
                 batteryEnabled={batteryEnabled}
              />
              <PathLine 
-                path={agent.path} 
-                color={agent.color} 
-                destructionTime={agent.destructionTime} 
+                agent={agent}
+                tick={tick}
+                clusters={visibleClusters}
              />
              {agent.goal && <GoalMarker position={agent.goal} color={agent.color} />}
           </React.Fragment>
+        ))}
+
+        {forklifts.map((fl) => (
+             <React.Fragment key={fl.id}>
+                 <ForkliftMesh forklift={fl} tick={tick} />
+             </React.Fragment>
         ))}
 
         {visibleCollisions.map((col) => (

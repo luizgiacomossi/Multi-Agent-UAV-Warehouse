@@ -1,4 +1,4 @@
-import { Position3D } from '../types';
+import { Position3D, Pallet, Forklift } from '../types';
 import { WorldGenerator, ReservedZone } from './WorldGenerator';
 import { Warehouse } from './Warehouse';
 
@@ -8,6 +8,8 @@ export class World {
   obstacleList: Position3D[];
   chargeStations: Position3D[];
   warehouse: Warehouse | null = null;
+  pallets: Pallet[] = []; // [NEW] Track pallets generated in the warehouse
+  forklifts: Forklift[] = [];
 
   constructor(size: number = 24) {
     this.size = size;
@@ -22,6 +24,8 @@ export class World {
     this.obstacleList = [];
     this.chargeStations = [];
     this.warehouse = null;
+    this.pallets = [];
+    this.forklifts = [];
   }
 
   private getIndex(x: number, y: number, z: number): number {
@@ -33,6 +37,8 @@ export class World {
     this.obstacleList = [];
     this.chargeStations = [];
     this.warehouse = null;
+    this.pallets = [];
+    this.forklifts = [];
   }
 
   public setupWarehouse(capacity: number) {
@@ -65,9 +71,9 @@ export class World {
       }
   }
 
-  public generate(theme: string, reservedZone?: ReservedZone) {
-      WorldGenerator.generate(this, theme, reservedZone);
-  }
+    public generate(theme: string, reservedZone?: ReservedZone, totalTasks: number = 50, numForklifts: number = 3) {
+        WorldGenerator.generate(this, theme, reservedZone, totalTasks, numForklifts);
+    }
 
   public generateStations(count: number) {
       this.chargeStations = [];

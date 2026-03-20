@@ -1,5 +1,6 @@
 import { World } from './World';
-import { GenerationTheme } from '../types';
+import { GenerationTheme, Position3D } from '../types';
+import { WAREHOUSE, DEFAULT_MAX_ALTITUDE } from '../SimulationConfig';
 
 export interface ReservedZone {
   minX: number; maxX: number;
@@ -8,7 +9,7 @@ export interface ReservedZone {
 }
 
 export class WorldGenerator {
-  static generate(world: World, theme: string, reservedZone?: ReservedZone) {
+  static generate(world: World, theme: string, reservedZone?: ReservedZone, totalTasks: number = 50, numForklifts: number = 3) {
     world.clear();
 
     switch (theme) {
@@ -21,9 +22,34 @@ export class WorldGenerator {
       case GenerationTheme.OPEN:
         this.generateOpen(world, reservedZone);
         break;
+      case 'Warehouse':
+        this.generateWarehouse(world, reservedZone, totalTasks, numForklifts);
+        break;
       default:
         this.generateRandom(world, reservedZone);
         break;
+    }
+
+    // Ensure all non-Warehouse themes strictly spawn the exact totalTasks requested
+    if (theme !== 'Warehouse') {
+        world.pallets = [];
+        let attempts = 0;
+        // Find safe spawn points across the generated obstacles
+        while (world.pallets.length < totalTasks && attempts < totalTasks * 20) {
+             const x = Math.floor(Math.random() * world.size);
+             const z = Math.floor(Math.random() * world.size);
+             const y = Math.floor(Math.random() * Math.min(world.size - 1, 15));
+             
+             if (!this.isRestricted(x, y, z, reservedZone) && !world.isBlocked(x, y, z)) {
+                 world.pallets.push({
+                     id: `PLT-${this.generateUUID()}`,
+                     position: { x, y, z },
+                     weight: Math.floor(Math.random() * 50) + 10,
+                     payload_type: Math.random() > 0.5 ? 'camera' : 'rfid'
+                 });
+             }
+             attempts++;
+        }
     }
   }
 
@@ -32,6 +58,91 @@ export class WorldGenerator {
       return x >= zone.minX && x <= zone.maxX &&
              y >= zone.minY && y <= zone.maxY &&
              z >= zone.minZ && z <= zone.maxZ;
+  }
+
+  // Simple pseudo-random UUID generator for Pallets
+  private static generateUUID(): string {
+      return Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
+  }
+
+  private static generateWarehouse(world: World, reservedZone?: ReservedZone, totalTasks: number = 50, numForklifts: number = 3) {
+      const aisleWidth = WAREHOUSE.AISLE_WIDTH;
+      const rackDepth  = WAREHOUSE.RACK_HEIGHT;  // depth of each rack cluster (voxels)
+      const maxRackHeight = Math.min(world.size - 2, DEFAULT_MAX_ALTITUDE);
+
+      // Clear existing pallets just in case
+      world.pallets = [];
+
+      for (let x = 0; x < world.size; x++) {
+          for (let z = 0; z < world.size; z++) {
+              
+              // Skip the base/charging zone
+              if (this.isRestricted(x, 0, z, reservedZone)) continue;
+
+              // Determine if this cell is an aisle or a rack
+              const isAisleX = (x % (rackDepth + aisleWidth)) < aisleWidth;
+              const isAisleZ = (z % (rackDepth + aisleWidth)) < aisleWidth;
+
+              // If it's not an aisle in either dimension, it's a rack location
+              if (!isAisleX && !isAisleZ) {
+                  // Build a vertical stack of pallets
+                  const height = Math.floor(Math.random() * maxRackHeight) + 1;
+                  
+                  for (let y = 0; y < height; y++) {
+                      if (this.isRestricted(x, y, z, reservedZone)) continue;
+                      
+                      world.addObstacle(x, y, z); // Physically block the pathfinder
+                      
+                      // Register a logical Pallet here
+                      world.pallets.push({
+                          id: `PLT-${this.generateUUID()}`,
+                          position: { x, y, z },
+                          weight: Math.floor(Math.random() * 50) + 10,
+                          payload_type: Math.random() > 0.5 ? 'camera' : 'rfid'
+                      });
+                  }
+              }
+          }
+      }
+
+      // Truncate to the exact requested totalTasks randomly
+      if (world.pallets.length > totalTasks) {
+          // simple fisher-yates shuffle and slice
+          const shuffled = [...world.pallets].sort(() => 0.5 - Math.random());
+          world.pallets = shuffled.slice(0, totalTasks);
+      }
+
+      // Generate moving Dynamic Forklifts inside aisles
+      world.forklifts = [];
+      const MAX_TICKS = 2000;
+      let forkliftCount = 0;
+      
+      // Determine what Z range is safe
+      const zMin = reservedZone ? (reservedZone.maxZ + 1) : 2;
+      const zMax = world.size - 2;
+
+      for (let x = 2; x < world.size - 2; x++) {
+          if (forkliftCount >= numForklifts) break;
+          const isAisleX = (x % (rackDepth + aisleWidth)) < aisleWidth;
+          
+          if (isAisleX && x % 4 === 0) {
+              const path: Position3D[] = [];
+              let cz = zMin;
+              let dir = 1;
+              for (let t = 0; t < MAX_TICKS; t++) {
+                  path.push({ x, y: 0, z: cz });
+                  cz += dir;
+                  if (cz >= zMax || cz <= zMin) dir *= -1;
+              }
+              world.forklifts.push({
+                  id: `FL-${forkliftCount}`,
+                  name: `Forklift ${forkliftCount + 1}`,
+                  path,
+                  color: '#fbbf24' // Amber
+              });
+              forkliftCount++;
+          }
+      }
   }
 
   private static generateCity(world: World, reservedZone?: ReservedZone) {

@@ -27,8 +27,8 @@ interface ControlPanelProps {
   isRoundTrip: boolean;
   setIsRoundTrip: (b: boolean) => void;
 
-  isInfiniteMode: boolean;
-  setIsInfiniteMode: (b: boolean) => void;
+  missionCount: number;
+  setMissionCount: (n: number) => void;
   
   batteryCapacity: number;
   setBatteryCapacity: (n: number) => void;
@@ -40,6 +40,21 @@ interface ControlPanelProps {
 
   maxAltitude: number;
   setMaxAltitude: (n: number) => void;
+
+  allocationMode: '1-to-1' | 'Cluster';
+  setAllocationMode: (m: '1-to-1' | 'Cluster') => void;
+  clusterRadius: number;
+  setClusterRadius: (n: number) => void;
+  maxClusterSize: number;
+  setMaxClusterSize: (n: number) => void;
+
+  totalTasks: number;
+  setTotalTasks: (n: number) => void;
+  numForklifts: number;
+  setNumForklifts: (n: number) => void;
+
+  onRunMonteCarlo: () => void;
+  onRunFaultTolerance: () => void;
 }
 
 const ControlPanel: React.FC<ControlPanelProps> = ({
@@ -63,8 +78,8 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   currentAlgoDesc,
   isRoundTrip,
   setIsRoundTrip,
-  isInfiniteMode,
-  setIsInfiniteMode,
+  missionCount,
+  setMissionCount,
   batteryCapacity,
   setBatteryCapacity,
   batteryEnabled,
@@ -72,7 +87,19 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   enableCharging,
   setEnableCharging,
   maxAltitude,
-  setMaxAltitude
+  setMaxAltitude,
+  allocationMode,
+  setAllocationMode,
+  clusterRadius,
+  setClusterRadius,
+  maxClusterSize,
+  setMaxClusterSize,
+  totalTasks,
+  setTotalTasks,
+  numForklifts,
+  setNumForklifts,
+  onRunMonteCarlo,
+  onRunFaultTolerance
 }) => {
   return (
     <div className="absolute top-4 left-4 w-80 bg-slate-800/90 backdrop-blur-md p-4 rounded-xl border border-slate-700 shadow-xl text-slate-100 flex flex-col gap-4 z-10 max-h-[90vh] overflow-y-auto">
@@ -157,6 +184,57 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                 onChange={(e) => setGridSizeValue(Number(e.target.value))}
                 className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-cyan-500"
              />
+         </div>
+
+         {/* Total Initial Tasks Slider */}
+         <div className="space-y-1">
+              <div className="flex items-center justify-between text-xs text-slate-400">
+                 <span>Total Initial Tasks (M)</span>
+                 <span className="font-mono text-cyan-400">{totalTasks} items</span>
+              </div>
+              <input 
+                 type="range" 
+                 min="10" 
+                 max="200" 
+                 step="5"
+                 value={totalTasks} 
+                 onChange={(e) => setTotalTasks(Number(e.target.value))}
+                 className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-cyan-500"
+              />
+         </div>
+
+         {/* Forklifts Slider */}
+         <div className="space-y-1">
+              <div className="flex items-center justify-between text-xs text-slate-400">
+                 <span>Number of Forklifts</span>
+                 <span className="font-mono text-cyan-400">{numForklifts} units</span>
+              </div>
+              <input 
+                 type="range" 
+                 min="0" 
+                 max="15" 
+                 step="1"
+                 value={numForklifts} 
+                 onChange={(e) => setNumForklifts(Number(e.target.value))}
+                 className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-cyan-500"
+              />
+         </div>
+
+         {/* Missions Count Slider */}
+        <div className="space-y-1">
+             <div className="flex items-center justify-between text-xs text-slate-400">
+                <span>Missions Per Drone</span>
+                <span className="font-mono text-cyan-400">{missionCount} runs</span>
+             </div>
+             <input 
+                type="range" 
+                min="1" 
+                max="20" 
+                step="1"
+                value={missionCount} 
+                onChange={(e) => setMissionCount(Number(e.target.value))}
+                className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-cyan-500"
+             />
         </div>
 
         {/* Max Altitude Slider */}
@@ -221,19 +299,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                 </span>
             </div>
 
-            {/* Infinite Mode Toggle */}
-             <div className="flex-1 min-w-[100px] flex items-center gap-2 cursor-pointer hover:bg-slate-700/50 p-1.5 rounded transition-colors border border-transparent hover:border-slate-700" onClick={() => setIsInfiniteMode(!isInfiniteMode)}>
-                <div className={`w-4 h-4 rounded border border-slate-500 flex items-center justify-center ${isInfiniteMode ? 'bg-pink-500 border-pink-500' : 'bg-slate-800'}`}>
-                    {isInfiniteMode && <div className="w-2 h-2 bg-white rounded-[1px]" />}
-                </div>
-                <span className="text-xs text-slate-300 flex items-center gap-1">
-                    <InfinityIcon size={12} />
-                    Infinite
-                </span>
-            </div>
-
             {/* Round Trip Toggle */}
-            {!isInfiniteMode && (
             <div className="flex-1 min-w-[100px] flex items-center gap-2 cursor-pointer hover:bg-slate-700/50 p-1.5 rounded transition-colors border border-transparent hover:border-slate-700" onClick={() => setIsRoundTrip(!isRoundTrip)}>
                 <div className={`w-4 h-4 rounded border border-slate-500 flex items-center justify-center ${isRoundTrip ? 'bg-purple-500 border-purple-500' : 'bg-slate-800'}`}>
                     {isRoundTrip && <div className="w-2 h-2 bg-white rounded-[1px]" />}
@@ -243,7 +309,6 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                     Return
                 </span>
             </div>
-            )}
 
             {/* Charging Stations Toggle */}
             <div className="flex-1 min-w-[100px] flex items-center gap-2 cursor-pointer hover:bg-slate-700/50 p-1.5 rounded transition-colors border border-transparent hover:border-slate-700" onClick={() => setEnableCharging(!enableCharging)}>
@@ -285,6 +350,59 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
             </div>
         </div>
         
+        {/* Allocation Mode Selection */}
+        <div className="space-y-2 mt-2">
+            <div className="flex items-center gap-1 text-xs text-slate-400">
+                <Box size={12} /> Task Assignment Mode
+            </div>
+            <div className="flex items-center justify-between bg-slate-900 p-1 rounded-lg border border-slate-700 gap-1">
+                {(['1-to-1', 'Cluster'] as const).map(mode => {
+                    const isSelected = mode === allocationMode;
+                    return (
+                        <button 
+                            key={mode}
+                            onClick={() => setAllocationMode(mode)}
+                            className={`flex-1 py-1.5 text-[10px] rounded-md transition-all font-medium ${
+                                isSelected 
+                                ? 'bg-indigo-600 text-white shadow-sm border border-indigo-500' 
+                                : 'text-slate-500 hover:text-slate-300'
+                            }`}
+                        >
+                            {mode}
+                        </button>
+                    )
+                })}
+            </div>
+            {allocationMode === 'Cluster' && (
+                <div className="p-2 mt-1 bg-slate-900/50 rounded border border-slate-700/50 flex flex-col gap-2">
+                     <div className="space-y-1">
+                          <div className="flex items-center justify-between text-[10px] text-slate-400">
+                              <span>Cluster Radius (<span className="text-indigo-400 italic">δ</span>)</span>
+                              <span className="font-mono text-indigo-400">{clusterRadius} voxels</span>
+                          </div>
+                          <input 
+                              type="range" min="2" max="15" step="1"
+                              value={clusterRadius} 
+                              onChange={(e) => setClusterRadius(Number(e.target.value))}
+                              className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                          />
+                     </div>
+                     <div className="space-y-1">
+                          <div className="flex items-center justify-between text-[10px] text-slate-400">
+                              <span>Max Capacity (<span className="text-indigo-400 italic">K<sub className="text-[8px] leading-none">max</sub></span>)</span>
+                              <span className="font-mono text-indigo-400">{maxClusterSize} pallets</span>
+                          </div>
+                          <input 
+                              type="range" min="1" max="10" step="1"
+                              value={maxClusterSize} 
+                              onChange={(e) => setMaxClusterSize(Number(e.target.value))}
+                              className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                          />
+                     </div>
+                </div>
+            )}
+        </div>
+        
         <hr className="border-slate-700 my-1" />
 
         <div className="flex items-center justify-between">
@@ -324,6 +442,29 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                 <Shuffle size={12} /> New Missions
             </button>
         </div>
+
+        <hr className="border-slate-700 my-1" />
+
+        <div className="flex flex-col gap-2">
+            <div className="flex items-center gap-1 text-xs text-slate-400">
+                <Box size={12} /> Experiments (Console Output)
+            </div>
+            <button
+                onClick={onRunMonteCarlo}
+                disabled={isPlaying || isGenerating}
+                className="w-full py-2 text-xs font-semibold rounded bg-indigo-600/20 hover:bg-indigo-600/40 border border-indigo-500/50 text-indigo-300 transition-colors disabled:opacity-50"
+            >
+                Run Exp 2: Monte Carlo (50 Iterations)
+            </button>
+            <button
+                onClick={onRunFaultTolerance}
+                disabled={isPlaying || isGenerating}
+                className="w-full py-2 text-xs font-semibold rounded bg-rose-600/20 hover:bg-rose-600/40 border border-rose-500/50 text-rose-300 transition-colors disabled:opacity-50"
+            >
+                Run Exp 3: Fault Injection (T=60s)
+            </button>
+        </div>
+
       </div>
     </div>
   );
