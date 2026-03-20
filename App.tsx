@@ -4,7 +4,7 @@ import { AlertTriangle } from 'lucide-react';
 import VoxelWorld from './components/VoxelWorld';
 import ControlPanel from './components/ControlPanel';
 import StatusPanel from './components/StatusPanel';
-import { Agent, Position3D, GenerationTheme, SimulationIncident, Forklift, Pallet, ClusterVisualization } from './types';
+import { Agent, Position3D, GenerationTheme, SimulationIncident, Forklift, Pallet, ClusterVisualization, TaskPriorityMode } from './types';
 import { SimulationManager } from './classes/SimulationManager';
 import { Warehouse } from './classes/Warehouse';
 import { GRID_SIZE, DEFAULT_AGENT_COUNT } from './SimulationConfig';
@@ -27,6 +27,8 @@ const App: React.FC = () => {
   const [maxClusterSize, setMaxClusterSize] = useState(3);
   const [totalTasks, setTotalTasks] = useState(50);
   const [numForklifts, setNumForklifts] = useState(3);
+  const [taskPriorityMode, setTaskPriorityMode] = useState<TaskPriorityMode>('mixed');
+  const [currentTheme, setCurrentTheme] = useState<string>(GenerationTheme.WAREHOUSE);
 
   // -- Simulation Data State --
   // We store snapshots of the simulation data for rendering
@@ -104,8 +106,15 @@ const App: React.FC = () => {
     }
   }, [agentCount, batteryCapacity]);
 
+  useEffect(() => {
+    if (!isGenerating && agents.length > 0) {
+      handleGenerate(currentTheme);
+    }
+  }, [taskPriorityMode]);
+
 
   const handleGenerate = async (theme: string) => {
+    setCurrentTheme(theme);
     setIsPlaying(false);
     setIsGenerating(true);
     setTick(0);
@@ -123,7 +132,7 @@ const App: React.FC = () => {
           setDeployFromBase(true); // Sync UI
         }
 
-        engine.generateWorld(theme, gridSizeVal, enableCharging, effectiveDeployFromBase, agentCount, totalTasks, numForklifts);
+        engine.generateWorld(theme, gridSizeVal, enableCharging, effectiveDeployFromBase, agentCount, totalTasks, numForklifts, taskPriorityMode);
         const palletPositionSet = new Set(
           engine.world.pallets.map(p => `${p.position.x},${p.position.y},${p.position.z}`)
         );
@@ -271,6 +280,8 @@ const App: React.FC = () => {
         setTotalTasks={setTotalTasks}
         numForklifts={numForklifts}
         setNumForklifts={setNumForklifts}
+        taskPriorityMode={taskPriorityMode}
+        setTaskPriorityMode={setTaskPriorityMode}
         onRunMonteCarlo={() => {
           console.clear();
           engineRef.current.runMonteCarloAllocations();

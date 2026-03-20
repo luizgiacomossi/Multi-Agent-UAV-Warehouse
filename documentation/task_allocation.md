@@ -1,47 +1,129 @@
-# Task Allocation and Decision Logic
+# Task Allocation and Cost Model
 
-The VoxelSwarm architecture assigns $N$ agents to $M$ spatially distributed tasks utilizing a centralized, globally optimal bipartite matching approach. The assignment logic is implemented within `CostModel.ts` and triggered by the `SimulationManager` when evaluating mission sets.
+## 1. Implemented Assignment Problem
 
-## 1. Problem Definition (Linear Assignment Problem)
+The current allocation layer solves a linear assignment problem between a set of idle drones and a candidate set of tasks or task clusters. The solver is the Hungarian algorithm provided by `munkres-js`; see [`classes/CostModel.ts`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/classes/CostModel.ts).
 
-Given a set of identical parallel task structures (e.g., Inventory scanning) with variable geographic targets and required payloads, the system maps Drone $i \in \{1 \dots N\}$ to Task $k \in \{1 \dots M\}$ such that global cost is minimized.
+Given drones \(\mathcal{A} = \{a_1,\dots,a_N\}\) and tasks \(\mathcal{T} = \{\tau_1,\dots,\tau_M\}\), the code constructs a dense matrix
 
-This is fundamentally a **balanced bipartite graph matching problem**.
-VoxelSwarm utilizes the **Hungarian Algorithm** (via `munkres-js`) to achieve deterministic minimum-weight bipartite matching in computational complexity $O(\max(N,M)^3)$.
+\[
+C \in \mathbb{R}^{N \times M},
+\]
 
-## 2. Multi-Objective Cost Formulation
+then returns a minimum-cost matching on that matrix.
 
-Each weight $w_{ik}$ in the underlying $N \times M$ matrix comprises distance parameters normalized against exponential battery penalty constraints. 
+## 2. Required-Energy Screening
 
-### 2.1 The Required Energy ($E_{req}$)
-Prior to validating assignment feasibility, the operational energy required to process a task and retreat successfully to a base vector is resolved linearly:
-$$ E_{req} = \beta_{fly} \cdot \gamma (\|p_i - p_k\|_2 + \|p_k - p_{base}\|_2) + \beta_{hover} \cdot t_{task} $$
-Where:
-*   $\beta_{fly}$: Default drain rate for linear movement.
-*   $\gamma = 1.3$: Real-world non-convex pathing approximation (A* detours).
-*   $t_{task}$: Hover latency executing the scan/mission payload.
+For a drone \(a_i\) and task \(\tau_k\), the code computes
 
-### 2.2 Task Feasibility Filtering ($\Omega$ Penalties)
-If an agent cannot physically achieve $E_{req}$ while retaining a strict structural safety buffer defined as $\delta_{safe} = 20\%$, the edge cost $w_{ik}$ is saturated to an arbitrarily large float ($\Omega = 1e9$), effectively pruning branch assignment.
-$$ B_i - E_{req} < \delta_{safe} \implies w_{ik} = \Omega $$
+\[
+e_{req}(i,k)
+=
+\beta_{fly}\gamma
+\left(
+\lVert s_i - g_k \rVert_2 + \lVert g_k - p_{base} \rVert_2
+\right)
 
-### 2.3 Normalized Spatial Deviation Cost
-Minimizes total trajectory makespan flow:
-$$ c_{dist\_ik} = \frac{\|p_i - p_k\|}{D_{max}} $$
-Where $D_{max}$ normalizes metrics to $[0,1]$ according to the environment bounds.
++ \beta_{hover} t_k^{hover},
+\]
 
-### 2.4 Unilateral Battery Penalties
-Agents suffering acute discharge ($< 35\%$ remain) map exponentially sharper cost slopes. Utilizing a continuous barrier function $\lambda$:
-$$ c_{batt\_i} = \exp(-\lambda (B_i(t) - \delta_{safe})) $$
+where:
 
-### 2.5 The Final Edge Weight $w_{ik}$
-The global assignment cell $(i,k)$ represents:
-$$ C_{ik} = \left( \Phi_1 \cdot c_{dist\_ik} + \Phi_2 \cdot c_{batt\_i} \right) \cdot \pi_k $$
-Where $\Phi_1, \Phi_2 = 0.5$ (configurable priority weights), and $\pi_k$ represents extrinsic payload/target priority values.
+- \(s_i\) is `drone.start`,
+- \(g_k\) is `task.target`,
+- \(p_{base}\) is the warehouse origin if present, otherwise \((0,0,0)\),
+- \(\beta_{fly}\), \(\beta_{hover}\), and \(\gamma\) come from [`SimulationConfig.ts`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/SimulationConfig.ts).
 
-## 3. Execution Pipeline in VoxelSwarm
+This is implemented by `calculate_e_req(...)`.
 
-1. `SimulationManager` aggregates `Pending` tasks.
-2. `filter()` maps agents not possessing `Payload` compatibilities to $\Omega$.
-3. Matrix size mapping: the code internally manages asymmetric $N \neq M$ assignments natively via padding.
-4. Hungarian matches invoke `MissionController.assignNewMission(goal, ... )`. 
+A task is feasible only if:
+
+1. the drone supports the required payload type, and
+2. `drone.battery >= e_req + DELTA_SAFE`.
+
+Otherwise the matrix entry is set to a large penalty
+
+\[
+\Omega = 10^9.
+\]
+
+## 3. Implemented Scalar Cost
+
+For feasible assignments, the matrix entry is built from two terms.
+
+### 3.1 Distance term
+
+\[
+c_{dist}(i,k)=\frac{\lVert s_i - g_k \rVert_2}{D_{max}}.
+\]
+
+In `CostModel` this is Euclidean distance divided by a caller-supplied normalization constant.
+
+Important implementation note:
+
+- the runtime allocator in `SimulationManager` does not use the `D_MAX` constant from [`SimulationConfig.ts`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/SimulationConfig.ts);
+- it currently uses the approximation `world.size * 2`.
+
+### 3.2 Battery term
+
+\[
+c_{batt}(i)=\exp\left(-\lambda(B_i-\delta_{safe})\right).
+\]
+
+This is a drone-only penalty term, so for a fixed drone it is identical across all candidate tasks in the same allocation round.
+
+### 3.3 Final task cost
+
+\[
+C_{ik} = \left(w_1 c_{dist}(i,k) + w_2 c_{batt}(i)\right)\pi_k.
+\]
+
+This is implemented by `calculate_C_ik(...)`.
+
+## 4. Cluster Allocation
+
+Cluster allocation uses the same Hungarian structure but replaces a single task with a `TaskCluster`.
+
+For a cluster \(\kappa\), the code computes:
+
+- a centroid,
+- a greedy intra-cluster tour sequence,
+- a scalar `tourCost`.
+
+The required-energy estimate becomes
+
+\[
+e_{req}^{cluster}(i,\kappa)
+=
+\beta_{fly}\gamma
+\left(
+\lVert s_i - g_{\kappa}^{first} \rVert_2 +
+\lVert g_{\kappa}^{last} - p_{base} \rVert_2
+\right)
+ + c_{\kappa}^{tour},
+\]
+
+where \(c_{\kappa}^{tour}\) is accumulated from Manhattan inter-task motion and hover costs inside the cluster.
+
+The cost matrix then uses centroid distance rather than full tour distance:
+
+\[
+c_{dist}^{cluster}(i,\kappa)=
+\frac{\lVert s_i - centroid(\kappa) \rVert_2}{D_{max}}.
+\]
+
+This is a heuristic bidding rule, not a globally exact clustered routing objective.
+
+## 5. Important Behavior Of The Current Runtime
+
+The most important implementation detail is in [`classes/SimulationManager.ts`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/classes/SimulationManager.ts).
+
+In 1-to-1 mode, the runtime does not allocate over all remaining tasks. Instead it constructs:
+
+\[
+\texttt{pendingTasks} = \texttt{unscanned.slice(0, idleDrones.length)}.
+\]
+
+So the Hungarian step is globally optimal only over that truncated candidate subset, not over the full set of remaining pallets.
+
+That is mathematically and experimentally significant. Any paper or thesis text describing the current implementation should state this explicitly.

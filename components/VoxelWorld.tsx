@@ -239,8 +239,21 @@ const ForkliftMesh: React.FC<ForkliftMeshProps> = ({ forklift, tick }) => {
 };
 
 const PathLine: React.FC<{ agent: Agent; tick: number; clusters: ClusterVisualization[] }> = ({ agent, tick, clusters }) => {
-  const visiblePath = useMemo(() => {
-     if (!agent.path || agent.path.length < 2) return [];
+  const buildVisibleSegment = (rawStartTick: number, rawEndTick: number) => {
+    const clampedStartTick = Math.max(rawStartTick, tick);
+    if (clampedStartTick >= rawEndTick) {
+      return { path: [] as Position3D[], startTick: clampedStartTick, endTick: rawEndTick };
+    }
+
+    return {
+      path: agent.path.slice(clampedStartTick, rawEndTick + 1),
+      startTick: clampedStartTick,
+      endTick: rawEndTick,
+    };
+  };
+
+  const visibleSegment = useMemo(() => {
+     if (!agent.path || agent.path.length < 2) return { path: [] as Position3D[], startTick: 0, endTick: 0 };
      
      const maxTick = agent.destructionTime !== undefined 
          ? agent.destructionTime 
@@ -255,24 +268,127 @@ const PathLine: React.FC<{ agent: Agent; tick: number; clusters: ClusterVisualiz
      if (activeCluster) {
        const startTickLine = Math.max(0, activeCluster.startTick);
        const endTickLine = Math.min(maxTick, activeCluster.endTick);
-       return agent.path.slice(startTickLine, endTickLine + 1);
+       return buildVisibleSegment(startTickLine, endTickLine);
      }
 
      const activeTask = (agent.assignedTasksLog || []).find(t => tick >= t.startTick && tick <= t.endTick);
 
      if (!activeTask) {
-       return [];
+       return { path: [] as Position3D[], startTick: 0, endTick: 0 };
      }
 
      const startTickLine = Math.max(0, activeTask.startTick);
      const endTickLine = Math.min(maxTick, activeTask.endTick);
-     return agent.path.slice(startTickLine, endTickLine + 1);
+     return buildVisibleSegment(startTickLine, endTickLine);
   }, [agent, tick, clusters]);
 
+  const visiblePath = visibleSegment.path;
+
   const points = useMemo(() => visiblePath.map(p => [p.x, p.y, p.z] as [number, number, number]), [visiblePath]);
+  const directionMarkers = useMemo(() => {
+    if (visiblePath.length < 2) return [];
+
+    const upAxis = new THREE.Vector3(0, 1, 0);
+
+    return visiblePath.slice(0, -1).map((current, idx) => {
+      const next = visiblePath[idx + 1];
+      const delta = new THREE.Vector3(next.x - current.x, next.y - current.y, next.z - current.z);
+      const length = delta.length();
+
+      if (length === 0) {
+        return {
+          key: `${agent.id}-wait-${idx}`,
+          position: [current.x, current.y + 0.18, current.z] as [number, number, number],
+          isWait: true,
+          quaternion: new THREE.Quaternion(),
+        };
+      }
+
+      const direction = delta.normalize();
+      const quaternion = new THREE.Quaternion().setFromUnitVectors(upAxis, direction);
+
+      return {
+        key: `${agent.id}-dir-${idx}`,
+        position: [
+          current.x + direction.x * 0.18,
+          current.y + 0.18 + direction.y * 0.18,
+          current.z + direction.z * 0.18,
+        ] as [number, number, number],
+        isWait: false,
+        quaternion,
+      };
+    });
+  }, [agent.id, visiblePath]);
+  const taskMarkers = useMemo(() => {
+    if (visiblePath.length === 0) return [];
+
+    return (agent.assignedTasksLog || [])
+      .filter(task => task.endTick >= visibleSegment.startTick && task.startTick <= visibleSegment.endTick)
+      .map((task) => {
+        const pathIndex = visiblePath.findIndex(
+          p => p.x === task.position.x && p.y === task.position.y && p.z === task.position.z
+        );
+        const fallbackIndex = Math.max(
+          0,
+          Math.min(visiblePath.length - 1, task.endTick - visibleSegment.startTick)
+        );
+        const markerPoint = visiblePath[pathIndex >= 0 ? pathIndex : fallbackIndex];
+
+        return {
+          key: `${agent.id}-task-${task.palletId}-${task.endTick}`,
+          palletId: task.palletId,
+          type: task.type,
+          position: [markerPoint.x, markerPoint.y + 0.5, markerPoint.z] as [number, number, number],
+        };
+      });
+  }, [agent.assignedTasksLog, agent.id, visiblePath, visibleSegment.endTick, visibleSegment.startTick]);
   
   if (points.length < 2) return null;
-  return <Line points={points} color={agent.color} lineWidth={2} opacity={0.6} transparent depthTest={true} />;
+  return (
+    <group>
+      <Line points={points} color={agent.color} lineWidth={2} opacity={0.6} transparent depthTest={true} />
+      {directionMarkers.map((marker) => (
+        marker.isWait ? (
+          <mesh key={marker.key} position={marker.position}>
+            <sphereGeometry args={[0.08, 10, 10]} />
+            <meshBasicMaterial color={agent.color} transparent opacity={0.75} depthTest={true} />
+          </mesh>
+        ) : (
+          <group key={marker.key} position={marker.position} quaternion={marker.quaternion}>
+            <mesh position={[0, 0.12, 0]}>
+              <cylinderGeometry args={[0.03, 0.03, 0.22, 8]} />
+              <meshBasicMaterial color={agent.color} transparent opacity={0.85} depthTest={true} />
+            </mesh>
+            <mesh position={[0, 0.28, 0]}>
+              <coneGeometry args={[0.09, 0.18, 10]} />
+              <meshBasicMaterial color={agent.color} transparent opacity={0.95} depthTest={true} />
+            </mesh>
+          </group>
+        )
+      ))}
+      {taskMarkers.map((marker) => (
+        <group key={marker.key} position={marker.position}>
+          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.18, 0]}>
+            <ringGeometry args={[0.14, 0.22, 20]} />
+            <meshBasicMaterial color={agent.color} transparent opacity={0.85} side={THREE.DoubleSide} depthTest={true} />
+          </mesh>
+          <mesh position={[0, 0.02, 0]}>
+            <planeGeometry args={[0.52, 0.22]} />
+            <meshBasicMaterial color="#0f172a" transparent opacity={0.9} side={THREE.DoubleSide} depthTest={true} />
+          </mesh>
+          <Text
+            position={[0, 0.02, 0.01]}
+            fontSize={0.09}
+            color={agent.color}
+            anchorX="center"
+            anchorY="middle"
+          >
+            {marker.type === 'rfid' ? 'RFID' : 'SCAN'}
+          </Text>
+        </group>
+      ))}
+    </group>
+  );
 };
 
 const GoalMarker: React.FC<{ position: Position3D; color: string }> = ({ position, color }) => {

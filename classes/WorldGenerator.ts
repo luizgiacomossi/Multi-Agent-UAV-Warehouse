@@ -1,5 +1,5 @@
 import { World } from './World';
-import { GenerationTheme, Position3D } from '../types';
+import { GenerationTheme, Position3D, TaskPriorityMode } from '../types';
 import { WAREHOUSE, DEFAULT_MAX_ALTITUDE } from '../SimulationConfig';
 
 export interface ReservedZone {
@@ -9,7 +9,11 @@ export interface ReservedZone {
 }
 
 export class WorldGenerator {
-  static generate(world: World, theme: string, reservedZone?: ReservedZone, totalTasks: number = 50, numForklifts: number = 3) {
+  private static getPalletWeight(priorityMode: TaskPriorityMode): number {
+    return priorityMode === 'uniform' ? 100 : Math.floor(Math.random() * 50) + 10;
+  }
+
+  static generate(world: World, theme: string, reservedZone?: ReservedZone, totalTasks: number = 50, numForklifts: number = 3, priorityMode: TaskPriorityMode = 'mixed') {
     world.clear();
 
     switch (theme) {
@@ -23,7 +27,7 @@ export class WorldGenerator {
         this.generateOpen(world, reservedZone);
         break;
       case 'Warehouse':
-        this.generateWarehouse(world, reservedZone, totalTasks, numForklifts);
+        this.generateWarehouse(world, reservedZone, totalTasks, numForklifts, priorityMode);
         break;
       default:
         this.generateRandom(world, reservedZone);
@@ -44,7 +48,7 @@ export class WorldGenerator {
                  world.pallets.push({
                      id: `PLT-${this.generateUUID()}`,
                      position: { x, y, z },
-                     weight: Math.floor(Math.random() * 50) + 10,
+                     weight: this.getPalletWeight(priorityMode),
                      payload_type: Math.random() > 0.5 ? 'camera' : 'rfid'
                  });
              }
@@ -65,7 +69,7 @@ export class WorldGenerator {
       return Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
   }
 
-  private static generateWarehouse(world: World, reservedZone?: ReservedZone, totalTasks: number = 50, numForklifts: number = 3) {
+  private static generateWarehouse(world: World, reservedZone?: ReservedZone, totalTasks: number = 50, numForklifts: number = 3, priorityMode: TaskPriorityMode = 'mixed') {
       const aisleWidth = WAREHOUSE.AISLE_WIDTH;
       const rackDepth  = WAREHOUSE.RACK_HEIGHT;  // depth of each rack cluster (voxels)
       const maxRackHeight = Math.min(world.size - 2, DEFAULT_MAX_ALTITUDE);
@@ -97,7 +101,7 @@ export class WorldGenerator {
                       world.pallets.push({
                           id: `PLT-${this.generateUUID()}`,
                           position: { x, y, z },
-                          weight: Math.floor(Math.random() * 50) + 10,
+                          weight: this.getPalletWeight(priorityMode),
                           payload_type: Math.random() > 0.5 ? 'camera' : 'rfid'
                       });
                   }

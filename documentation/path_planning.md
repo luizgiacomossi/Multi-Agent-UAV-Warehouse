@@ -1,76 +1,135 @@
-# Multi-Agent Path Finding (MAPF) via Prioritized Planning on Time-Expanded Graphs
+# Path Planning
 
-VoxelSwarm implements several distinct search strategies mapped through the `PathFindingStrategy` abstract class. The primary mechanism for collision-free trajectory generation is **Prioritized Planning over Time-Expanded Graphs (Cooperative A*)**.
+## 1. Search Space
 
-## 1. Problem Formulation: Multi-Agent Path Finding (MAPF)
+The planners operate on a time-expanded voxel graph. A search state is
 
-Given a set of agents $A = \{a_1, \dots, a_k\}$ and a set of tasks $\mathcal{T}$, the Multi-Agent Path Finding (MAPF) problem instance is formally defined as a tuple $\Sigma = (G, A, \mathcal{T})$. The objective is to find a set of collision-free plans $\Pi = \{\pi_1, \dots, \pi_k\}$ from their respective start locations $S = \{s_1, \dots, s_k\}$ to their goal locations $G_{oal} = \{g_1, \dots, g_k\}$ within a discretized 3D grid environment.
+\[
+n = (x,y,z,t),
+\]
 
-Coupled global $A^*$ approaches model joint configuration spaces, suffering an exponential runtime explosion $O((|V| \cdot T)^k)$. Therefore, VoxelSwarm utilizes a Decoupled, Prioritized formulation to guarantee polynomial-time resolution.
+with accumulated path cost \(g(n)\), heuristic \(h(n)\), and evaluation
 
-### 1.1 The Environment and Graph Model
-The environment is modeled as a directed graph $G(V, E)$, where vertices $V \subset \mathbb{Z}^3$ represent unoccupied voxel coordinates.
-For a voxel $v = (x, y, z)$, the valid transition neighborhood $\mathcal{N}(v)$ includes the 6 cardinal directions (Von Neumann neighborhood) and the voxel itself (representing a "wait" action):
-$$ \mathcal{N}(v) = \{ u \in V \mid \|u - v\|_1 \le 1 \} $$
+\[
+f(n)=g(n)+h(n).
+\]
 
-### 1.2 Constraints
-A valid solution requires that for any two agents $a_i, a_j$:
-1. **Vertex Constraint**: $\forall t, \forall i \neq j, \pi_i(t) \neq \pi_j(t)$ (No two agents occupy the same voxel simultaneously).
-2. **Edge Constraint**: $\forall t, \forall i \neq j, \neg (\pi_i(t) = \pi_j(t+1) \land \pi_i(t+1) = \pi_j(t))$ (No pass-through/swapping).
+The successor relation uses the six cardinal moves plus wait.
 
-## 2. Cooperative A* (Prioritized Planning)
+## 2. Reservation Encoding
 
-This algorithm serializes path planning. A strict priority index ensures lower-priority agents navigate around the pre-computed routes of higher-priority peers. 
+The implemented reservation table stores occupied vertex-time pairs in a `Set<number>`. The hash function is
 
-1. Agent $a_1$ plans a path ignoring all other agents.
-2. Agent $a_1$'s path is treated as a dynamic obstacle in the **Space-Time Reservation Table** $\mathcal{R}$.
-3. Agent $a_2$ plans a path avoiding static obstacles AND any spatiotemporal state $(x,y,z,t) \in \mathcal{R}$.
-4. This repeats sequentially for all $a_i$.
+\[
+\operatorname{key}(x,y,z,t)
+=
+x + (y \ll 6) + (z \ll 12) + (t \ll 18).
+\]
 
-### 2.1 Space-Time Reservation Table ($\mathcal{R}$) implementation
-The planner projects the grid into continuous time, shifting graph traversal from $V_{3D} \to V_{4D}$. As agent $a_i$ generates the path list $[-n-\dots-n_{final}]$, each state coordinate including its `time` integer is inserted into a distributed hash map.
+This encoding assumes the relevant coordinate ranges fit within those bit fields.
 
-To achieve $O(1)$ collision checks during node expansion for agent $j (j > i)$, the coordinate tensor is compressed via bitwise shifting:
-$$ \text{key} = x \lor (y \ll 6) \lor (z \ll 12) \lor (t \ll 18) $$
-$$ \text{if } hash \in \mathcal{R}: \text{prune node from OpenSet} $$
+The reservation table is used by the cooperative planners to reject successor states already claimed by previously planned drones or by forklifts.
 
-Waiting actions ($x, y, z, t \to x, y, z, t+1$) naturally resolve temporal conflicts, allowing agent $j$ to hover until a corridor opens.
+## 3. Blocked-Goal Repair
 
-### 2.2 Re-Routing Goal Obstructions
-If a target coordinate $g$ overlaps an explicit structural object (like a Pallet), the solver dynamically executes a bounded 5-iteration Breadth-First Search (BFS) to find the nearest unoccupied Von Neumann neighbor $\mathcal{N}(g)$, resolving target blockages $O(b^d)$ immediately.
+Warehouse pallets occupy blocked voxels. To make those tasks reachable, `nearestFreeNeighbor(...)` performs a bounded breadth-first search around the requested goal until a free adjacent voxel is found.
 
-## 3. Heuristic Implementation and Graph Edge Costs
+The search:
 
-The $f$-cost function dictates algorithmic search behavior: $f(n) = g(n) + h(n)$.
-We utilize the **Manhattan Distance ($\ell_1$ norm)** as our consistent, admissible heuristic $h(n)$.
+- expands only non-wait neighbors,
+- stops after at most 200 visited states,
+- returns the original blocked goal if no repair is found.
 
-VoxelSwarm implements two A* variations corresponding to specific cost structures:
+Thus reachability is improved heuristically, not guaranteed.
 
-### 3.1 Naive/Cooperative A* (Time-Optimal)
-Designed to minimize flowtime/time-steps.
-$$ g(n) = t $$
-$$ Cost(Move) = 1.0, \quad Cost(Wait) = 1.0 $$
+## 4. Implemented A* Variants
 
-### 3.2 Energy Saver A* (Energy-Optimal)
-Simulates realistic quadrotor energy dynamics where stationary hovering utilizes significantly less battery capacity than lateral thrust vectors.
+### 4.1 `NaivePlanner`
 
-$$ g(n) = \sum C_{action} $$
-Where $C_{wait} = \beta_{hover} = 0.1$ and $C_{move} = \beta_{fly} = 1.0$.
+`NaivePlanner` ignores the shared reservation table and runs A* independently for each drone. It therefore does not attempt dynamic deconfliction between drones. Collisions are detected after planning.
 
-To maintain admissibility, the Manhattan distance is normalized by the lowest possible energy expenditure required to reach the target:
-$$ h_{energy}(n) = \ell_1(\text{pos}, \text{goal}) \times \beta_{fly} $$
+Its A* objective is time-step minimization:
 
-This drastically alters swarm emergent behavior. A blocked drone will prefer to wait $10$ seconds to let a corridor clear (cost $1.0$) rather than taking a $4$-step detour (cost $4.0$).
+\[
+g(n)=\text{number of elapsed actions from the leg start}.
+\]
 
-## 4. Complexity Analysis 
-* **State Space Size**: $|V| \cdot T$ (where $T = \text{max timesteps}$).
-* **Single Path**: $O(|V| \cdot T \log(|V| \cdot T))$.
-* **Total Swarm Complexity**: $O(k \cdot |V| \cdot T \log(|V| \cdot T))$.
-* **Memory Complexity**: Exploring the Time-Expanded Graph requires maintaining the Reservation Table $\mathcal{R}$ and A* Closed Sets, bottlenecking at $O(k \cdot T)$. Since optimal path lengths roughly correspond to the grid diameter $D$, this approximates to $O(k \cdot D)$.
+The heuristic is Manhattan distance:
 
-This predictable linear scaling with relation to $k$ permits the 60 FPS Browser visualization without blocking the main renderer execution thread excessively.
+\[
+h(n)=\lVert pos(n)-goal \rVert_1.
+\]
 
-## 5. Algorithmic Limitations
+### 4.2 `CooperativePlanner`
 
-1.  **Incompleteness**: Prioritized planning is theoretically incomplete. A solution may exist, but the greedy reservation by a high-priority agent might permanently block a lower-priority agent (e.g., parking inside a narrow tunnel exit).
-2.  **Suboptimality**: The sum of costs (makespan flowtime) is globally suboptimal. High-priority agents possess no intelligence to "cooperate" or yield pathing matrices to clear the way for slower/battery-drained peers.
+`CooperativePlanner` uses the same A* cost function as the naive planner, but it rejects reserved vertex-time states.
+
+For each previously planned path \(\pi_i\), the planner inserts:
+
+- every occupied vertex-time pair on the path,
+- the goal voxel for four extra time steps after arrival.
+
+This introduces a simple yielding mechanism for later-planned drones.
+
+### 4.3 `EnergySaverPlanner`
+
+`EnergySaverPlanner` changes the A* objective to an energy-like additive cost.
+
+For a move action:
+
+\[
+c_{move}=\beta_{fly},
+\]
+
+and for a wait action:
+
+\[
+c_{wait}=\beta_{hover}.
+\]
+
+The accumulated path cost becomes
+
+\[
+g(n)=\sum_{\ell \le n} c_{\ell}.
+\]
+
+The heuristic is
+
+\[
+h(n)=\beta_{fly}\lVert pos(n)-goal \rVert_1.
+\]
+
+Because \(\beta_{hover} > \beta_{fly}\) in the current configuration, waiting is actually more expensive than moving. That is the opposite of what the older documentation claimed.
+
+## 5. Battery Constraint During Planning
+
+Each search state also tracks an `energy` field. Successors are pruned if this exceeds `maxEnergy`.
+
+However, the runtime planners currently pass `drone.maxBattery`, not the drone's actual residual battery at the current mission stage. So the search horizon is energy-bounded only by nominal full capacity, not by exact remaining charge after earlier legs.
+
+This is one of the most important implementation gaps between the mathematical intention and the current planner behavior.
+
+## 6. What Safety Is Actually Enforced
+
+The current planners enforce only vertex-time avoidance through reservations. They do not explicitly reserve directed edges, so the standard MAPF edge-swap constraint
+
+\[
+\pi_i(t)=\pi_j(t+1), \quad
+\pi_i(t+1)=\pi_j(t)
+\]
+
+is not directly prevented for drone-drone interactions.
+
+Therefore the code should not be described as implementing the full classical MAPF conflict model. It implements a weaker reservation scheme that works well in many cases but is not complete with respect to all pairwise conflicts.
+
+## 7. Complexity
+
+If the search horizon is capped by \(T\) and the free-space volume is \(|V|\), then the time-expanded state space is \(O(|V|T)\). With a standard sorted open list, one leg search is roughly
+
+\[
+O(|V|T \log(|V|T))
+\]
+
+in the usual A* sense.
+
+The multi-drone cooperative approach multiplies this by the number of planned drones, but remains a decoupled rather than coupled solver.

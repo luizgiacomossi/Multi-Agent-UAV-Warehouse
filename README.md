@@ -1,84 +1,62 @@
-# VoxelSwarm: Distributed Multi-Agent Path Finding & Centralized Task Allocation Visualizer
+# VoxelSwarm
 
-![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?style=for-the-badge&logo=typescript&logoColor=white)
-![React](https://img.shields.io/badge/React_19-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)
-![Three.js](https://img.shields.io/badge/Three.js-black?style=for-the-badge&logo=three.js&logoColor=white)
+VoxelSwarm is a browser-based simulator and visualizer for centralized multi-drone task allocation and grid-based multi-agent path planning in discretized 3D environments. The project combines a TypeScript simulation core with a React and Three.js frontend so that planning, allocation, playback, and incident inspection can be studied from the same executable artifact.
 
-## 📖 Abstract
+The repository is best understood as an experimental platform for:
 
-**VoxelSwarm** is a rigorous, math-driven simulation framework and visualizer designed for analyzing **Multi-Agent Path Finding (MAPF)** and **Centralized Task Allocation** in complex $\mathbb{Z}^3$ environments (e.g., automated warehouse setups).  
+- centralized task allocation using the Hungarian algorithm,
+- prioritized multi-agent path planning on a time-expanded voxel grid,
+- battery-aware mission feasibility screening,
+- clustered warehouse inspection missions,
+- replayable execution traces with post hoc collision and battery incident analysis.
 
-Built with a strictly decoupled architecture, the logic kernel operates independently from the React-Three-Fiber WebGL rendering engine. The simulation relies on polynomial-time **Prioritized Planning on Time-Expanded Graphs (Cooperative A*)** coupled with optimal **Hungarian (Munkres) Bipartite Assignments**, providing an executable testbed for PhD-level autonomous systems research, fault-tolerance benchmarking, and swarm intelligence.
+## What The Current Implementation Actually Contains
 
----
+The codebase implements the following major mechanisms.
 
-## ✨ Core Features & Research Implementations
+- A 3D voxel world stored in a flattened `Uint8Array`; see [`classes/World.ts`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/classes/World.ts).
+- Procedural world generation for warehouse, city, tunnel, open, and random themes; see [`classes/WorldGenerator.ts`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/classes/WorldGenerator.ts).
+- Three path planners:
+  - `Naive`
+  - `Cooperative`
+  - `Energy Saver`
+  These are implemented in [`classes/PathPlanner.ts`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/classes/PathPlanner.ts).
+- Centralized allocation with `munkres-js`; see [`classes/CostModel.ts`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/classes/CostModel.ts).
+- Optional clustered missions built from a KD-tree neighborhood query and a greedy intra-cluster tour heuristic; see [`utils/KDTree.ts`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/utils/KDTree.ts) and [`classes/TaskCluster.ts`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/classes/TaskCluster.ts).
+- Deterministic playback from precomputed paths, including battery depletion, recharging, and crash/fall visualization; see [`classes/Drone.ts`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/classes/Drone.ts).
+- Console-driven experiment helpers for Monte Carlo allocation sweeps and a simplified fault-injection timing scenario; see [`classes/SimulationManager.ts`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/classes/SimulationManager.ts).
 
-### 1. Mathematical Cost Integrations
-The solver utilizes non-linear cost formulas evaluated prior to node dispatching:
-*   **Energy Requirements**: Calculates continuous flight ($\beta_{fly}$) and hovering ($\beta_{hover}$) penalty weights via route compensation factor ($\gamma$).
-*   **Feasibility Filters**: Drops unfeasible drones with insufficient batteries to an infinite assignment threshold ($\Omega$).
-*   **Battery Constraints**: Dynamic cost matrices ($\Phi_1, \Phi_2$) weight absolute distance linearly against exponential battery barriers, enforcing safe-return padding ($\delta_{safe}$).
+## Important Scope Notes
 
-### 2. Task Allocation Integrity
-The system implements the **Hungarian Munkres algorithm** natively evaluated across a dynamically sizing $N \times M$ padding tensor. This guarantees that drones calculate mathematically perfect global-minima task assignments (e.g., Pallet scanning) prior to disembarking, bypassing local-minima traps inherent to greedy heuristic solvers.
+The earlier documentation overstated several aspects of the implementation. The revised documentation in [`documentation/`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/documentation) now matches the code more closely.
 
-### 3. Procedural Warehouse Synthesizer
-*   **Physical Tracking**: Actionable targets (Pallets) function as trackable database records handling varying payloads (RFID, Camera) and specific weights scattered procedurally across Volumetric Storage Racks in parameterized aisles.
-*   **Dynamic Obstacles**: The environment simulates looping ground-level Forklifts. Pathfinders predictively map these continuous $(x,y,z,t)$ vectors to proactively reserve global space-time indices, ensuring deterministically safe routing.
+In particular:
 
----
+- clustered missions are implemented, but cluster tours are greedy nearest-neighbor heuristics, not exact TSP solutions;
+- the planner uses vertex-time reservation, but it does not explicitly reserve drone edge swaps, so the classical full MAPF edge-conflict model is not fully implemented;
+- the `Energy Saver` planner changes the A* objective, but the other planners still optimize time steps rather than a full energy objective;
+- the 1-to-1 allocator applies Hungarian matching only to a truncated subset of currently available pallets, not to the full remaining task set;
+- the experiment utilities are useful, but they are not full benchmark suites with all baselines implemented.
 
-## 🔬 Experimental Benchmarking (DevTools Export)
+## Documentation Map
 
-The Control Panel GUI natively supports automated testing loops that trace metrics (Makespan matrices, energy deviations, crash logs) directly to the browser DevTools console natively formatted for MATLAB/Python extraction.
+- [`documentation/overview.md`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/documentation/overview.md): project scope and research framing
+- [`documentation/architecture.md`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/documentation/architecture.md): software architecture and execution flow
+- [`documentation/simulation.md`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/documentation/simulation.md): world model and procedural environments
+- [`documentation/task_allocation.md`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/documentation/task_allocation.md): implemented cost model and assignment logic
+- [`documentation/path_planning.md`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/documentation/path_planning.md): implemented planners and reservation mechanics
+- [`documentation/agent_model.md`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/documentation/agent_model.md): drone state, mission controller, and battery dynamics
+- [`documentation/communication.md`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/documentation/communication.md): centralized coordination model
+- [`documentation/control_and_execution.md`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/documentation/control_and_execution.md): planning, playback, and incident timing
+- [`documentation/algorithms.md`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/documentation/algorithms.md): auxiliary algorithms and experiment helpers
+- [`documentation/design_decisions.md`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/documentation/design_decisions.md): design rationale and tradeoffs
+- [`documentation/limitations.md`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/documentation/limitations.md): current limitations and concrete future work
 
-*   **Experiment 2 (Monte Carlo Loop)**: Triggers $50$ randomized execution iterations. Spawns synthetic drones evaluating initial battery loads ($50-100\%$) and randomized payloads against 50 targeted warehouse tasks. Benchmarks standard deviations of energy draw and overall operational flowtime.
-*   **Experiment 3 (Fault Injection Trigger)**: Evaluates autonomous recovery capability. Injects an instantaneous catastrophic battery collapse into Drone 2 exactly at $T=60s$. The framework benchmarks $t_{recovery}$ algorithms (in milliseconds) as the central `CostModel` dynamically strips the failed agent and natively re-executes the Bipartite Matching to orchestrate the remaining swarm.
+## Running The Project
 
----
+```bash
+npm install
+npm run dev
+```
 
-## 🛠️ Architecture and Stack
-
-*   **Logic Layer**: Pure TypeScript, implementing object-oriented Models (`Drone.ts`, `CostModel.ts`) and Strategy Patterns (`PathPlanner.ts`).
-*   **Presentation Layer**: **React 19** paired with **React Three Fiber (R3F)**. Employs optimized `THREE.InstancedMesh` logic mapping GPU buffers directly to the discrete Time-Expanded Graph, effortlessly maintaining a 60 FPS playback on dense agent counts. 
-
----
-
-## 📚 PhD-Level Documentation
-
-An exhaustive breakdown of algorithmic derivations, complexity metrics, and physical limitations is available in the [`/documentation`](./documentation/) directory.
-
-*   [`overview.md`](./documentation/overview.md) - Context and broad design.
-*   [`architecture.md`](./documentation/architecture.md) - System layout, React-Decoupling, and Data Flow.
-*   [`simulation.md`](./documentation/simulation.md) - $\mathbb{Z}^3$ Space formulation and Procedural Generation.
-*   [`task_allocation.md`](./documentation/task_allocation.md) - Exact mathematical cost matrix implementation (Munkres constraints).
-*   [`path_planning.md`](./documentation/path_planning.md) - Prioritized Planning heuristics, Energy constraints, and $A^*$ optimization.
-*   [`agent_model.md`](./documentation/agent_model.md) - Deterministic tracking and physical battery simulations.
-*   [`communication.md`](./documentation/communication.md) - Implicit space-time reservation methodologies.
-*   [`control_and_execution.md`](./documentation/control_and_execution.md) - Pre-computation asynchronous loops vs. WebGL ticking.
-*   [`algorithms.md`](./documentation/algorithms.md) - Monte Carlo arrays, Goal-Unblocking BFS, and Fault Tolerance. 
-*   [`limitations.md`](./documentation/limitations.md) - Formal identification of system abstractions (e.g., continuous rigid-body dynamics, partial SLAM observability).
-
----
-
-## 🚀 Installation & Execution
-
-Ensure you have Node.js and NPM installed on your machine.
-
-1.  **Clone the Repository**
-2.  **Install Dependencies**:
-    ```bash
-    npm install
-    ```
-3.  **Run Development Server**:
-    ```bash
-    npm run dev
-    ```
-4.  **View Interface**: Navigate to the local URL (typically `http://localhost:5173`).
-5.  **View Experiment Logs**: Open your browser's Developer Console (e.g., `Cmd+Option+J` on Mac/Chrome) to monitor runtime task allocation constraints and Monte Carlo statistical payloads.
-
----
-
-## ⚖️ License
-MIT License. Designed strictly for educational and academic research contexts.
+The default Vite dev server runs locally and the experiments can be triggered from the control panel. Their output is written to the browser console.

@@ -1,30 +1,51 @@
-# Communication & Swarm Coordination
+# Coordination and Communication Model
 
-Unlike decentralized, ad-hoc reactive models typical in multi-robot systems (where nodes implement peer-to-peer data interchange mechanisms like ROS2 DDS or mesh UDP), **VoxelSwarm is inherently architected as a Centralized Control Simulator.**
+## 1. Centralized Coordination
 
-Because the primary objective involves evaluating computational pathing overhead ($A^*$ heuristics and Centralized Bipartite Matching models), simulating true $n$-to-$n$ asynchronous network protocols would obfuscate the specific structural metrics the research aims to quantify.
+VoxelSwarm is a centralized simulator. There is no explicit peer-to-peer communication protocol between drones.
 
-## 1. Implicit Information Exchange
+Coordination happens through shared centralized data structures owned by the planner:
 
-The "Communication" among drone actors is fundamentally abstracted. Agents share knowledge implicitly via a globally readable construct: the **Space-Time Reservation Table ($ \mathcal{R} $)**.
+- the world state,
+- the task list,
+- the reservation table,
+- the mission allocator.
 
-When Agent $\alpha_1$ identifies its $1000$-tick optimal route across the warehouse format, it "broadcasts" the projected indices directly to $\mathcal{R}$. Agent $\alpha_{j > 1}$ operates under the assumption it maintains absolute, unimpeded access to this trajectory graph subset.
+Therefore the correct conceptual analogue is a fleet-management server or ground-station planner, not a decentralized swarm protocol.
 
-### 1.1 Analogs to Real-World Swarm Intelligence
-In a physically deployed environment based heavily on this codebase's control pipeline, this logic mirrors a **Centralized Cloud/Ground Station Controller**. 
-1. Real physical drones transmit latency-buffered positional telemetry to the Fleet Manager server.
-2. The central node calculates the Time-Expanded Cooperative iterations.
-3. The resultant array sequences $\pi_1 \dots \pi_k$ are packaged as discrete waypoint streams and transmitted downstream directly to the individual flight controllers (e.g., PX4/Mavlink via WiFi/LTE).
+## 2. Implicit Information Sharing
 
-## 2. Coordination and Deadlock Mitigation
+The main coordination structure is the reservation table
 
-By maintaining deterministic centralization, the framework automatically bypasses classic decentralized consensus flaws, notably **Liveline Deadlocks** (e.g., two drones approaching symmetrically, stopping to re-calculate, and moving identically leading to indefinite cycling).
+\[
+\mathcal{R} \subset \mathcal{V} \times \mathbb{N}.
+\]
 
-The priority strictness ($\alpha_i > \alpha_j \implies A_i$ moves flawlessly, $A_j$ yields fully) prevents cyclical dependencies in the decision loop geometry.
+When a higher-priority drone is planned first, its path states are inserted into \(\mathcal{R}\). Later drones treat those states as unavailable.
 
-### 2.1 Environmental Restrictions
-If a target vector involves highly non-convex routing (e.g., internal Tunneled architecture algorithms), $A_j$ relies on the implicit $h(n)$ loop expansion cost (A* Wait Edge $t \to t+1$) to coordinate passing behaviors. Agent $j$ mathematically realizes hovering indefinitely causes a cheaper $f$-cost than penetrating the dynamically-sealed spatiotemporal nodes published by $A_i$.
+Thus information sharing is implicit and perfect:
 
-## 3. Fault-Tolerant Reallocation Comms
-During catastrophic component simulations (Execution Pipeline Experiment 3: fault injection via `battery = 10`), the centralized Simulation Manager loop detects failure directly on the `calculateStateAt(tick)` validation tick. 
-The Swarm Coordinator universally "hears" the drop, dynamically strips the orphaned task from the corrupted subset tree, and iteratively runs the core `CostModel.ts` allocation to re-evaluate the closest unassigned (or healthy returning) neighboring module.
+- no packet loss,
+- no latency,
+- no bandwidth limit,
+- no asynchronous disagreement.
+
+This is mathematically clean for algorithm comparison, but it is also a strong abstraction.
+
+## 3. Priority Rule
+
+The cooperative planners enforce a strict plan-order priority. Earlier drones acquire spatiotemporal rights first, later drones adapt.
+
+This removes some negotiation complexity, but it also means:
+
+- the system is order-sensitive,
+- lower-priority drones may become stranded,
+- a feasible joint solution can still be missed.
+
+## 4. Dynamic Obstacles
+
+Forklifts are also inserted into the reservation structure before drone planning begins. From the drone planner's perspective, they are deterministic moving obstacles with full future observability.
+
+## 5. Fault Handling
+
+Battery incidents and collisions are not negotiated between drones. They are detected centrally after planning, then exposed to the UI as incidents. The separate fault-tolerance experiment also performs reassignment from a centralized viewpoint.

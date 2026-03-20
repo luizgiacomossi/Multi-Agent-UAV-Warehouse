@@ -1,4 +1,4 @@
-import { Position3D, Pallet, Forklift } from '../types';
+import { Position3D, Pallet, Forklift, TaskPriorityMode } from '../types';
 import { WorldGenerator, ReservedZone } from './WorldGenerator';
 import { Warehouse } from './Warehouse';
 
@@ -71,8 +71,8 @@ export class World {
       }
   }
 
-    public generate(theme: string, reservedZone?: ReservedZone, totalTasks: number = 50, numForklifts: number = 3) {
-        WorldGenerator.generate(this, theme, reservedZone, totalTasks, numForklifts);
+    public generate(theme: string, reservedZone?: ReservedZone, totalTasks: number = 50, numForklifts: number = 3, priorityMode: TaskPriorityMode = 'mixed') {
+        WorldGenerator.generate(this, theme, reservedZone, totalTasks, numForklifts, priorityMode);
     }
 
   public generateStations(count: number) {

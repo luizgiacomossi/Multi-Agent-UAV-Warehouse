@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { Play, Pause, RotateCcw, Box, Grid3X3, Settings, Building2, ShieldCheck, Skull, Shuffle, Cpu, Repeat, Battery, Zap, Infinity as InfinityIcon, ArrowUpToLine, Power } from 'lucide-react';
-import { GenerationTheme } from '../types';
+import { GenerationTheme, TaskPriorityMode } from '../types';
 
 interface ControlPanelProps {
   isPlaying: boolean;
@@ -52,6 +52,8 @@ interface ControlPanelProps {
   setTotalTasks: (n: number) => void;
   numForklifts: number;
   setNumForklifts: (n: number) => void;
+  taskPriorityMode: TaskPriorityMode;
+  setTaskPriorityMode: (mode: TaskPriorityMode) => void;
 
   onRunMonteCarlo: () => void;
   onRunFaultTolerance: () => void;
@@ -98,6 +100,8 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   setTotalTasks,
   numForklifts,
   setNumForklifts,
+  taskPriorityMode,
+  setTaskPriorityMode,
   onRunMonteCarlo,
   onRunFaultTolerance
 }) => {
@@ -201,6 +205,33 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                  onChange={(e) => setTotalTasks(Number(e.target.value))}
                  className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-cyan-500"
               />
+         </div>
+
+         <div className="space-y-2">
+              <div className="flex items-center gap-1 text-xs text-slate-400">
+                 <ShieldCheck size={12} /> Task Priorities
+              </div>
+              <div className="flex items-center justify-between bg-slate-900 p-1 rounded-lg border border-slate-700 gap-1">
+                  {([
+                    { mode: 'uniform', label: 'Same' },
+                    { mode: 'mixed', label: 'Mixed' }
+                  ] as const).map(({ mode, label }) => {
+                    const isSelected = mode === taskPriorityMode;
+                    return (
+                      <button
+                        key={mode}
+                        onClick={() => setTaskPriorityMode(mode)}
+                        className={`flex-1 py-1.5 text-[10px] rounded-md transition-all font-medium ${
+                          isSelected
+                            ? 'bg-emerald-600 text-white shadow-sm border border-emerald-500'
+                            : 'text-slate-500 hover:text-slate-300'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+              </div>
          </div>
 
          {/* Forklifts Slider */}

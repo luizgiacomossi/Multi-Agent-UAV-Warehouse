@@ -48,6 +48,8 @@ export interface Pallet {
   payload_type: string;
 }
 
+export type TaskPriorityMode = 'uniform' | 'mixed';
+
 export interface Forklift {
   id: string;
   name: string;

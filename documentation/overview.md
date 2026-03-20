@@ -1,25 +1,108 @@
 # Project Overview
 
-## 1. Introduction
+## 1. Purpose
 
-The **VoxelSwarm** platform is a high-fidelity, web-based simulation environment designed for the rigorous analysis of Multi-Agent Path Finding (MAPF), task allocation, and autonomous swarm behaviors in complex, discretized 3D environments ($\mathbb{Z}^3$). 
+VoxelSwarm is an executable research prototype for studying centralized coordination of multiple drones in a discretized 3D environment. The system combines:
 
-Originating out of research in autonomous systems and swarm intelligence, the project serves as an executable testbed to evaluate trade-offs in computational tractability, sub-optimality, and energy constraints in multi-drone logistics operations (such as automated warehouse inventory inspection).
+- task allocation,
+- path planning,
+- mission execution,
+- battery bookkeeping,
+- and interactive visualization.
 
-## 2. Research Context and Goals
+The core research question represented in the codebase is not "how to solve general MAPF optimally," but rather:
 
-State-of-the-art multi-agent planning often faces the curse of dimensionality. Coupled approaches to MAPF scale exponentially $O(|V|^k)$ with respect to the number of agents $k$. VoxelSwarm implements decoupled, heuristic-driven methods—namely Prioritized Planning on Time-Expanded Graphs (Cooperative A*)—to achieve polynomial-time resolution of complex spatial-temporal conflicts. 
+How far can a browser-hosted, centralized, heuristic planning stack go while remaining interpretable, inspectable, and computationally tractable?
 
-The primary research objectives addressed by this repository are:
-1. **Scalable Task Allocation**: Implementing globally optimal centralized assignment strategies utilizing the Hungarian algorithm (Munkres) coupled with composite multi-objective cost functions (distance minimization + non-linear battery degradation).
-2. **Energy-Aware Pathing**: Exploring the impact of biologically inspired or strict operational constraints (e.g., flight vs. hover drain dynamics) on optimal routing through non-uniform cost functions.
-3. **Fault Tolerance and Resilience**: Simulating dynamic task reallocation under simulated catastrophic agent failures (e.g., mid-flight battery exhaustion) with measurable recovery latencies.
+## 2. Problem Setting
 
-## 3. Scope of the Implementation
+Let the environment be a finite voxel grid
 
-The repository is structured to separate algorithmic logic purely in standard TypeScript, decoupled from the React 19 / React-Three-Fiber frontend. This ensures that the simulation can be run in headless environments or WebWorkers for large-scale Monte Carlo data gathering. 
+\[
+\mathcal{V} = \{0,\dots,S-1\}^3 \subset \mathbb{Z}^3,
+\]
 
-Key features include:
-* **Procedural Environments**: Stochastic Volumetric Generation supporting urban canyons, tunnel networks, and warehouse rack configurations.
-* **Deterministic Execution State**: Physics and agent states are resolvable purely via discrete time ticks without side effects, enabling accurate replay and theoretical validation.
-* **Algorithmic Extensibility**: A Strategy-pattern implementation allowing hot-swapping between solvers (Naive, Cooperative, Energy-Saver) and observing emergent macroscopic swarm properties.
+with obstacle set \(\mathcal{O} \subset \mathcal{V}\), drone set
+
+\[
+\mathcal{A} = \{a_1,\dots,a_N\},
+\]
+
+and task set
+
+\[
+\mathcal{T} = \{\tau_1,\dots,\tau_M\}.
+\]
+
+Each drone has:
+
+- a start state \(s_i \in \mathcal{V}\),
+- a battery level \(B_i\),
+- a payload capability set \(P_i\),
+- a precomputed path \(\pi_i : \{0,\dots,T_i\} \to \mathcal{V}\).
+
+Each task has:
+
+- a target voxel \(g_k \in \mathcal{V}\),
+- a required payload type \(r_k\),
+- a hover duration \(t_k^{hover}\),
+- a scalar priority \(\pi_k > 0\).
+
+The implemented workflow decomposes the overall problem into two coupled subproblems:
+
+1. Assign currently idle drones to tasks or task clusters.
+2. Plan collision-avoiding legs sequentially using a prioritized space-time reservation table.
+
+## 3. What Is Implemented
+
+The repository currently implements the following stack.
+
+### 3.1 Allocation
+
+`CostModel` builds a dense cost matrix and solves a linear assignment problem using the Hungarian algorithm through `munkres-js`; see [`classes/CostModel.ts`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/classes/CostModel.ts).
+
+### 3.2 Path planning
+
+`PathPlanner` provides:
+
+- `NaivePlanner`,
+- `CooperativePlanner`,
+- `EnergySaverPlanner`.
+
+These planners search a time-expanded grid and append one mission leg at a time; see [`classes/PathPlanner.ts`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/classes/PathPlanner.ts).
+
+### 3.3 Mission control
+
+`MissionController` manages the mission state machine:
+
+- `IDLE`
+- `OUTBOUND`
+- `EXECUTING_TOUR`
+- `RETURNING`
+- `COMPLETED`
+
+This is implemented in [`classes/MissionController.ts`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/classes/MissionController.ts).
+
+### 3.4 Clustered warehouse inspection
+
+The code supports a cluster allocation mode. Clusters are built locally from nearby pallets using a KD-tree range query, and each cluster is internally ordered by a greedy nearest-neighbor tour heuristic. This is important: the implementation is heuristic, not an exact mTSP or TSP solver.
+
+## 4. What Is Not Implemented
+
+The code should not be described as containing any of the following, because it does not.
+
+- Conflict-Based Search
+- optimal coupled MAPF
+- decentralized inter-agent communication
+- exact TSP optimization inside clusters
+- full benchmark baselines for Monte Carlo experiments
+- full online replanning from actual residual battery during search
+
+## 5. Documentation Philosophy
+
+The revised documentation aims at a PhD-appropriate standard in two senses:
+
+1. The mathematical notation is explicit enough to support a methods section.
+2. The claims are constrained to what the code actually does.
+
+Where the implementation uses a heuristic or approximation, this is stated directly rather than framed as a stronger result.

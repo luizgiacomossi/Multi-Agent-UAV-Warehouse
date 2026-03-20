@@ -1,41 +1,95 @@
-# Agent Model and Behavior Structures
+# Agent Model and Mission Dynamics
 
-The agent entities represented in VoxelSwarm (`Drone`) act as finite state automata encapsulating discrete spatial tracking, physical battery simulation, and decoupled objective pipelines.
+## 1. Drone State Representation
 
-## 1. Kinematic Arrays and Structural Physics
+Each drone stores a discrete path
 
-Rather than processing real-time object positions via delta-time Newtonian integrations (typical of continuous engine models like Unity), VoxelSwarm utilizes a **Deterministic History Array**.
+\[
+\pi_i = [p_i(0), p_i(1), \dots, p_i(T_i)],
+\]
 
-When Pathfinding resolves iteratively, the solution expands a simple continuous array `drone.path: Position3D[]`.
-Playback interpolation acts explicitly as array reading mechanism defined by the simulation clock context (`globalTick` $\in \mathbb{N}$).
+where each \(p_i(t) \in \mathbb{Z}^3\).
 
-```typescript
-const agentPosition = (tick < path.length) ? path[tick] : start_or_goal;
-```
+The path is not generated online during playback. It is precomputed and later replayed.
 
-### 1.1 Structural Fall Physics (Energy Depletion)
-An explicit exception to linear route adherence occurs during complete battery exhaustion (`deathTick`). The `Drone.calculateStateAt(tick)` function processes the entire path historically:
-*   If theoretical battery drain $\Sigma (C_{fly} + C_{hover})$ forces the integral state to $0$, the `deathTick` is permanently flagged.
-*   Instead of reading the planned path index, rendering calculates gravitational fall: $y(t_{post\_death}) = \max(0, \text{pos}_y - t \cdot 0.8)$. 
+The drone also stores:
 
-## 2. Decision Making Pipeline (MissionController)
+- nominal and current battery values,
+- payload types,
+- scan logs,
+- assignment logs,
+- optional destruction time,
+- mission-controller state.
 
-The internal logic flow representing the deliberative layer is executed via the `MissionController` class.
+## 2. Mission Controller
 
-### 2.1 State Sub-graph
-The primary mission logic relies on reactive transition bindings governed strictly by operational task status:
-*   **`IDLE`**: Awaiting tasks. Will generally path back to $p_{base}$ or loiter depending on configuration (`mustReturnToBase`).
-*   **`OUTBOUND`**: Navigating utilizing resolved `PathPlanner` metrics. Validates progress and checks if global time coordinate alignment aligns with `goal` nodes.
-*   **`RETURNING`**: Milk-Run optimization. Agent completed the forward objective matrix, triggering subsequent planning passes to the closest charging terminal node.
-*   **`COMPLETED` / `STRANDED`**: Terminal status branches halting loop hooks.
+The mission logic is implemented in [`classes/MissionController.ts`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/classes/MissionController.ts).
 
-### 2.2 Leg Iterators
-Path execution involves "Legs" processed symmetrically. When `MissionController.completeLeg()` returns `true`, it informs the `SimulationManager` orchestration loop that the `Drone` memory is contextually free to be mapped via the Hungarian Matrix to a new subset task identifier, enabling essentially limitless simulated cycles (Infinite Mode scenarios).
+The mission-state machine is:
 
-## 3. Battery Degredation Mechanism
+- `IDLE`
+- `OUTBOUND`
+- `EXECUTING_TOUR`
+- `RETURNING`
+- `COMPLETED`
 
-Energy levels are updated incrementally. At time step $t$, the cost to execute action $v_{t-1} \to v_t$:
+The semantics are:
 
-1. Ensure the agent bounds align with defined Station Coordinates. If `Waiting` on a station, $Battery = M_{cap}$ immediately.
-2. Deduct $C_{fly}$ if geometrically advancing ($\Delta x \lor \Delta y \lor \Delta z$).
-3. Deduct $C_{hover}$ if spatial indices are static.
+- `OUTBOUND`: moving toward a single task or the first task of a cluster,
+- `EXECUTING_TOUR`: traversing the remaining tasks of a cluster,
+- `RETURNING`: moving back to the warehouse base,
+- `IDLE`: ready for a new allocation round,
+- `COMPLETED`: no further missions to assign.
+
+Clustered missions keep an internal task index and advance through the tour sequence one leg at a time.
+
+## 3. Path Appending and Scan Registration
+
+When a new leg is planned, `Drone.appendPath(...)` appends all path states except the duplicated starting state. If the leg corresponds to a scan target, the arrival tick is stored in `scanLog`.
+
+This design is subtle:
+
+- `scanLog` is used by the UI to color pallets as scanned at the correct playback tick;
+- the allocation logic separately tracks in-flight tasks so that a pallet is not considered globally completed too early.
+
+## 4. Battery Dynamics
+
+The battery bookkeeping is reconstructed by iterating through the planned path in `calculateStateAt(...)`.
+
+For each time step:
+
+1. If the drone is waiting at base or at a charge station, the battery is reset to `maxBattery`.
+2. Otherwise a move consumes `BETA_FLY`.
+3. A wait consumes `BETA_HOVER`.
+
+Formally, if \(p(t-1)\neq p(t)\), then
+
+\[
+B(t)=B(t-1)-\beta_{fly},
+\]
+
+and if \(p(t-1)=p(t)\), then
+
+\[
+B(t)=B(t-1)-\beta_{hover},
+\]
+
+except at recharging states where \(B(t)=B_{max}\).
+
+## 5. Battery Death And Falling Visualization
+
+If the reconstructed battery reaches zero at tick \(t_d\), the drone records a `deathTick`.
+
+For playback times \(t \ge t_d\), the rendered position becomes:
+
+\[
+x(t)=x(t_d), \quad
+z(t)=z(t_d), \quad
+y(t)=\max\{0, y(t_d)-0.8(t-t_d)\}.
+\]
+
+This is a visualization device rather than a physical flight-dynamics model.
+
+## 6. Collision Destruction
+
+If a collision incident is detected post hoc, `SimulationManager` sets `destructionTime` and truncates the remaining path from that tick onward. The drone then remains stranded for the rest of the replay.

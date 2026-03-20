@@ -2,7 +2,7 @@
 import { World } from './World';
 import { Swarm, Drone } from './Drone';
 import { Warehouse } from './Warehouse';
-import { SimulationIncident, Position3D, Pallet, ClusterVisualization } from '../types';
+import { SimulationIncident, Position3D, Pallet, ClusterVisualization, TaskPriorityMode } from '../types';
 import { ReservedZone } from './WorldGenerator';
 import { KDTree } from '../utils/KDTree';
 import { TaskCluster } from './TaskCluster';
@@ -17,12 +17,20 @@ import { CostModel } from './CostModel';
 import { Task } from '../types';
 import { MAX_TIMESTEPS, GRID_SIZE, DEFAULT_AGENT_COUNT } from '../SimulationConfig';
 
+type PalletReservation = {
+    droneId: string;
+    mode: 'single' | 'cluster';
+    clusterId?: string;
+};
+
 // class SimulationManager is the main class that manages the simulation
 // it connects the frontend (UI) and the backend (Simulation logic)
 export class SimulationManager {
     public world: World;
     public swarm: Swarm;
     private algorithms: Record<string, PathFindingStrategy>;
+    private palletAssignments = new Map<string, PalletReservation>();
+    private completedPalletIds = new Set<string>();
 
     constructor(defaultSize: number = GRID_SIZE, defaultAgentCount: number = DEFAULT_AGENT_COUNT) {
         this.world = new World(defaultSize);
@@ -43,7 +51,7 @@ export class SimulationManager {
         return this.algorithms[name]?.description || "";
     }
 
-    public generateWorld(theme: string, size: number, enableStations: boolean, deployFromBase: boolean, agentCount: number, totalTasks: number = 50, numForklifts: number = 3) {
+    public generateWorld(theme: string, size: number, enableStations: boolean, deployFromBase: boolean, agentCount: number, totalTasks: number = 50, numForklifts: number = 3, priorityMode: TaskPriorityMode = 'mixed') {
         this.world.setSize(size);
 
         let reservedZone: ReservedZone | undefined = undefined;
@@ -58,7 +66,7 @@ export class SimulationManager {
             };
         }
 
-        this.world.generate(theme, reservedZone, totalTasks, numForklifts);
+        this.world.generate(theme, reservedZone, totalTasks, numForklifts, priorityMode);
 
         if (enableStations) {
             const stationCount = size > 20 ? 3 : 1;
@@ -98,6 +106,15 @@ export class SimulationManager {
             p = { x: plt.position.x, y: plt.position.y, z: plt.position.z };
             reqPayload = plt.payload_type;
             palletId = plt.id;
+            return {
+                id: 'T-' + Math.random().toString(36).substr(2, 9),
+                target: p,
+                req_payload: reqPayload,
+                palletId: palletId,
+                pi_k: plt.weight / 100,
+                t_hover: 5,
+                status: 'PENDING'
+            };
         } else {
             // Fallback to random coordinate ONLY if not in a Warehouse
             const worldSizeX = this.world?.size || 24;
@@ -159,7 +176,7 @@ export class SimulationManager {
                 target: { ...plt.position },
                 req_payload: plt.payload_type,
                 palletId: plt.id,
-                pi_k: 1.0,
+                pi_k: plt.weight / 100,
                 t_hover: 5,
                 status: 'PENDING' as const
             }));
@@ -179,6 +196,38 @@ export class SimulationManager {
         }
 
         return clusters;
+    }
+
+    private resetPalletTracking() {
+        this.palletAssignments.clear();
+        this.completedPalletIds.clear();
+    }
+
+    private reservePallet(palletId: string | undefined, reservation: PalletReservation) {
+        if (!palletId || this.completedPalletIds.has(palletId)) return;
+        this.palletAssignments.set(palletId, reservation);
+    }
+
+    private reserveCluster(cluster: TaskCluster, droneId: string) {
+        cluster.tourSequence.forEach(task => {
+            this.reservePallet(task.palletId, {
+                droneId,
+                mode: 'cluster',
+                clusterId: cluster.id
+            });
+        });
+    }
+
+    private completePallet(palletId: string | undefined) {
+        if (!palletId) return;
+        this.palletAssignments.delete(palletId);
+        this.completedPalletIds.add(palletId);
+    }
+
+    private getAvailablePallets(): Pallet[] {
+        return this.world.pallets.filter(plt =>
+            !this.completedPalletIds.has(plt.id) && !this.palletAssignments.has(plt.id)
+        );
     }
 
     public async runPathfinding(
@@ -209,6 +258,13 @@ export class SimulationManager {
                 drone.mission.currentPalletId = drone.currentPalletId;
                 drone.mission.currentScanType = drone.currentScanType || null;
             }
+        });
+        this.resetPalletTracking();
+        this.swarm.drones.forEach(drone => {
+            this.reservePallet(drone.currentPalletId, {
+                droneId: drone.id,
+                mode: 'single'
+            });
         });
 
         // 2. Iterative Simulation Loop
@@ -263,9 +319,14 @@ export class SimulationManager {
             // B. Update Mission States and Batch Assign using Munkres
             const idleDrones: Drone[] = [];
             this.swarm.drones.forEach(drone => {
+                if (drone.status === 'STRANDED') {
+                    return;
+                }
+
                 const prevPallet = drone.mission.currentPalletId;
                 const prevCluster = drone.mission.currentCluster;
                 const readyForNew = drone.mission.completeLeg();
+                this.completePallet(prevPallet);
 
                 // 0.5 Close the historical segment
                 if (prevPallet && drone.assignedTasksLog.length > 0) {
@@ -289,30 +350,11 @@ export class SimulationManager {
             });
 
             if (idleDrones.length > 0) {
-                // Build the exclusion set from in-flight state only (NOT scanLog, which logs future ticks at planning time).
-                // Using scanLog here would mark pallets as "done" the instant a path is queued, before the drone arrives.
-                const allScanned = new Set<string>();
-                this.swarm.drones.forEach(d => {
-                    // 1. Pallet the drone is actively flying to right now
-                    if (d.currentPalletId) allScanned.add(d.currentPalletId);
-
-                    // 2. All pallets scheduled inside an active cluster tour
-                    if (d.mission.currentCluster) {
-                        d.mission.currentCluster.tourSequence.forEach(t => allScanned.add(t.palletId));
-                    }
-
-                    // 3. Pallets whose arrival tick has already passed (genuinely scanned)
-                    const currentPathLen = d.path.length;
-                    (d.scanLog || []).forEach(entry => {
-                        if (entry.tick < currentPathLen) allScanned.add(entry.palletId);
-                    });
-                });
-
                 const dMax = this.world.size * 2; // Approximate valid maximum structural traversal
                 const pBase = this.world.warehouse?.position || { x: 0, y: 0, z: 0 };
 
                 if (allocationMode === 'Cluster' && this.world.pallets && this.world.pallets.length > 0) {
-                    const unscanned = this.world.pallets.filter(plt => !allScanned.has(plt.id));
+                    const unscanned = this.getAvailablePallets();
 
                     if (unscanned.length > 0) {
                         const pendingClusters = this.buildLocalizedClusters(unscanned, clusterRadius, maxClusterSize, idleDrones.length);
@@ -325,6 +367,7 @@ export class SimulationManager {
                                 const drone = idleDrones.find(d => d.id === a.drone.id);
                                 if (drone) {
                                     drone.mission.assignClusterMission(a.cluster);
+                                    this.reserveCluster(a.cluster, drone.id);
                                     const clusterVisual: ClusterVisualization = {
                                         id: a.cluster.id,
                                         droneId: drone.id,
@@ -351,7 +394,7 @@ export class SimulationManager {
                     }
                 } else {
                     // Baseline 1-to-1 Munkres Assignment
-                    const unscanned = this.world.pallets ? this.world.pallets.filter(plt => !allScanned.has(plt.id)) : [];
+                    const unscanned = this.world.pallets ? this.getAvailablePallets() : [];
 
                     if (unscanned.length > 0) {
                         const pendingTasks: Task[] = unscanned.slice(0, idleDrones.length).map(plt => ({
@@ -359,7 +402,7 @@ export class SimulationManager {
                             target: { ...plt.position },
                             req_payload: plt.payload_type,
                             palletId: plt.id,
-                            pi_k: 1.0,
+                            pi_k: plt.weight / 100,
                             t_hover: 5,
                             status: 'PENDING'
                         }));
@@ -374,6 +417,10 @@ export class SimulationManager {
                                     drone.goal = { ...a.task.target };
                                     drone.currentPalletId = a.task.palletId;
                                     drone.currentScanType = a.task.req_payload;
+                                    this.reservePallet(a.task.palletId, {
+                                        droneId: drone.id,
+                                        mode: 'single'
+                                    });
 
                                     console.log(`[${drone.name}] Munkres Cost (${a.cost.toFixed(2)}) - Allocated 1-to-1 Task:`, {
                                         timestamp: new Date().toISOString(),

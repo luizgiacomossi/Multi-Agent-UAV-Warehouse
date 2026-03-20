@@ -1,39 +1,59 @@
-# Control and Execution Pipelines
+# Control and Execution Pipeline
 
-VoxelSwarm distinguishes itself by strictly mapping the algorithmic Control Theory layers into a non-blocking browser execution pipeline. Understanding the temporal constraints and execution loops is critical to interpreting the output datasets.
+## 1. Precomputation First
 
-## 1. The Pre-Computation execution model
+The engine computes mission histories before playback. This is the key execution principle of the repository.
 
-Unlike interactive games where physics loops compute velocity integrals every 16ms, VoxelSwarm operates an **Asynchronous Pre-Computation Pipeline**. To accurately resolve multi-agent Time-Expanded Graphs (which require exploring thousands of permutations of $(x,y,z,t)$ coordinates), real-time evaluation is mathematically intractable within the 16ms budgeted for a 60 FPS presentation layer.
+`SimulationManager.runPathfinding(...)` performs:
 
-### 1.1 `runPathfinding()` Orchestration
-1. Process triggered from the top-level React UI thread.
-2. The `SimulationManager` iterates `MissionController` goals sequentially.
-3. Path arrays `Position3D[]` are computationally populated for the entire operational timeframe $T=0 \to T_{final}$.
-4. Post-processing steps evaluate anomalies (e.g., collisions, battery dead-states).
+1. mission-controller initialization,
+2. forklift reservation-table insertion,
+3. repeated allocation and leg planning,
+4. post hoc incident detection,
+5. cloning of final agent histories for UI consumption.
 
-By computing the entire history state prior to visual execution, VoxelSwarm establishes an immutable tracking dataset that allows rigorous regression testing, Monte-Carlo scaling, and time-scrubbing.
+The UI does not run the planner in the frame loop.
 
-## 2. Rendering and Interpolation
+## 2. Leg-By-Leg Planning
 
-The Presentation loop (WebGL via React Three Fiber) is completely divested from agent logic.
+Planning is not done as one monolithic route from start to terminal mission completion. Instead the engine iterates over mission legs.
 
-React defines a single `globalTick` timer. Inside the WebGL canvas, `useFrame()` hooks bind directly to the browser's native `requestAnimationFrame`, intercepting the frame loop and updating the 3D translation matrices of the `InstancedMesh`.
+At each cycle:
 
-```typescript
-const agentLocalTransform = calculatedPath[globalTick]; 
-// Translate Mesh without invoking React Tree Reconciliations
-```
+1. the current planner appends one leg to each active drone,
+2. each drone updates its mission-controller state through `completeLeg()`,
+3. newly idle drones are reallocated,
+4. the loop repeats until all drones are completed or stranded, or the safety bound is reached.
 
-## 3. Real-Time Collision and Event Analysis
+This is a pragmatic decomposition that keeps the implementation inspectable.
 
-Post-trajectory resolution, the `CollisionAnalyzer` constructs a temporary hash-map evaluating global intersections.
+## 3. Reservation Horizon
 
-$$ Map: (Time) \to List[Agent\_ID] $$
+The reservation table persists across legs. Forklifts are inserted for the full global time horizon, while drone reservations accumulate as paths are appended.
 
-### 3.1 Inter-Agent Collisions
-If `Map.get(tick_state).length > 1`, the specific coordinate represents a simultaneous collision. 
-If the `NaivePlanner` strategy is utilized, collision states propagate a semantic `Destroyed` flag, forcibly truncating the respective agent array memories `< path.slice(0, collisionTime+1)`.
+This means a late-assigned drone still plans around paths generated much earlier in the global simulation.
 
-### 3.2 Dynamic Entity Collisions
-The `World` tracks autonomous looped entities like Forklifts. These operate independently of the Drone pathfinding logic. The Analyzer performs secondary evaluations mapping the Forklift spatial footprint `(x, y=[0,1], z)` against the drone arrays, appending `SimulationIncident` metadata to the global React Store if overlapping logic triggers.
+## 4. Playback
+
+Playback is handled in [`App.tsx`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/App.tsx) with a discrete `tick` incremented by `setInterval(..., 150)`.
+
+At each playback tick:
+
+- drone pose is read from the precomputed path,
+- battery and recharge state are reconstructed,
+- pallet status is derived from scan logs and assignment logs,
+- collisions already detected by the engine are visualized if their incident time has been reached.
+
+## 5. Incident Detection
+
+After planning completes, `CollisionAnalyzer.detect(...)` checks:
+
+- drone-drone same-voxel collisions,
+- drone-forklift occupancy collisions,
+- drone-forklift swap-through collisions.
+
+Battery incidents are checked separately by replaying each planned path through the battery model and recording the first tick at which charge reaches zero.
+
+## 6. Important Caveat
+
+Because many safety checks are post hoc rather than enforced as hard constraints during every phase of planning, the simulator should be described as a centralized planning-and-analysis framework, not as a formally verified execution system.

@@ -1,38 +1,85 @@
 # Simulation Environment
 
-## 1. Environment Representation
+## 1. Spatial Model
 
-The simulation environment is fundamentally modeled as a dense, uniform 3D Cartesian grid (Voxels) in $\mathbb{Z}^3$. The boundary dimensions (`GRID_SIZE`) define an enclosed cubic space.
+The world is a finite cubic grid
 
-Rather than maintaining a heavy object-oriented grid, the spatial data is flattened into a 1D `Uint8Array`.
-The index transformation is handled as:
-$$ Index = x + S \cdot (y + S \cdot z) $$
-Where $S$ is `GRID_SIZE`. This highly optimized structure allows the $A^*$ heuristic search to perform $O(1)$ block-checks with minimal CPU cache misses.
+\[
+\mathcal{V} = \{0,\dots,S-1\}^3.
+\]
 
-## 2. Procedural Generation Architectures
+Each voxel is either free or blocked. Occupancy is stored in a flattened `Uint8Array`, which makes obstacle lookup constant-time in the implemented model.
 
-The `WorldGenerator` utility employs procedural algorithms to bootstrap varying topological complexities.
+The planner treats any out-of-bounds location as blocked, so the boundary is closed.
 
-### 2.1 The Warehouse Model
-The primary testbed models a commercial logistics center. It creates:
-*   **Racks**: Vertical pillars spaced with specific `AISLE_WIDTH`.
-*   **Spawn Zones**: Dedicated drop-off and deployment areas.
-*   **Pallets**: Actionable targets for drone inspection that act as trackable database records (e.g., specific weights, required payload tracking types like RFID or Camera).
-*   **Dynamic Obstacles (Forklifts)**: Ground-level Forklifts mapped to predictable, endless looping paths across defined aisles. By computing their $(x, y, z, t)$ vectors and reserving global space-time, the pathfinders natively perform collision deterrence.
+## 2. Motion Model
 
-### 2.2 Abstract Topologies
-To test algorithmic generality, the environment supports:
-*   **Open**: Sparse columnar obstacles ($5\%$ density).
-*   **City**: High-density ($20\%$) blocked grids representing urban canyons, heavily restricting lower $y$-level transversals.
-*   **Tunnel**: Extreme constrained environments generated using structural carves with Perlin-like noise, specifically aimed at stress-testing cooperative pathfinding resolution and deadlock risks.
+The action set is the six-axis Von Neumann neighborhood plus a wait action:
 
-## 3. Coordinate Systems and Kinematics
+\[
+\mathcal{U} = \{
+(\pm1,0,0),
+(0,\pm1,0),
+(0,0,\pm1),
+(0,0,0)
+\}.
+\]
 
-*   **Spatial Transitions**: Agents move exclusively using Neumann neighborhood rules (6 cardinal directions). Diagonal movement is prohibited, aligning the mathematical model with the Manhattan Distance ($\ell_1$ norm) heuristic.
-*   **Time Discretization**: Time is purely discrete (`tick`). One transition between adjacent voxels $(u \to v)$ requires exactly one time step $\Delta t = 1$. The theoretical velocity is therefore uniform in grid-space.
+Thus the successor set of voxel \(v\) is
 
-## 4. Assumptions and Constraints
+\[
+\mathcal{N}(v)=\{v+u \mid u \in \mathcal{U}\},
+\]
 
-*   **Perfect State Knowledge**: The environment is fully observable. Path planners have access to the absolute ground truth of the `Uint8Array` world map. There is no Partial Observability or SLAM uncertainty simulated.
-*   **Synchronous Movement**: All agents transition between nodes simultaneously at each discrete tick.
-*   **Ideal Localization**: Agents never deviate from the planned path (PID control errors, wind turbulence, and motor variances are abstracted away).
+subject to obstacle and altitude constraints.
+
+Movement is synchronous and discrete. One action consumes one time step.
+
+## 3. Procedural Environments
+
+World generation is implemented in [`classes/WorldGenerator.ts`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/classes/WorldGenerator.ts).
+
+### 3.1 Warehouse
+
+The warehouse generator creates:
+
+- aisle regions,
+- rack regions,
+- pallets embedded in blocked rack voxels,
+- optional forklifts with periodic trajectories.
+
+Pallets are both logical targets and blocked cells. Because of that, the planner cannot route into a pallet voxel directly; it later resolves the target to a nearby free voxel with bounded BFS.
+
+### 3.2 City
+
+The city generator creates a structured obstacle field with roads, block interiors, and varying building heights derived from geometric rules and pseudo-random local variation.
+
+### 3.3 Tunnel
+
+The tunnel generator creates a highly constrained obstacle field with preserved cross-like corridors and additional random occupancy, producing narrow passages that stress prioritized planning.
+
+### 3.4 Open and Random
+
+The open generator creates sparse pillars. The random generator creates voxel occupancy with a uniform Bernoulli rule.
+
+## 4. Warehouse Base and Stations
+
+If the simulation is configured to deploy from base, `World.setupWarehouse(...)` clears a protected spawn and airspace region near the origin. Optional charging stations can also be generated.
+
+This means the warehouse base is not just a visual convention; it actively modifies the occupancy map.
+
+## 5. Dynamic Obstacles
+
+Forklifts are represented as periodic paths at ground level, with an additional occupied voxel one unit above the base pose. In `SimulationManager.runPathfinding(...)`, these positions are inserted into the reservation table for the full planning horizon, so the planners treat them as time-indexed obstacles.
+
+## 6. Modeling Assumptions
+
+The environment model makes the following assumptions.
+
+- perfect global state knowledge,
+- exact localization,
+- synchronous transitions,
+- no aerodynamic interaction,
+- no continuous-time control dynamics,
+- no perception uncertainty,
+- no geometric body volume beyond the voxel occupancy abstraction.

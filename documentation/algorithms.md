@@ -1,32 +1,64 @@
-# Auxiliary Algorithms and Analytical Models
+# Auxiliary Algorithms and Experiment Helpers
 
-While Pathfinding (A*) and Task Allocation (Hungarian Munkres) form the core of VoxelSwarm, several auxiliary algorithms enforce the robustness required for PhD-level research validation.
+## 1. Blocked-Goal Repair With Bounded BFS
 
-## 1. Bounded Breadth-First-Search (Target Resolution)
+Warehouse pallets occupy blocked rack voxels. To route a drone to a pallet, the planner uses `nearestFreeNeighbor(...)` in [`classes/PathPlanner.ts`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/classes/PathPlanner.ts).
 
-**Problem**: Simulated environments organically generate blocked structures (e.g., Warehouses spawn Racks populated with Pallets). If a Pallet target resides strictly *inside* a solid obstacle voxel (representing physical containment), standard A* heuristics immediately flag the target as unreachable, expanding infinitely until memory exhaustion.
+This algorithm performs a breadth-first search from the blocked target until it finds a free neighboring voxel. The search is bounded to at most 200 visited states.
 
-**Solution**: The `nearestFreeNeighbor` algorithm dynamically maps unreachable goals using a bounded BFS outward expansion.
-$$ O(b^d) $$
-Where $b = 6$ (Von Neumann neighborhood branch factor), constrained to a maximum memory footprint of 200 spatial iterations.
-The BFS maps the contiguous blocked spaces and returns the closest adjacent valid space grid index $x,y,z$, allowing the Drone to pathfind correctly "in front" of the target pallet for payload interaction.
+The method is useful because it converts "target embedded inside obstacle geometry" into "inspect from the nearest reachable adjacent cell."
 
-## 2. Monte Carlo Stochastic Simulations
+## 2. KD-Tree Local Clustering
 
-To quantitatively validate Task Allocation efficiencies over random greedy models, the `runMonteCarloAllocations` pipeline iterates statistical significance tests ($n=50$ minimum sweeps).
+Cluster mode uses a 3D KD-tree implemented in [`utils/KDTree.ts`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/utils/KDTree.ts).
 
-**Algorithmic Sequence (Triggered via GUI "Run Exp 2")**:
-1. Spawns 50 randomized iterations assigning synthetic Drones mapping variable payloads and $50-100\%$ initial batteries against 50 targeted warehouse tasks.
-2. Injects varying $\beta$-degradations assigning disparate generic $Battery$ initial states.
-3. Evaluates Hungarian matrix resolution against non-optimal sets, logging systemic Standard Deviations of aggregate fleet battery percentages and global operational makespan times.
-4. Identifies constraint-stranding factors (Agents completely trapped by $\Omega$ infeasibility penalty curves).
-5. Outputs high-fidelity logging metrics identically formatted for graph extraction straight to the browser DevTools console.
+For a randomly selected seed pallet, the runtime:
 
-## 3. Event-Triggered Fault Tolerance 
+1. queries all pallets within a Manhattan radius,
+2. sorts them by distance to the seed,
+3. truncates to `maxClusterSize`,
+4. removes those pallets from the pool,
+5. creates a `TaskCluster`.
 
-Experimentally measuring autonomous recovery latencies $t_{recovery}$ via the Control Panel ("Run Exp 3" button):
-1. A static map is instantiated with $N$ drones correctly solving the Bipartite Matching algorithm.
-2. The Execution loop operates until evaluating an instantaneous anomaly at $T=60s$, injecting a critical battery collapse on a specific drone (**Drone 2**):
-$$ B_{agent\_2} = 10 \implies B \ll \delta_{safe} $$
-3. The centralized loop automatically orphans the associated node-task.
-4. Latency performance measurement benchmarks the instantaneous calculation time (in milliseconds) required for the `CostModel` to strip the agent, recalculate the Munkres matrix, and orchestrate the safe reassignment of the remaining fleet. Measurements are output directly to the DevTools console.
+This is a locality heuristic, not a globally optimal clustering formulation such as k-median, k-means with constraints, or exact set partitioning.
+
+## 3. Greedy Intra-Cluster Tour Construction
+
+`TaskCluster.calculateTour()` constructs the internal inspection order greedily:
+
+1. choose the task nearest the rounded centroid,
+2. repeatedly choose the nearest unvisited task by Manhattan distance,
+3. accumulate inter-task move cost and hover cost.
+
+Thus the cluster execution order is a nearest-neighbor TSP heuristic.
+
+## 4. Monte Carlo Allocation Helper
+
+`SimulationManager.runMonteCarloAllocations(...)` generates synthetic drones and synthetic tasks, runs the Hungarian allocator, and prints summary statistics to the console.
+
+What it currently does:
+
+- randomizes start locations, battery levels, and payload capabilities,
+- allocates with the Hungarian model,
+- computes approximate residual-battery and makespan-style summaries,
+- outputs a table to the browser console.
+
+What it does not currently do:
+
+- compare against implemented greedy and random baselines,
+- run full route planning for each allocation,
+- use exact battery dynamics from the mission planner.
+
+The code itself contains a `TODO` noting the missing baselines.
+
+## 5. Fault-Tolerance Timing Helper
+
+`SimulationManager.runFaultToleranceScenario()` is a simplified timing experiment:
+
+1. create five drones and five tasks,
+2. perform an initial Hungarian assignment,
+3. inject a battery failure into drone `FT_D2` at simulated time \(T=60\) s,
+4. reassign only the orphaned task to healthy drones,
+5. record the reassignment latency with `performance.now()`.
+
+This is a useful instrumentation scaffold, but it is not a full online mission-recovery simulation.

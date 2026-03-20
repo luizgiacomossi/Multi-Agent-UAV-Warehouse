@@ -1,31 +1,50 @@
-# Architectural Design Decisions and Rationale
+# Design Decisions and Tradeoffs
 
-The development of VoxelSwarm required balancing theoretical mathematical modeling with practical browser-based computational limits. Key design decisions and their rationale are detailed below.
+## 1. Decoupled Prioritized Planning Instead Of Coupled MAPF
 
-## 1. Prioritized (Decoupled) vs. Coupled Space-Time Search
+The repository chooses decoupled prioritized planning because it is implementable, inspectable, and responsive in a browser setting.
 
-**Decision**: Implementing Prioritized Planning (Cooperative A*) instead of Coupled configuration space search.
+The price is standard:
 
-*   **Context**: A Coupled $A^*$ models the global configuration space of all agents simultaneously. While guaranteeing Makespan/Flowtime theoretical optimality, the branching factor scales exponentially.
-*   **Trade-off**: Browser/V8 runtimes enforce strict single-thread blocking execution limits. Solving an optimal graph for $k=8$ agents on a 24x24x24 grid via a Coupled approach easily causes runtime failures. Prioritized Planning explicitly trades total swarm optimality for a guaranteed polynomial timeline $O(k \cdot |V| \cdot T)$, forcing the heuristic algorithm to sequentially treat previous peers as dynamic spatiotemporal bounds.
+- incompleteness,
+- order sensitivity,
+- suboptimality relative to coupled solvers.
 
-## 2. Centralized Simulation over Distributed Node-Agents
+This tradeoff is justified if the goal is a practical experimental platform rather than a complete optimal MAPF benchmark.
 
-**Decision**: Modeling VoxelSwarm centrally instead of replicating individual UDP/WebSocket based communicative actors.
+## 2. Flat Voxel Storage
 
-*   **Context**: While true multi-agent robot testing implies distributed decision networking, the mathematical goals evaluating Map-Allocation matrices and cost-barriers ($c_{ik}$) heavily index optimal mathematical baselines.
-*   **Rationale**: Distributing nodes logically introduces networking packet constraints, clock-skews, and latency artifacts that convolute the measurable outcomes of the cost functions. VoxelSwarm functions as the centralized Ground-station logic component dictating the swarm parameters downward.
+The use of a flattened `Uint8Array` is a sound engineering choice for JavaScript and TypeScript.
 
-## 3. Flat Arrays vs Linked Node Graphs
+Advantages:
 
-**Decision**: The Cartesian $\mathbb{Z}^3$ world is mapped to an intrinsic 1D `Uint8Array`.
+- constant-time occupancy checks,
+- compact memory layout,
+- lower object allocation pressure than pointer-heavy graph structures.
 
-*   **Context**: Typical pedagogical implementations of graphs maintain node objects containing array sub-lists representing linked structural vertices.
-*   **Rationale**: Javascript Garbage Collection heavily penalizes millions of allocated micro-objects spanning graph evaluations. Flattening the topological matrices ensures CPU cache locality. The cost structure of evaluating $(x,y,z) \to Index$ via multiplicative shifting is computationally trivial compared to recursively chasing pointer references.
+## 3. Precomputed Histories Instead Of Online Control
 
-## 4. Non-Uniform Cost Implementation (Energy Saver)
+The engine plans full path histories first and replays them later. This keeps the visualization deterministic and simplifies incident analysis.
 
-**Decision**: The A* function differentiates explicit wait action penalties.
+The cost is that the runtime model is closer to offline planning than to a reactive onboard autonomy stack.
 
-*   **Context**: Navigational shortest-time metrics uniformly weight movement vs station holding as $Cost=1$.
-*   **Rationale**: Operational Quadrotors (or equivalently modeled VTOL assets) incur drastic battery decay mapping lateral movement against rotational hovering. Modifying the edge heuristic where spatial transition costs $1.0$ and temporal idling costs $0.1$ inherently re-trains the pathfinding engine to prioritize battery preservation over speed, simulating organic swarm grid-locks and natural waiting cascades naturally without hard-coding queue systems.
+## 4. Centralization Instead Of Distributed Protocols
+
+The code focuses on allocation and planning quality under perfect information. That makes centralization a reasonable first abstraction.
+
+It also means the current simulator does not answer questions about:
+
+- communication delays,
+- packet loss,
+- consensus,
+- decentralized negotiation.
+
+## 5. Heuristic Clustering
+
+Cluster mode uses local grouping plus greedy touring because it is fast and easy to inspect. This is a good prototyping decision, but it should be presented as heuristic batching rather than as exact clustered routing.
+
+## 6. Post Hoc Incident Analysis
+
+The system performs strong analysis after planning rather than enforcing every physically relevant constraint during planning.
+
+That choice is defensible for an exploratory simulator, but it should not be conflated with formal safety guarantees.

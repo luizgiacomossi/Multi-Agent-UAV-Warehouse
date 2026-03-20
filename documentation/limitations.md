@@ -1,50 +1,92 @@
-# Theoretical Limitations and Future Work
+# Limitations and Future Work
 
-While the VoxelSwarm architecture provides a robust, $O(k \cdot |V| \cdot T \log(|V| \cdot T))$ scalable environment for evaluating Multi-Agent Path Finding (MAPF) and centralized task allocation, certain mathematically necessary abstractions separate the simulated results from physical deployment realities. 
+## 1. The Current Documentation Boundary
 
-For the purposes of academic validation, it is critical to explicitly bound the scope of the simulation. The following sections detail the current technical and algorithmic limitations, outlining pathways for future research.
+The revised documentation is now closer to the code, but the implementation still has several substantive modeling and algorithmic limitations. These are not cosmetic issues; they affect what can be claimed in a thesis or paper.
 
----
+## 2. Allocation Is Not Over The Full Remaining Task Set
 
-## 1. Kinematics, Rigid-Body Dynamics, and Low-Level Control
+In 1-to-1 mode, `SimulationManager` truncates candidate pallets to the first `idleDrones.length` unscanned items before calling the Hungarian solver.
 
-### 1.1 The Discrete Point-Mass Abstraction
-**Current Implementation**: Drones are simulated as holonomic point-masses transitioning instantaneously between discrete $\mathbb{Z}^3$ voxels. The temporal resolution is fixed ($\Delta t = 1$), implying uniform velocity and instantaneous acceleration.
-**Limitation**: This abstraction ignores Newtonian physics. In reality, quadrotors represent underactuated systems in $SE(3)$. Physical flight controllers (e.g., PX4) must evaluate PID loops compensating for inertia, angular momentum, and jerk. 
-**Future Work**: Integrating a physics sub-step solver to map the $A^*$ discrete paths into smooth continuous-time trajectories (e.g., using Minimum Snap Trajectory Generation) before execution.
+Therefore the runtime is not solving
 
----
+\[
+\min_{\text{matching over all remaining tasks}} \sum C_{ik},
+\]
 
-## 2. Payload-Coupled Energy Degradation
+but a smaller subproblem chosen by list order.
 
-### 2.1 Uniform Battery Heuristics
-**Current Implementation**: The energy consumption model relies on static penalty weights ($\beta_{fly}$ and $\beta_{hover}$) multiplied by pathing distance ($\gamma$).
-**Limitation**: Real-world power draw is heavily coupled to **mass** ($m$). A drone deployed with a heavy physical package or computationally expensive sensor suite (RGB-D + LiDAR) inherently requires greater rotor thrust to maintain altitude. Eq. 13 conceptually treats all agents similarly, irrespective of their specific assigned `req_payload`.
-**Future Work**: Formulate $E_{req}$ as a multivariate function of both trajectory length and dynamically loaded mass: $E_{req} = f(d_{Eucl}, t_{hover}, m_{payload})$.
+Future work:
 
----
+- allocate over all currently available tasks,
+- or justify a deliberate candidate-pruning policy mathematically.
 
-## 3. Predictive "Mid-Flight" Reallocation and Traffic Delays
+## 3. Planner Battery Bounds Use Full Capacity Rather Than True Residual Charge
 
-### 3.1 Static Feasibility Filtering
-**Current Implementation**: The Bipartite Matching constraints drop agents ($w_{ik} \to \Omega$) if their *pre-flight* energy calculation falls below $\delta_{safe}$. 
-**Limitation**: Because Prioritized Planning forces yielding, lower-priority agents may be forced to hover indefinitely while higher-priority swarms clear a constrained tunnel. This unexpected hovering burns actual battery. An agent might mathematically cross the $\delta_{safe}$ threshold *during* a mission due to traffic density, but the system currently lacks a predictive, mid-flight re-bidding structure.
-**Future Work**: Implement a Receding Horizon Controller capable of monitoring real-time $f$-cost inflation. If an agent detects traffic delays threatening theoretical viability, it should abort the mission leg dynamically and trigger a global Munkres matrix recalculation.
+The path planners currently bound search with `drone.maxBattery`, not exact residual battery after previously planned legs.
 
----
+Future work:
 
-## 4. Perception, SLAM, and Observability
+- propagate true residual energy into each leg planner,
+- integrate recharge events directly into feasibility and path planning,
+- optionally plan in a hybrid state space \((x,y,z,t,B)\).
 
-### 4.1 Perfect Global State Knowledge
-**Current Implementation**: The pathfinders operate with absolute ground-truth knowledge. Drones have $O(1)$ access to the location of all static racks, pallets, and dynamically moving Forklift entities via the centralized `Uint8Array`.
-**Limitation**: Autonomous nodes suffer from Partial Observability. They rely on restricted Field of View (FOV) sensors and suffer from occlusion. A physical drone does not "know" a forklift is in the aisle until it enters sensor range.
-**Future Work**: Restrict the Planner's access to the global matrix. Implement simulated raycasting (e.g., a pseudo-LiDAR point cloud) requiring drones to execute Simultaneous Localization and Mapping (SLAM) and recalculate A* paths dynamically upon "discovering" dynamic obstacles.
+## 4. No Explicit Drone-Drone Edge Conflict Prevention
 
----
+The cooperative planners reserve vertex-time states, but they do not explicitly reserve traversed edges. Thus classical edge-swap conflicts between drones are not prevented by construction.
 
-## 5. Algorithmic Incompleteness and Deadlock Resolution
+Future work:
 
-### 5.1 Prioritized Planning Constraints
-**Current Implementation**: The system resolves MAPF utilizing Prioritized Planning (Cooperative A*), sequentially reserving space-time nodes.
-**Limitation**: Prioritized Planning is mathematically *Incomplete*. In highly constrained spaces (like a single-voxel wide Tunnel), if a high-priority drone secures a path that prevents lower-priority drones from passing, the lower-priority drone will fail to route and enter a `'STRANDED'` state—even if a globally optimal, cooperative solution exists involving the high-priority drone yielding momentarily.
-**Future Work**: When the Prioritized baseline returns a failure heuristic, trigger a fallback to a complete algorithmic solver such as **Conflict-Based Search (CBS)** to resolve complex inter-agent deadlocks.
+- reserve directed edges \((u,v,t)\),
+- or adopt CBS or another conflict-resolution framework.
+
+## 5. Cluster Routing Is Heuristic
+
+Cluster tours are constructed with greedy nearest-neighbor search. That is fast, but it is not optimal and has no approximation guarantee in this implementation.
+
+Future work:
+
+- compare greedy tours with exact small-cluster TSP,
+- or use insertion heuristics, 2-opt, or beam search.
+
+## 6. Monte Carlo Experimentation Is Partial
+
+The Monte Carlo helper currently evaluates only the Hungarian allocation path, despite comments suggesting future comparison against greedy and random baselines.
+
+Future work:
+
+- implement baseline allocators,
+- use reproducible random seeds,
+- log full route-level metrics rather than approximate summaries only.
+
+## 7. Fault Tolerance Experiment Is Simplified
+
+The fault-injection experiment times reassignment of one orphaned task, but it does not replay the entire multi-agent system under online replanning.
+
+Future work:
+
+- integrate fault injection into the main mission loop,
+- preserve actual in-flight states at failure time,
+- compare recovery quality as well as latency.
+
+## 8. Physical Modeling Is Minimal
+
+Drones are point masses on a voxel grid with instantaneous transitions and a stylized fall animation after battery death.
+
+Future work:
+
+- continuous trajectory smoothing,
+- rigid-body flight dynamics,
+- actuator and controller constraints,
+- payload-mass-dependent power models.
+
+## 9. Perception And Observability Are Idealized
+
+The planner has full access to the global map and deterministic forklift trajectories.
+
+Future work:
+
+- partial observability,
+- sensor-range limits,
+- map uncertainty,
+- online obstacle discovery.
