@@ -37,11 +37,20 @@ The semantics are:
 
 - `OUTBOUND`: moving toward a single task or the first task of a cluster,
 - `EXECUTING_TOUR`: traversing the remaining tasks of a cluster,
-- `RETURNING`: moving back to the warehouse base,
+- `RETURNING`: moving back to the drone's own dock slot,
 - `IDLE`: ready for a new allocation round,
-- `COMPLETED`: no further missions to assign.
+- `COMPLETED`: no further missions to assign, landed on the dock.
 
 Clustered missions keep an internal task index and advance through the tour sequence one leg at a time.
+
+A drone never finishes, or waits for work, airborne:
+- after its last mission it always flies back to its dock, even when "Return" (return between missions) is off;
+- an idle drone that gets no task while away from its dock is sent home (`returnToDock()`);
+- in full-coverage missions, idle drones land once every pallet is done.
+
+Every pallet stop is therefore followed by another leg, and only the dock is a parking goal (`continuesAfterCurrentLeg()`). CBS uses this to set how long a drone holds its goal.
+
+The status shown for each drone in the UI and in the voice assistant is derived per tick by `describeDroneActivity` ([`classes/DroneActivity.ts`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/classes/DroneActivity.ts)), from the planned path, task log and scan log. The possible states are: en route, scanning, returning, holding, in transit, charging, docked, complete, crashed, depleted and blocked. `Agent.status` is only the final planning outcome.
 
 ## 3. Path Appending and Scan Registration
 

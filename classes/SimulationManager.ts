@@ -41,6 +41,12 @@ export class SimulationManager {
     /** A pallet abandoned this many times is treated as unreachable and no longer offered. */
     private static readonly MAX_PALLET_ABANDONS = 2;
 
+    /**
+     * Drones whose clocks are within this many ticks of the earliest pending event are planned in
+     * the same cycle (lets CBS plan them jointly while keeping drones roughly in time order).
+     */
+    private static readonly EVENT_SYNC_WINDOW_TICKS = 10;
+
     constructor(defaultSize: number = GRID_SIZE, defaultAgentCount: number = DEFAULT_AGENT_COUNT) {
         this.world = new World(defaultSize);
         this.swarm = new Swarm(defaultAgentCount);
@@ -259,6 +265,18 @@ export class SimulationManager {
     }
 
     /**
+     * Latest clock (tick) a drone may have to act in this cycle: the earliest clock among drones with
+     * a leg to fly, plus a small sync window. With no leg pending, every idle drone may act.
+     */
+    private nextEventHorizon(): number {
+        const pendingClocks = this.swarm.drones
+            .filter(d => d.status !== 'STRANDED' && d.mission.getNextTarget() !== null)
+            .map(d => d.path.length - 1);
+        if (pendingClocks.length === 0) return Infinity;
+        return Math.min(...pendingClocks) + SimulationManager.EVENT_SYNC_WINDOW_TICKS;
+    }
+
+    /**
      * Idle drones parked on their dock swap/charge their battery before the next dispatch. The
      * battery model recharges on a waiting tick at the dock (Drone.calculateStateAt), so a single
      * hover tick restores full capacity. Without it, drones returning below the task threshold
@@ -266,13 +284,16 @@ export class SimulationManager {
      */
     private rechargeDockedDrones(drones: Drone[]) {
         drones.forEach(drone => {
-            const pos = drone.path[drone.path.length - 1];
-            const dock = drone.mission.warehouseLocation;
-            if (!pos || drone.battery >= drone.maxBattery) return;
-            if (pos.x !== dock.x || pos.y !== dock.y || pos.z !== dock.z) return;
-            drone.path.push({ ...pos });
+            if (drone.battery >= drone.maxBattery || !this.isAtDock(drone)) return;
+            drone.path.push({ ...drone.path[drone.path.length - 1] });
             drone.battery = drone.maxBattery;
         });
+    }
+
+    private isAtDock(drone: Drone): boolean {
+        const pos = drone.path[drone.path.length - 1];
+        const dock = drone.mission.warehouseLocation;
+        return !!pos && pos.x === dock.x && pos.y === dock.y && pos.z === dock.z;
     }
 
     /** Scans planned after a drone was lost (crash or dead battery) never happened. */
@@ -410,9 +431,15 @@ export class SimulationManager {
                 }
             });
 
-            // A. Plan Current Leg for all agents
-            // The planner now just looks at where they are (end of current path) and where MissionController says to go.
-            strategy.planLeg(this.swarm, this.world, 0, reservedSpaceTime, maxAltitude, batteryEnabled);
+            // A. Plan the next leg of the drones whose turn it is (earliest clocks first).
+            // Planning every drone each cycle let clocks drift apart by hundreds of ticks, so a drone
+            // that was free early could not pick up tasks another drone only took much later.
+            const eventHorizon = this.nextEventHorizon();
+            const isDue = (drone: Drone) => drone.path.length - 1 <= eventHorizon;
+            const dueSwarm = new Swarm(0);
+            dueSwarm.drones = this.swarm.drones.filter(d => d.status !== 'STRANDED' && d.mission.getNextTarget() !== null && isDue(d));
+            strategy.planLeg(dueSwarm, this.world, 0, reservedSpaceTime, maxAltitude, batteryEnabled);
+            const plannedIds = new Set(dueSwarm.drones.map(d => d.id));
 
             // B. Update Mission States and Batch Assign using Munkres
             const idleDrones: Drone[] = [];
@@ -422,9 +449,12 @@ export class SimulationManager {
                 }
 
                 if (drone.mission.state === 'IDLE') {
-                    idleDrones.push(drone);
+                    // Only allocate once no busy drone could still become free earlier
+                    if (isDue(drone)) idleDrones.push(drone);
                     return;
                 }
+
+                if (!plannedIds.has(drone.id)) return; // its current leg is still in progress
 
                 // No path this cycle: the drone hovered in place and keeps its leg for a retry.
                 if (drone.lastLegFailed) {
@@ -485,7 +515,7 @@ export class SimulationManager {
                     }
                 }
 
-                if (readyForNew && drone.mission.state !== 'COMPLETED') {
+                if (readyForNew && drone.mission.state !== 'COMPLETED' && isDue(drone)) {
                     idleDrones.push(drone);
                 }
             });
@@ -603,18 +633,18 @@ export class SimulationManager {
             if (isAllPalletsMode) {
                 const resolvedPallets = this.completedPalletIds.size + this.unreachablePalletIds.size;
                 const allPalletsChecked = this.world.pallets.length > 0 && resolvedPallets >= this.world.pallets.length;
-                const hasActiveLegs = this.swarm.drones.some(d =>
-                    d.status !== 'STRANDED' &&
-                    (d.mission.state === 'OUTBOUND' || d.mission.state === 'EXECUTING_TOUR' || d.mission.state === 'RETURNING')
-                );
 
-                if (allPalletsChecked && !hasActiveLegs) {
+                // Every pallet is done: idle drones land (complete on their dock, or fly home first)
+                if (allPalletsChecked) {
                     this.swarm.drones.forEach(drone => {
-                        if (drone.status !== 'STRANDED') {
+                        if (drone.status === 'STRANDED' || drone.mission.state !== 'IDLE') return;
+                        if (this.isAtDock(drone)) {
                             drone.mission.state = 'COMPLETED';
+                        } else {
+                            drone.mission.returnToDock();
+                            drone.goal = { ...drone.mission.warehouseLocation };
                         }
                     });
-                    break;
                 }
             }
 
@@ -622,10 +652,22 @@ export class SimulationManager {
             const everyoneDone = this.swarm.drones.every(d => d.mission.state === 'COMPLETED' || d.status === 'STRANDED');
             if (everyoneDone) break;
 
-            // Stop once nothing can progress: no drone has a leg to fly and allocation found no
-            // feasible task (e.g. the remaining pallets are incompatible or unreachable).
+            // Idle drones that got no task and are away from their dock fly home: a drone never
+            // waits (or finishes) airborne.
+            idleDrones
+                .filter(d => d.mission.state === 'IDLE' && !this.isAtDock(d))
+                .forEach(d => {
+                    d.mission.returnToDock();
+                    d.goal = { ...d.mission.warehouseLocation };
+                });
+
+            // Stop once nothing can progress: no drone has a leg to fly, no idle drone is still
+            // waiting for its turn, and allocation found no feasible task.
             const anyActiveLeg = this.swarm.drones.some(d => d.status !== 'STRANDED' && d.mission.getNextTarget() !== null);
-            if (!anyActiveLeg) break;
+            const idleAwaitingTurn = this.swarm.drones.some(d =>
+                d.status !== 'STRANDED' && d.mission.state === 'IDLE' && !idleDrones.includes(d)
+            );
+            if (!anyActiveLeg && !idleAwaitingTurn) break;
         }
 
         // Ensure any drone completing flight at ground/clearance level in a forklift aisle ascends to safe hover altitude (y >= 2)

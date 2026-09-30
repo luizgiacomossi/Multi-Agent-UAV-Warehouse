@@ -376,7 +376,12 @@ export abstract class PathFindingStrategy {
       });
       const tailEnd = Math.min(arrivalTime + PARKING_TAIL_TICKS, this.maxTimeSteps);
       for (let t = arrivalTime + 1; t <= tailEnd; t++) {
-        reserved.addVertex(this.key(lastPos, t), drone.id);
+        const k = this.key(lastPos, t);
+        // Never take over another drone's reservation: overwriting it (and later clearing our own)
+        // erased that drone's path from the table. The parked drone's next leg, planned from its
+        // arrival, has to leave before the other drone passes.
+        if (reserved.isVertexReserved(k, drone.id)) break;
+        reserved.addVertex(k, drone.id);
       }
     } else {
       path.forEach((p, idx) => reserved.add(this.key(p, startTime + idx)));

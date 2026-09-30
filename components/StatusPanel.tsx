@@ -3,12 +3,28 @@ import React, { useMemo } from 'react';
 import { 
   CheckCircle2, Activity, ShieldAlert, Skull, Zap, ScanLine, Navigation, Warehouse, 
   Undo2, BatteryWarning, Camera, Wifi, History, Target, Battery, BatteryCharging, 
-  BatteryFull, BatteryMedium, BatteryLow 
+  BatteryFull, BatteryMedium, BatteryLow, type LucideIcon
 } from 'lucide-react';
 import { Agent, SimulationIncident, Pallet, Position3D } from '../types';
 import { Drone } from '../classes/Drone';
 import { Metrics } from '../classes/Metrics';
 import { AlertLog } from '../classes/AlertLog';
+import { DroneActivityKind, describeDroneActivity } from '../classes/DroneActivity';
+
+/** Label, colour and icon for each drone activity in the scan manifest. */
+const ACTIVITY_STYLE: Record<DroneActivityKind, { label: string; color: string; icon: LucideIcon }> = {
+  crashed:   { label: 'Crashed',    color: 'text-red-400',     icon: Skull },
+  depleted:  { label: 'Depleted',   color: 'text-amber-500',   icon: BatteryWarning },
+  blocked:   { label: 'Blocked',    color: 'text-amber-400',   icon: ShieldAlert },
+  scanning:  { label: 'Scanning',   color: 'text-cyan-400',    icon: ScanLine },
+  enRoute:   { label: 'En route',   color: 'text-blue-400',    icon: Navigation },
+  returning: { label: 'Returning',  color: 'text-purple-400',  icon: Undo2 },
+  holding:   { label: 'Holding',    color: 'text-amber-300',   icon: Activity },
+  inTransit: { label: 'In transit', color: 'text-blue-300',    icon: Navigation },
+  charging:  { label: 'Charging',   color: 'text-emerald-400', icon: BatteryCharging },
+  docked:    { label: 'Docked',     color: 'text-slate-400',   icon: Warehouse },
+  complete:  { label: 'Complete',   color: 'text-slate-400',   icon: CheckCircle2 },
+};
 
 interface StatusPanelProps {
   agents: Agent[];
@@ -215,45 +231,21 @@ const StatusPanel: React.FC<StatusPanelProps> = ({
           const currentBattery = Math.max(0, Math.min(100, snapshot.battery));
           const isRecharging = snapshot.isRecharging;
 
-          const isDestroyed = agent.status === 'STRANDED' && agent.destructionTime !== undefined && tick >= agent.destructionTime;
-          const isDeadBattery = snapshot.isDeadBattery;
-          // `status` is the final planning outcome, so only show Blocked once playback reaches
-          // the point where the planner gave up (the end of the drone's path).
-          const isBlocked = !isDestroyed && !isDeadBattery && (
-            (agent.status === 'STRANDED' && agent.destructionTime === undefined && tick >= finishTime) ||
-            agent.path.length <= 1
-          );
+          // Per-tick activity from the planned records (agent.status is only the final outcome)
+          const dock = agent instanceof Drone ? agent.mission.warehouseLocation : agent.start;
+          const activity = describeDroneActivity(agent, tick, dock, snapshot);
+          const isDestroyed = activity.kind === 'crashed';
+          const isDeadBattery = activity.kind === 'depleted';
 
-          const scansDone = agent.deliveryTimes?.filter(t => t <= tick).length || 0;
-          const nextScan = agent.deliveryTimes?.find(t => t > tick);
+          const style = ACTIVITY_STYLE[activity.kind];
+          const statusText = activity.kind === 'enRoute' || activity.kind === 'scanning'
+            ? `${style.label} #${activity.scanNumber}`
+            : style.label;
+          const statusColor = style.color;
+          const StatusIcon = style.icon;
 
-          let statusText = "Idle";
-          let statusColor = "text-slate-400";
-          let StatusIcon: React.ElementType = CheckCircle2;
-
-          let scanType = agent.currentScanType;
-          let palletShortId = agent.currentPalletId ? agent.currentPalletId.slice(-6).toUpperCase() : null;
-          
-          const currentTask = (agent.assignedTasksLog || []).find(t => tick >= t.startTick && tick <= t.endTick);
-          if (currentTask) {
-              scanType = currentTask.type;
-              palletShortId = currentTask.palletId.slice(-6).toUpperCase();
-          }
-
-          if (isDestroyed)        { statusText = "Crashed";    statusColor = "text-red-400";    StatusIcon = Skull; }
-          else if (isDeadBattery) { statusText = "Depleted";   statusColor = "text-amber-500";  StatusIcon = BatteryWarning; }
-          else if (isBlocked)     { statusText = "Blocked";    statusColor = "text-amber-400";  StatusIcon = ShieldAlert; }
-          else if (tick >= finishTime) { statusText = "Complete"; statusColor = "text-slate-400"; StatusIcon = CheckCircle2; }
-          else if (nextScan !== undefined) {
-              statusText = `Scan #${scansDone + 1}`;
-              statusColor = "text-blue-400";
-              StatusIcon = ScanLine;
-          } else if (scansDone > 0) {
-              statusText = "Returning";
-              statusColor = "text-purple-400";
-              StatusIcon = Undo2;
-              palletShortId = null; // Returning, not tracking a pallet right now
-          }
+          const scanType = activity.scanType;
+          const palletShortId = activity.palletId ? activity.palletId.slice(-6).toUpperCase() : null;
 
           const ScanIcon = scanType === 'camera' ? Camera : scanType === 'rfid' ? Wifi : null;
 
@@ -309,7 +301,7 @@ const StatusPanel: React.FC<StatusPanelProps> = ({
               </div>
 
               {/* Pallet Inspection Details */}
-              {palletShortId && !isDestroyed && !isDeadBattery && tick < finishTime && (
+              {palletShortId && (
                 <div className="mt-1.5 ml-3 flex items-center gap-2 text-[9px] text-slate-400 font-mono">
                   {ScanIcon && <ScanIcon size={9} className={scanType === 'camera' ? 'text-blue-400' : 'text-green-400'} />}
                   <span>PLT-{palletShortId}</span>

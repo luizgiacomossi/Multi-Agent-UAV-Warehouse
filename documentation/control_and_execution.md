@@ -18,12 +18,16 @@ The UI does not run the planner in the frame loop.
 
 Planning is not done as one monolithic route from start to terminal mission completion. Instead the engine iterates over mission legs.
 
-At each cycle:
+The loop is ordered by time. Each drone's clock is the last tick of its planned path. At each cycle:
 
-1. the current planner appends one leg to each active drone,
-2. each drone updates its mission-controller state through `completeLeg()`,
-3. newly idle drones are reallocated,
-4. the loop repeats until all drones are completed or stranded, or the safety bound is reached.
+1. the *event horizon* is the earliest clock among drones with a leg to fly, plus a sync window of `EVENT_SYNC_WINDOW_TICKS` (10). With no leg pending, the horizon is unbounded;
+2. the planner appends one leg to each drone with a leg to fly whose clock is within the horizon. Planning them together lets CBS resolve their conflicts jointly;
+3. each of those drones updates its mission-controller state through `completeLeg()`;
+4. idle drones whose clock is within the horizon are allocated. An idle drone further ahead in time waits, because a busy drone may still become free earlier. Docked idle drones recharge first;
+5. idle drones that got no task and are away from their dock fly home. Drones never wait, or finish, airborne;
+6. the loop repeats until all drones are completed or stranded, nothing can progress, or the safety bound is reached.
+
+Planning all drones every cycle, regardless of their clocks, let clocks drift apart by hundreds of ticks. A drone that was free early could then not pick up tasks another drone took much later, and full-coverage missions ended with one drone idle for up to 17% of the mission. With time ordering the gap is under about 5%.
 
 This is a pragmatic decomposition that keeps the implementation inspectable.
 

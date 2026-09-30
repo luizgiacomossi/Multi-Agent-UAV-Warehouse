@@ -5,7 +5,8 @@ import {
   NaivePlanner, 
   EnergySaverPlanner, 
   SpaceTimeReservations,
-  CollisionAnalyzer
+  CollisionAnalyzer,
+  spaceTimeKey
 } from '../classes/PathPlanner';
 import { CBSPlanner, ConflictDetector, ConstraintTable } from '../classes/CBSPlanner';
 import { Forklift, Position3D } from '../types';
@@ -168,6 +169,23 @@ export function runPathPlanningTests(): { passed: number; failed: number } {
 
   runCBSTests(world);
 
+  // ─────────────────────────────────────────────────────────────
+  // 6. Parking tails never take over other drones' reservations
+  // ─────────────────────────────────────────────────────────────
+  console.log('\n--- 6. Parking Tail Reservations ---');
+
+  const tailReservations = new SpaceTimeReservations();
+  const parkCell = { x: 4, y: 2, z: 4 };
+  tailReservations.addVertex(spaceTimeKey(parkCell, 20), 'OTHER_DRONE'); // another drone passes at t=20
+  const tailSwarm = new Swarm(0);
+  const tailDrone = makeDrone('TAIL', { x: 1, y: 2, z: 4 }, parkCell);
+  tailSwarm.drones = [tailDrone];
+  new CooperativePlanner().planLeg(tailSwarm, world, 0, tailReservations, 6, false);
+  assert(samePosition(tailDrone.path[tailDrone.path.length - 1], parkCell), 'Drone reaches the cell another drone passes later');
+  assert(tailReservations.getVertexOwner(spaceTimeKey(parkCell, 20)) === 'OTHER_DRONE',
+    "The other drone's later reservation is kept (tail stops before it)");
+  assert(tailReservations.getVertexOwner(spaceTimeKey(parkCell, 19)) === 'TAIL', 'The parking tail covers the ticks before it');
+
   return { passed, failed };
 }
 
@@ -221,11 +239,14 @@ function runCBSTests(world: World) {
     'CBS: both drones reach their goals in a head-on swap');
   assert(CollisionAnalyzer.detect(swapSwarm, [], undefined).length === 0, 'CBS: zero collisions in a head-on swap');
 
-  // 5c. Goal parking: a drone that parks early must not block another drone's later pass.
-  // Prioritized A* plans the passer first and only checks the parker's goal on arrival.
+  // 5c. Goal parking: a drone that parks early (landing on its dock, which is not a dock-floor
+  // cell here) must not block another drone's later pass. Prioritized A* plans the passer first
+  // and only checks the parker's goal on arrival.
   const parkSwarm = new Swarm(0);
   const passer = makeDrone('CBS_PASS', { x: 0, y: 2, z: 5 }, { x: 10, y: 2, z: 5 });
   const parker = makeDrone('CBS_PARK', { x: 5, y: 2, z: 7 }, { x: 5, y: 2, z: 5 });
+  parker.mission.warehouseLocation = { x: 5, y: 2, z: 5 };
+  parker.mission.state = 'RETURNING';
   parkSwarm.drones = [passer, parker];
   new CBSPlanner(new CooperativePlanner()).planLeg(parkSwarm, world, 0, new SpaceTimeReservations(), 6, false);
   assert(samePosition(passer.path[passer.path.length - 1], passer.goal) && samePosition(parker.path[parker.path.length - 1], parker.goal),
