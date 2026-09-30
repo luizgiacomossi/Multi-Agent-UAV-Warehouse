@@ -22,6 +22,13 @@ export class CostModel {
   }
 
   /**
+   * Get the drone's current residual battery level
+   */
+  static getDroneCurrentBattery(drone: Agent): number {
+    return drone.battery;
+  }
+
+  /**
    * Equation 13: Required Energy
    * e_req = \beta_{fly} \gamma (||p_i - p_k|| + ||p_k - p_{base}||) + \beta_{hover} t_{task}
    */
@@ -49,7 +56,8 @@ export class CostModel {
     }
     
     // 2. Check Strict Safety Margin constraint
-    if (drone.battery < e_req + MATH_CONSTANTS.DELTA_SAFE) {
+    const currentBattery = this.getDroneCurrentBattery(drone);
+    if (currentBattery < e_req + MATH_CONSTANTS.DELTA_SAFE) {
       return false;
     }
     
@@ -82,7 +90,8 @@ export class CostModel {
     }
     
     // Multi-task flight safety margin
-    if (drone.battery < e_req + MATH_CONSTANTS.DELTA_SAFE) return false;
+    const currentBattery = this.getDroneCurrentBattery(drone);
+    if (currentBattery < e_req + MATH_CONSTANTS.DELTA_SAFE) return false;
     
     return true;
   }
@@ -102,7 +111,8 @@ export class CostModel {
    * c_{batt} = e^{-\lambda (b_i(t) - \delta_{safe})}
    */
   static calculate_c_batt(drone: Agent): number {
-    const exponent = -MATH_CONSTANTS.LAMBDA_PEN * (drone.battery - MATH_CONSTANTS.DELTA_SAFE);
+    const currentBattery = this.getDroneCurrentBattery(drone);
+    const exponent = -MATH_CONSTANTS.LAMBDA_PEN * (currentBattery - MATH_CONSTANTS.DELTA_SAFE);
     return Math.exp(exponent);
   }
 

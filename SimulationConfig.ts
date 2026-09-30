@@ -36,7 +36,11 @@ export const WAREHOUSE = {
  * For a 50 × 30 × 10 m physical space this equals Math.sqrt(50²+30²+10²).
  * In voxel space we approximate with the diagonal of the default grid.
  *
- * Equation reference: normalisation denominator in Eq. 15.
+ * Equation reference: normalisation denominator of $c_{dist}$.
+ *
+ * NOTE: currently unused. SimulationManager.runPathfinding passes
+ * `world.size * 2`, and the Monte Carlo / fault-tolerance experiments pass
+ * `world.size * 1.732` (the grid diagonal of the *current* world size).
  */
 export const D_MAX = Math.sqrt(
   GRID_SIZE ** 2 + GRID_SIZE ** 2 + GRID_SIZE ** 2
@@ -92,10 +96,11 @@ export const DELTA_SAFE = 20.0;
  * Controls how steeply the cost rises as the drone's battery approaches
  * $\delta_{safe}$.  Higher → more aggressive avoidance of low-battery states.
  *
- * At $B_i = \delta_{safe} + 1$: $c_{batt} \approx 1 - e^{-0.15} \approx 0.14$
- * At $B_i = 100\%$:             $c_{batt} \approx 1 - e^{-12.0}  \approx 0.00$
+ * At $B_i = \delta_{safe} + 1$: $c_{batt} = e^{-0.15} \approx 0.86$
+ * At $B_i = 100\%$:             $c_{batt} = e^{-12.0} \approx 0.00$
  *
- * Equation reference: Eq. 16  $c_{batt,ik} = 1 - e^{-\lambda(B_i - \delta_{safe})}$
+ * Equation reference: $c_{batt,i} = e^{-\lambda(B_i - \delta_{safe})}$
+ * (see CostModel.calculate_c_batt)
  */
 export const LAMBDA_PEN = 0.15;
 
@@ -105,16 +110,18 @@ export const LAMBDA_PEN = 0.15;
 /**
  * $w_1$ — Weight for the normalised distance cost term.
  *
- * Must satisfy $w_1 + w_2 = 1$ for the composite cost to remain bounded [0,1].
+ * $w_1 + w_2 = 1$ keeps the numerator a convex combination of the two terms;
+ * the final cost is not bounded to [0,1] because it is divided by $\pi_k$.
  *
- * Equation reference: Eq. 15  $c_{ik} = (w_1 c_{dist,ik} + w_2 c_{batt,ik}) \cdot \pi_k$
+ * Equation reference: $C_{ik} = (w_1 c_{dist,ik} + w_2 c_{batt,i}) / \max(0.01, \pi_k)$
+ * (see CostModel.calculate_C_ik)
  */
 export const WEIGHT_DIST = 0.5;   // w₁
 
 /**
  * $w_2$ — Weight for the battery degradation cost term.
  *
- * Equation reference: Eq. 15  $c_{ik} = (w_1 c_{dist,ik} + w_2 c_{batt,ik}) \cdot \pi_k$
+ * Equation reference: $C_{ik} = (w_1 c_{dist,ik} + w_2 c_{batt,i}) / \max(0.01, \pi_k)$
  */
 export const WEIGHT_BATT = 0.5;   // w₂
 

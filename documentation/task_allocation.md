@@ -39,7 +39,7 @@ This is implemented by `calculate_e_req(...)`.
 A task is feasible only if:
 
 1. the drone supports the required payload type (`drone.payload.includes(task.req_payload)`), and
-2. `drone.battery >= e_req + DELTA_SAFE`.
+2. the drone's actual residual battery (synchronized dynamically from `calculateStateAt`) satisfies `currentBattery >= e_req + DELTA_SAFE`.
 
 Otherwise the matrix entry is set to a large penalty
 
@@ -57,15 +57,20 @@ For feasible assignments, the matrix entry is built from two terms.
 c_{dist}(i,k)=\frac{\lVert p_i(t) - g_k \rVert_2}{D_{max}}.
 \]
 
-In `CostModel` this evaluates Euclidean distance from the drone's current location \(p_i(t)\) divided by the maximum warehouse travel distance.
+In `CostModel` this evaluates Euclidean distance from the drone's current location \(p_i(t)\) divided by a normalisation constant \(D_{max}\) supplied by the caller:
+
+- the main mission loop (`SimulationManager.runPathfinding`) uses \(D_{max} = 2S\), where \(S\) is the grid side length;
+- the Monte Carlo and fault-tolerance experiments use \(D_{max} = \sqrt{3}\,S\) (the grid diagonal).
+
+The `D_MAX` constant in `SimulationConfig.ts` (the diagonal of the default grid) is currently not used by either path.
 
 ### 3.2 Battery term
 
 \[
-c_{batt}(i)=\exp\left(-\lambda(B_i-\delta_{safe})\right).
+c_{batt}(i)=\exp\left(-\lambda(B_i(t)-\delta_{safe})\right).
 \]
 
-This is a drone-only penalty term representing battery degradation/scarcity, penalizing drones close to the critical threshold \(\delta_{safe}\).
+This is an exponential barrier term representing battery scarcity, evaluated using the drone's true residual battery \(B_i(t)\) at the current leg start tick. It steeply penalizes drones approaching the critical margin \(\delta_{safe}\).
 
 ### 3.3 Final task cost
 
@@ -85,7 +90,10 @@ For a cluster \(\kappa\), the code computes:
 
 - a centroid,
 - a greedy intra-cluster tour sequence,
-- a scalar `tourCost`.
+- a scalar `tourCost` incorporating both structural hover and translational flight scaled by \(\beta_{fly} \cdot \gamma\):
+  \[
+  c_{\kappa}^{tour} = \sum_{j=1}^{|\kappa|-1} \beta_{fly} \gamma \lVert g_j - g_{j+1} \rVert_1 + \sum_{j=1}^{|\kappa|} \beta_{hover} t_j^{hover}.
+  \]
 
 The required-energy estimate evaluates flight from the drone's current position to the start of the tour, internal tour execution, and return from the final task to base:
 
@@ -97,10 +105,8 @@ e_{req}^{cluster}(i,\kappa)
 \lVert p_i(t) - g_{\kappa}^{first} \rVert_2 +
 \lVert g_{\kappa}^{last} - p_{base} \rVert_2
 \right)
- + c_{\kappa}^{tour},
+ + c_{\kappa}^{tour}.
 \]
-
-where \(c_{\kappa}^{tour}\) is accumulated from Manhattan inter-task motion and hover costs inside the cluster.
 
 The cost matrix then uses centroid distance from \(p_i(t)\):
 
@@ -116,7 +122,10 @@ The average priority of the cluster's tasks is used in \(C_{ik}\).
 In [`classes/SimulationManager.ts`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/classes/SimulationManager.ts), the allocation loop queries unscanned pallets and constructs candidate tasks for Munkres:
 
 1. **Payload Compatibility Screening:** The candidate pool filters available pallets by matching them against the union of active idle drones' payloads (`camera` vs `rfid`), preventing drones from stalling when leading pallets require sensors they lack.
-2. **Expanded Search Window:** The allocation window provides a wider candidate pool:
+2. **Payload-Homogeneous Clustering:** During cluster formation, spatial range queries are filtered to only group pallets sharing the seed's `payload_type`. This ensures clusters never demand conflicting payloads that single-payload drones cannot service.
+3. **Dynamic Battery Synchronization:** At each dispatch cycle, all idle drones synchronize their residual battery level from their actual flight history (`calculateStateAt(...)`) before constructing the Hungarian matrix.
+4. **Docking Base Preservation:** Drones spawned at arbitrary positions (`deployFromBase: false`) retain the explicit warehouse docking station location for round-trip returns (`isRoundTrip: true`).
+5. **Expanded Search Window:** The allocation window provides a wider candidate pool:
    \[
    \min\left(|\text{unscanned}|, \max(4 \cdot |\text{idleDrones}|, 20)\right).
    \]

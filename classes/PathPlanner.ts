@@ -189,26 +189,40 @@ export abstract class PathFindingStrategy {
   }
 
   /**
-   * If `pos` is blocked, BFS outward (max 5 steps) to find the nearest free neighbor.
+   * If `pos` is blocked, BFS outward to find the nearest free neighbor.
    * This allows drone goals to be set to pallet center positions even though pallets are blocked voxels.
-   * Guarantees safe hover positions outside forklift sweep corridors at y <= 1.
+   * Guarantees safe hover positions outside forklift sweep corridors at y <= 1, never picking y <= 1 in forklift corridors.
    */
-  protected nearestFreeNeighbor(pos: Position3D, world: World, maxAltitude?: number): Position3D {
+  protected nearestFreeNeighbor(
+    pos: Position3D,
+    world: World,
+    maxAltitude?: number,
+    reserved?: SpaceTimeReservations | Set<number>,
+    time?: number,
+    requesterId?: string
+  ): Position3D {
     const isForkliftZone = (x: number, y: number, z: number) => {
       if (y > 1) return false;
       return (world.forklifts || []).some(fl => fl.path && fl.path.some(p => p.x === x && p.z === z));
     };
 
+    const isReserved = (p: Position3D) => {
+      if (!reserved || time === undefined) return false;
+      const k = this.key(p, time);
+      return this.isCellReserved(reserved, k, requesterId);
+    };
+
     if (!world.isBlocked(pos.x, pos.y, pos.z) && 
         (maxAltitude === undefined || pos.y <= maxAltitude) && 
-        !isForkliftZone(pos.x, pos.y, pos.z)) {
+        !isForkliftZone(pos.x, pos.y, pos.z) &&
+        !isReserved(pos)) {
       return pos;
     }
 
     const queue: Position3D[] = [pos];
     const visited = new Set<string>();
     visited.add(`${pos.x},${pos.y},${pos.z}`);
-    let fallbackFree: Position3D | null = null;
+    let fallbackElevated: Position3D | null = null;
 
     while (queue.length > 0) {
       const curr = queue.shift()!;
@@ -222,14 +236,27 @@ export abstract class PathFindingStrategy {
         visited.add(key);
         if (nx < 0 || ny < 0 || nz < 0 || nx >= world.size || ny >= world.size || nz >= world.size) continue;
         if (maxAltitude !== undefined && ny > maxAltitude) continue;
+
         if (!world.isBlocked(nx, ny, nz)) {
-          if (!isForkliftZone(nx, ny, nz)) return { x: nx, y: ny, z: nz };
-          if (!fallbackFree) fallbackFree = { x: nx, y: ny, z: nz };
+          const candidate: Position3D = { x: nx, y: ny, z: nz };
+          const inFlZone = isForkliftZone(nx, ny, nz);
+          const cellReserved = isReserved(candidate);
+
+          if (!inFlZone && !cellReserved) {
+            return candidate;
+          }
+          // If in forklift zone, elevate to y = 2 if free
+          if (inFlZone && ny <= 1) {
+            const elevatedY = Math.min(2, maxAltitude !== undefined ? maxAltitude : 2);
+            if (!world.isBlocked(nx, elevatedY, nz) && !isReserved({ x: nx, y: elevatedY, z: nz })) {
+              if (!fallbackElevated) fallbackElevated = { x: nx, y: elevatedY, z: nz };
+            }
+          }
         }
-        if (visited.size < 200) queue.push({ x: nx, y: ny, z: nz });
+        if (visited.size < 300) queue.push({ x: nx, y: ny, z: nz });
       }
     }
-    return fallbackFree || pos;
+    return fallbackElevated || pos;
   }
 
   protected reconstructPath(node: PathNode): Position3D[] {

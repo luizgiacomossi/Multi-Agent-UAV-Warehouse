@@ -39,7 +39,7 @@ The earlier documentation overstated several aspects of the implementation. The 
 In particular:
 
 - clustered missions are implemented, but cluster tours are greedy nearest-neighbor heuristics, not exact TSP solutions;
-- the planner uses vertex-time reservation, but it does not explicitly reserve drone edge swaps, so the classical full MAPF edge-conflict model is not fully implemented;
+- the cooperative planners reserve both vertices and directed edges in space-time, so head-on swap conflicts are prevented by construction, but planning is prioritized (not coupled/CBS) and therefore incomplete;
 - the `Energy Saver` planner changes the A* objective, but the other planners still optimize time steps rather than a full energy objective;
 - the 1-to-1 allocator applies Hungarian matching only to a truncated subset of currently available pallets, not to the full remaining task set;
 - the experiment utilities are useful, but they are not full benchmark suites with all baselines implemented.

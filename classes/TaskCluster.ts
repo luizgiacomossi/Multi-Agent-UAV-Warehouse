@@ -51,8 +51,8 @@ export class TaskCluster {
             unvisited.sort((a, b) => this.dist(current.target, a.target) - this.dist(current.target, b.target)); // Sort the remaining tasks by distance from the current task
             const next = unvisited.shift()!;
 
-            // Add Kinetic energy cost of moving from Current to Next
-            this.tourCost += (this.dist(current.target, next.target) * MATH_CONSTANTS.BETA_FLY);
+            // Add Kinetic energy cost of moving from Current to Next (scaled by path complexity gamma)
+            this.tourCost += (this.dist(current.target, next.target) * MATH_CONSTANTS.BETA_FLY * MATH_CONSTANTS.GAMMA);
 
             // Add structural Hover cost to stop and scan the Next pallet
             this.tourCost += (next.t_hover * MATH_CONSTANTS.BETA_HOVER);

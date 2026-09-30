@@ -78,7 +78,17 @@ Future work:
 - actuator and controller constraints,
 - payload-mass-dependent power models.
 
-## 9. Perception And Observability Are Idealized
+## 9. Implementation Constraints
+
+- Space-time reservation keys are packed as \(x + 64y + 4096z + 262144t\) (see `SpaceTimeReservations` in `classes/PathPlanner.ts`). This is only collision-free for grid side lengths \(S \le 64\); larger worlds would produce aliased reservations.
+- `runPathfinding(...)` runs synchronously on the browser main thread. The only guard against a frozen UI is the per-leg A* timeout (`PATHFINDER_TIMEOUT_MS`, 10 s).
+
+Future work:
+
+- widen the key encoding (e.g. `BigInt` or a string key) or derive multipliers from the world size,
+- move planning into a Web Worker.
+
+## 10. Perception And Observability Are Idealized
 
 The planner has full access to the global map and deterministic forklift trajectories.
 

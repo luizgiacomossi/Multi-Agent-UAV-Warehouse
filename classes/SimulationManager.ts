@@ -169,6 +169,7 @@ export class SimulationManager {
 
             const neighbors = kdTree
                 .rangeQuery(seed.position, clusterRadius)
+                .filter(p => p.payload_type === seed.payload_type)
                 .sort((a, b) => this.distanceManhattan(a.position, seed.position) - this.distanceManhattan(b.position, seed.position))
                 .slice(0, Math.max(1, maxClusterSize));
 
@@ -256,10 +257,11 @@ export class SimulationManager {
         const activeClustersByDrone = new Map<string, ClusterVisualization>();
 
         // 1. Setup Initial Missions using MissionController
+        const warehouseBase = this.world.warehouse?.position || { x: 0, y: 0, z: 0 };
         this.swarm.drones.forEach(drone => {
             // drone.goal was set in initializeScenario to the pallet position
-            // sync MissionController with the correct pallet context
-            drone.setMissionConfig(drone.start, drone.goal, effectiveMissionCount, isRoundTrip);
+            // sync MissionController with the correct pallet context and warehouse docking location
+            drone.setMissionConfig(drone.start, drone.goal, effectiveMissionCount, isRoundTrip, warehouseBase);
             // Re-apply pallet metadata that initializeScenario set, since setMissionConfig resets mission
             if (drone.currentPalletId) {
                 drone.mission.currentPalletId = drone.currentPalletId;
@@ -270,6 +272,7 @@ export class SimulationManager {
         if (isAllPalletsMode) {
             this.swarm.drones.forEach(drone => {
                 drone.mission.reset();
+                drone.mission.warehouseLocation = { ...warehouseBase };
                 drone.mission.configure(effectiveMissionCount, isRoundTrip);
                 drone.goal = { ...drone.start };
                 drone.currentPalletId = undefined;
@@ -368,6 +371,14 @@ export class SimulationManager {
                 const readyForNew = drone.mission.completeLeg();
                 this.completePallet(prevPallet);
 
+                // Keep drone mirror properties in sync with mission controller
+                drone.currentPalletId = drone.mission.currentPalletId || undefined;
+                drone.currentScanType = drone.mission.currentScanType || undefined;
+                const nextTarget = drone.mission.getNextTarget();
+                if (nextTarget) {
+                    drone.goal = { ...nextTarget };
+                }
+
                 // 0.5 Close the historical segment
                 if (prevPallet && drone.assignedTasksLog.length > 0) {
                     const lastLog = drone.assignedTasksLog[drone.assignedTasksLog.length - 1];
@@ -390,6 +401,14 @@ export class SimulationManager {
             });
 
             if (idleDrones.length > 0) {
+                // Synchronize residual battery for idle drones before evaluating assignment feasibility
+                if (batteryEnabled) {
+                    idleDrones.forEach(drone => {
+                        const tick = drone.path.length > 0 ? drone.path.length - 1 : 0;
+                        drone.battery = drone.calculateStateAt(tick, this.world.chargeStations, batteryEnabled).battery;
+                    });
+                }
+
                 const dMax = this.world.size * 2; // Approximate valid maximum structural traversal
                 const pBase = this.world.warehouse?.position || { x: 0, y: 0, z: 0 };
 
@@ -397,7 +416,11 @@ export class SimulationManager {
                     const unscanned = this.getAvailablePallets();
 
                     if (unscanned.length > 0) {
-                        const pendingClusters = this.buildLocalizedClusters(unscanned, clusterRadius, maxClusterSize, idleDrones.length);
+                        // Gather compatible pallets for idle drones based on payload requirements
+                        const availablePayloads = new Set(idleDrones.flatMap(d => d.payload));
+                        const compatiblePallets = unscanned.filter(plt => availablePayloads.has(plt.payload_type));
+                        const pool = compatiblePallets.length > 0 ? compatiblePallets : unscanned;
+                        const pendingClusters = this.buildLocalizedClusters(pool, clusterRadius, maxClusterSize, idleDrones.length);
 
                         // Fire the Munkres Cost Engine for spatial matching
                         if (pendingClusters.length > 0) {
@@ -407,6 +430,9 @@ export class SimulationManager {
                                 const drone = idleDrones.find(d => d.id === a.drone.id);
                                 if (drone) {
                                     drone.mission.assignClusterMission(a.cluster);
+                                    drone.goal = { ...a.cluster.tourSequence[0].target };
+                                    drone.currentPalletId = a.cluster.tourSequence[0].palletId;
+                                    drone.currentScanType = a.cluster.tourSequence[0].req_payload;
                                     this.reserveCluster(a.cluster, drone.id);
                                     const clusterVisual: ClusterVisualization = {
                                         id: a.cluster.id,
