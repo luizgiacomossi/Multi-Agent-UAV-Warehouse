@@ -22,11 +22,12 @@ The codebase implements the following major mechanisms.
 
 - A 3D voxel world stored in a flattened `Uint8Array`; see [`classes/World.ts`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/classes/World.ts).
 - Procedural world generation for warehouse, city, tunnel, open, and random themes; see [`classes/WorldGenerator.ts`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/classes/WorldGenerator.ts).
-- Three path planners:
+- Four path planners:
   - `Naive`
   - `Cooperative`
   - `Energy Saver`
-  These are implemented in [`classes/PathPlanner.ts`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/classes/PathPlanner.ts).
+  - `CBS` (Conflict-Based Search)
+  The first three are implemented in [`classes/PathPlanner.ts`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/classes/PathPlanner.ts); CBS is in [`classes/CBSPlanner.ts`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/classes/CBSPlanner.ts).
 - Centralized allocation with `munkres-js`; see [`classes/CostModel.ts`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/classes/CostModel.ts).
 - Optional clustered missions built from a KD-tree neighborhood query and a greedy intra-cluster tour heuristic; see [`utils/KDTree.ts`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/utils/KDTree.ts) and [`classes/TaskCluster.ts`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/classes/TaskCluster.ts).
 - Deterministic playback from precomputed paths, including battery depletion, recharging, and crash/fall visualization; see [`classes/Drone.ts`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/classes/Drone.ts).
@@ -39,7 +40,7 @@ The earlier documentation overstated several aspects of the implementation. The 
 In particular:
 
 - clustered missions are implemented, but cluster tours are greedy nearest-neighbor heuristics, not exact TSP solutions;
-- the cooperative planners reserve both vertices and directed edges in space-time, so head-on swap conflicts are prevented by construction, but planning is prioritized (not coupled/CBS) and therefore incomplete;
+- the `Cooperative` and `Energy Saver` planners reserve both vertices and directed edges in space-time, but planning is prioritized and therefore incomplete; `CBS` plans the drones of each leg jointly and is conflict-free within a leg, but it is optimal per leg only (not over the whole mission) and falls back to prioritized A* when its search budget runs out;
 - the `Energy Saver` planner changes the A* objective, but the other planners still optimize time steps rather than a full energy objective;
 - the 1-to-1 allocator applies Hungarian matching only to a truncated subset of currently available pallets, not to the full remaining task set;
 - the experiment utilities are useful, but they are not full benchmark suites with all baselines implemented.

@@ -165,7 +165,7 @@ export class SimulationToolRegistry {
         type: 'function',
         function: {
           name: 'change_algorithm',
-          description: 'Change the multi-agent pathfinding algorithm (e.g. "Cooperative", "Independent", "Energy Saver", "Enhanced CBS") and recalculate drone paths.',
+          description: 'Change the multi-agent pathfinding algorithm ("Naive", "Cooperative", "Energy Saver", or "CBS" for Conflict-Based Search) and recalculate drone paths.',
           parameters: {
             type: 'object',
             properties: {
@@ -521,7 +521,10 @@ export class SimulationToolRegistry {
   private changeAlgorithm(algorithm: string) {
     if (!algorithm) return { success: false, error: 'No algorithm specified.' };
     const available = this.context.getAvailableAlgorithms ? this.context.getAvailableAlgorithms() : [];
-    const match = available.find((a) => a.toLowerCase() === algorithm.toLowerCase()) || algorithm;
+    const match = available.find((a) => a.toLowerCase() === algorithm.toLowerCase());
+    if (!match) {
+      return { success: false, error: `Unknown algorithm "${algorithm}". Available: ${available.join(', ')}.` };
+    }
     if (this.context.onChangeAlgorithm) {
       this.context.onChangeAlgorithm(match);
       return { success: true, message: `Swarm path planning algorithm set to "${match}". Recalculating paths.` };

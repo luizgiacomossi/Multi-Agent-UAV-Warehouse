@@ -33,6 +33,17 @@ export class Warehouse {
     };
   }
 
+  /**
+   * Whether `pos` is on the docking floor, where drones take off and land. Encounters there are
+   * handled by the dock itself, so they are neither deconflicted nor reported as collisions.
+   */
+  public isOnDockFloor(pos: Position3D): boolean {
+    const b = this.getBounds();
+    return pos.x >= b.minX && pos.x <= b.maxX &&
+      pos.y === this.position.y &&
+      pos.z >= b.minZ && pos.z <= b.maxZ;
+  }
+
   public getBounds() {
     return {
       minX: this.position.x,

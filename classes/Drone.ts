@@ -23,6 +23,8 @@ export class Drone implements Agent {
     currentScanType?: string;   // 'camera' | 'rfid'
     scanLog: { tick: number; palletId: string }[];  // history of completed scans
     assignedTasksLog: { startTick: number; endTick: number; palletId: string; position: Position3D; type: string; priority: number }[];
+    /** First target chosen by initializeScenario; every re-plan restarts from it. */
+    initialAssignment: { goal: Position3D; palletId?: string; scanType?: string } | null = null;
     legFailures: number = 0;        // consecutive failed plan attempts for the current leg
     lastLegFailed: boolean = false; // set by the planner when the latest planLeg found no path
 
@@ -69,6 +71,18 @@ export class Drone implements Agent {
         // but we copy the basic props if needed for UI logic
         d.missionState = this.mission.state;
         return d;
+    }
+
+    /**
+     * Restores the scenario's first target. A finished run leaves `goal` on the dock and no pallet,
+     * so re-planning (e.g. after switching strategy) would otherwise waste the first mission and
+     * compare strategies on different scenarios.
+     */
+    restoreInitialAssignment() {
+        if (!this.initialAssignment) return;
+        this.goal = { ...this.initialAssignment.goal };
+        this.currentPalletId = this.initialAssignment.palletId;
+        this.currentScanType = this.initialAssignment.scanType;
     }
 
     setMissionConfig(start: Position3D, firstGoal: Position3D, maxMissions: number, isRoundTrip: boolean, baseLocation?: Position3D) {
@@ -345,6 +359,7 @@ export class Swarm {
                 // Keep MissionController in sync
                 drone.mission.currentPalletId = pallet.id; // Keep MissionController in sync 
                 drone.mission.currentScanType = pallet.payload_type;
+                drone.initialAssignment = { goal: { ...pallet.position }, palletId: pallet.id, scanType: pallet.payload_type };
             } else {
                 // Non-warehouse fallback: random unblocked free cell
                 let attempts = 0;
@@ -363,6 +378,7 @@ export class Swarm {
                     attempts++;
                 }
                 if (attempts >= 1000) drone.goal = { x: 0, y: 0, z: 0 };
+                drone.initialAssignment = { goal: { ...drone.goal } };
             }
         }
     }

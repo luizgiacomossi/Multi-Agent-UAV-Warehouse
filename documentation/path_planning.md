@@ -105,6 +105,36 @@ h(n)=\beta_{fly}\lVert pos(n)-goal \rVert_1.
 
 Unlike naive binary closed-set pruning, `EnergySaverPlanner` tracks minimal cost-to-reach via a continuous `bestG` map (`Map<number, number>`). Nodes arriving at the same space-time voxel with strictly lower energy are permitted to relax and re-expand, guaranteeing optimal energy paths are preserved.
 
+### 4.4 `CBSPlanner` (Conflict-Based Search)
+
+[`classes/CBSPlanner.ts`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/classes/CBSPlanner.ts) implements Conflict-Based Search (Sharon et al., 2015) over each planning leg. Every drone that has a target in the current cycle is planned jointly.
+
+**High level.** A constraint tree is searched best-first by the sum of leg durations
+\[
+\text{SOC} = \sum_i \left(|\pi_i| - 1\right).
+\]
+The root plans each drone alone. For a node, `ConflictDetector` finds the earliest conflict between two drones, over all ticks \(t \ge \max(t^{start}_i, t^{start}_j)\). A drone stays parked on its last cell after arriving. Conflicts are either
+
+- a **vertex conflict** \(\pi_i(t) = \pi_j(t)\), branched into the constraints \(\langle i, v, t\rangle\) and \(\langle j, v, t\rangle\), or
+- an **edge (swap) conflict**, branched into \(\langle i, u \to v, t\rangle\) and \(\langle j, v \to u, t\rangle\).
+
+Each child re-plans only the constrained drone. The first conflict-free node is committed through the same `commitLeg(...)` path as the prioritized planners.
+
+**Low level.** The shared time-expanded A* (`findPath`) is reused unchanged. `ConstrainedReservationView` decorates the shared `SpaceTimeReservations` with the drone's `ConstraintTable`, through the `ReservationView` interface. It also implements `canHoldGoal`: a goal only counts as reached if no constraint, and no committed reservation of another drone, needs the cell within the next `world.size * 4` ticks. This is what removes the goal-parking conflicts left over by prioritized planning.
+
+**Scope rules.**
+- Committed traffic (forklifts, and drones not re-planned this cycle) is treated as fixed obstacles, as in the other planners.
+- Drones' start cells stay reserved, and a constraint on a drone's fixed start prunes that branch.
+- The dock floor (`Warehouse.isOnDockFloor`) is not deconflicted, matching `CollisionAnalyzer`.
+
+**Budget and fallback.** A leg whose search exceeds `maxExpansions` (default 500 constraint-tree nodes) or `timeBudgetMs` (default 2000 ms) is delegated to an injected fallback strategy, `CooperativePlanner` by default. Drones with no path even unconstrained go through the normal retry/abandon handling.
+
+**Measured behaviour** (20 warehouse runs per configuration, 12³ grid, 4–8 drones):
+- zero collisions and zero stranded drones in all configurations, where `Cooperative` still had 0–3 collisions per 20 runs;
+- the fallback was never triggered;
+- makespan was within about ±4% of `Cooperative`, because CBS minimises the sum of leg durations rather than the makespan;
+- planning took about 30–250 ms per mission on average (up to about 1.2 s), against 20–40 ms for `Cooperative`.
+
 ## 5. Battery Constraint During Planning
 
 Each search state tracks an `energy` field representing accumulated consumption along that leg. Successors are pruned if `energy > maxEnergy`.
@@ -127,7 +157,7 @@ The planning stack enforces both vertex and directed edge conflict prevention:
    \neg \left(\pi_i(t) = \pi_j(t+1) \land \pi_i(t+1) = \pi_j(t)\right).
    \]
 
-Both constraints are enforced during A* expansion against previously planned drones as well as moving forklifts (at both body and clearance height levels).
+Both constraints are enforced during A* expansion against previously planned drones as well as moving forklifts (at both body and clearance height levels). `CBSPlanner` additionally resolves them jointly among the drones planned in the same leg (Section 4.4).
 
 ## 7. Complexity
 

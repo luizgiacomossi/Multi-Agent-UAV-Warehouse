@@ -34,10 +34,12 @@ The cooperative planners enforce both vertex reservations and directed edge rese
 
 However, prioritized planning is fundamentally incomplete. When a leg has no path, the drone hovers in place for `RETRY_WAIT_TICKS` and re-plans on the next cycle. After `MAX_LEG_RETRIES` failed attempts, a drone with a pallet task abandons it: the pallet returns to the pool, and one abandoned `MAX_PALLET_ABANDONS` times is marked unreachable. A drone that cannot get home is stranded. Goal cells occupied by drones parked at the end of the search horizon are skipped when resolving hover targets.
 
-A residual source of conflicts remains: A* only checks that the goal is free on arrival, not that it stays free afterwards, so an earlier-planned drone can still pass through a later drone's parking cell. These rare collisions are caught post hoc by `CollisionAnalyzer`.
+A residual source of conflicts remains in the prioritized planners: their A* only checks that the goal is free on arrival, not that it stays free afterwards, so an earlier-planned drone can still pass through a later drone's parking cell. These rare collisions are caught post hoc by `CollisionAnalyzer`. The `CBS` planner removes them by planning each leg jointly and checking that a goal can be held (see `path_planning.md`, Section 4.4).
+
+CBS is optimal per planning leg only. Legs are still planned cycle by cycle against committed traffic, so the mission as a whole is not jointly optimal. Its worst-case runtime is exponential, which is bounded by a node and time budget with a fallback to prioritized A*.
 
 Future work:
-- implement Conflict-Based Search (CBS) or ECBS for scenarios with extreme space-time congestion,
+- add a bounded-suboptimal variant (ECBS/EECBS) to scale CBS to larger swarms,
 - support priority re-ordering or dynamic priority inversion when lower-priority drones become trapped.
 
 ## 5. Cluster Routing Is Heuristic
