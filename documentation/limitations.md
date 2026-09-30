@@ -32,7 +32,9 @@ Future work:
 
 The cooperative planners enforce both vertex reservations and directed edge reservations \((u \to v, t)\), preventing head-on swap conflicts by construction across drones and dynamic forklifts.
 
-However, prioritized planning is fundamentally incomplete and can result in lower-priority drones becoming stranded if high-priority reservations block all paths within `maxTimeSteps`.
+However, prioritized planning is fundamentally incomplete. When a leg has no path, the drone hovers in place for `RETRY_WAIT_TICKS` and re-plans on the next cycle. After `MAX_LEG_RETRIES` failed attempts, a drone with a pallet task abandons it: the pallet returns to the pool, and one abandoned `MAX_PALLET_ABANDONS` times is marked unreachable. A drone that cannot get home is stranded. Goal cells occupied by drones parked at the end of the search horizon are skipped when resolving hover targets.
+
+A residual source of conflicts remains: A* only checks that the goal is free on arrival, not that it stays free afterwards, so an earlier-planned drone can still pass through a later drone's parking cell. These rare collisions are caught post hoc by `CollisionAnalyzer`.
 
 Future work:
 - implement Conflict-Based Search (CBS) or ECBS for scenarios with extreme space-time congestion,

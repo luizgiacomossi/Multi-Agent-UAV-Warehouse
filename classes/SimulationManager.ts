@@ -12,7 +12,8 @@ import {
     CooperativePlanner,
     EnergySaverPlanner,
     CollisionAnalyzer,
-    SpaceTimeReservations
+    SpaceTimeReservations,
+    MAX_LEG_RETRIES
 } from './PathPlanner';
 import { CostModel } from './CostModel';
 import { Task } from '../types';
@@ -32,6 +33,11 @@ export class SimulationManager {
     private algorithms: Record<string, PathFindingStrategy>;
     private palletAssignments = new Map<string, PalletReservation>();
     private completedPalletIds = new Set<string>();
+    private abandonCounts = new Map<string, number>();
+    private unreachablePalletIds = new Set<string>();
+
+    /** A pallet abandoned this many times is treated as unreachable and no longer offered. */
+    private static readonly MAX_PALLET_ABANDONS = 2;
 
     constructor(defaultSize: number = GRID_SIZE, defaultAgentCount: number = DEFAULT_AGENT_COUNT) {
         this.world = new World(defaultSize);
@@ -203,6 +209,24 @@ export class SimulationManager {
     private resetPalletTracking() {
         this.palletAssignments.clear();
         this.completedPalletIds.clear();
+        this.abandonCounts.clear();
+        this.unreachablePalletIds.clear();
+    }
+
+    /**
+     * Releases every pallet reserved by a drone that gave up on its task, returning them to the
+     * pool. Pallets abandoned MAX_PALLET_ABANDONS times are marked unreachable instead.
+     */
+    private releaseDronePallets(droneId: string) {
+        for (const [palletId, reservation] of [...this.palletAssignments.entries()]) {
+            if (reservation.droneId !== droneId) continue;
+            this.palletAssignments.delete(palletId);
+            const count = (this.abandonCounts.get(palletId) || 0) + 1;
+            this.abandonCounts.set(palletId, count);
+            if (count >= SimulationManager.MAX_PALLET_ABANDONS) {
+                this.unreachablePalletIds.add(palletId);
+            }
+        }
     }
 
     private reservePallet(palletId: string | undefined, reservation: PalletReservation) {
@@ -228,7 +252,9 @@ export class SimulationManager {
 
     private getAvailablePallets(): Pallet[] {
         return this.world.pallets.filter(plt =>
-            !this.completedPalletIds.has(plt.id) && !this.palletAssignments.has(plt.id)
+            !this.completedPalletIds.has(plt.id) &&
+            !this.palletAssignments.has(plt.id) &&
+            !this.unreachablePalletIds.has(plt.id)
         );
     }
 
@@ -257,11 +283,14 @@ export class SimulationManager {
         const activeClustersByDrone = new Map<string, ClusterVisualization>();
 
         // 1. Setup Initial Missions using MissionController
-        const warehouseBase = this.world.warehouse?.position || { x: 0, y: 0, z: 0 };
-        this.swarm.drones.forEach(drone => {
+        // Each drone docks at its own warehouse slot. A single shared dock cell would be
+        // reserved by the first drone to land, leaving every other return leg unreachable.
+        const dockFor = (index: number, drone: Drone): Position3D =>
+            this.world.warehouse ? this.world.warehouse.getSpawnLocation(index) : { ...drone.start };
+        this.swarm.drones.forEach((drone, index) => {
             // drone.goal was set in initializeScenario to the pallet position
-            // sync MissionController with the correct pallet context and warehouse docking location
-            drone.setMissionConfig(drone.start, drone.goal, effectiveMissionCount, isRoundTrip, warehouseBase);
+            // sync MissionController with the correct pallet context and docking slot
+            drone.setMissionConfig(drone.start, drone.goal, effectiveMissionCount, isRoundTrip, dockFor(index, drone));
             // Re-apply pallet metadata that initializeScenario set, since setMissionConfig resets mission
             if (drone.currentPalletId) {
                 drone.mission.currentPalletId = drone.currentPalletId;
@@ -270,9 +299,9 @@ export class SimulationManager {
         });
         this.resetPalletTracking();
         if (isAllPalletsMode) {
-            this.swarm.drones.forEach(drone => {
+            this.swarm.drones.forEach((drone, index) => {
                 drone.mission.reset();
-                drone.mission.warehouseLocation = { ...warehouseBase };
+                drone.mission.warehouseLocation = dockFor(index, drone);
                 drone.mission.configure(effectiveMissionCount, isRoundTrip);
                 drone.goal = { ...drone.start };
                 drone.currentPalletId = undefined;
@@ -366,6 +395,36 @@ export class SimulationManager {
                     return;
                 }
 
+                // No path this cycle: the drone hovered in place and keeps its leg for a retry.
+                if (drone.lastLegFailed) {
+                    drone.lastLegFailed = false;
+                    const hasTask = drone.mission.state === 'OUTBOUND' || drone.mission.state === 'EXECUTING_TOUR';
+                    if (!hasTask || drone.legFailures < MAX_LEG_RETRIES) return;
+
+                    // Target stayed unreachable: drop the task instead of stranding the drone
+                    const endTick = drone.path.length - 1;
+                    const abandonedPallet = drone.mission.currentPalletId;
+                    const lastLog = drone.assignedTasksLog[drone.assignedTasksLog.length - 1];
+                    if (lastLog && lastLog.palletId === abandonedPallet) lastLog.endTick = endTick;
+                    const activeCluster = activeClustersByDrone.get(drone.id);
+                    if (activeCluster) {
+                        activeCluster.endTick = endTick;
+                        activeClustersByDrone.delete(drone.id);
+                    }
+                    console.warn(`[${drone.name}] Abandoned unreachable task ${abandonedPallet ?? ''} after ${drone.legFailures} failed plans`);
+
+                    this.releaseDronePallets(drone.id);
+                    drone.mission.abandonTask();
+                    drone.legFailures = 0;
+                    drone.currentPalletId = undefined;
+                    drone.currentScanType = undefined;
+                    // After abandoning, the drone either heads home (RETURNING) or is free (IDLE)
+                    const nextTarget = drone.mission.getNextTarget();
+                    if (nextTarget) drone.goal = { ...nextTarget };
+                    else idleDrones.push(drone);
+                    return;
+                }
+
                 const prevPallet = drone.mission.currentPalletId;
                 const prevCluster = drone.mission.currentCluster;
                 const readyForNew = drone.mission.completeLeg();
@@ -395,7 +454,7 @@ export class SimulationManager {
                     }
                 }
 
-                if (readyForNew && drone.status !== 'STRANDED' && drone.mission.state !== 'COMPLETED') {
+                if (readyForNew && drone.mission.state !== 'COMPLETED') {
                     idleDrones.push(drone);
                 }
             });
@@ -510,7 +569,8 @@ export class SimulationManager {
             }
 
             if (isAllPalletsMode) {
-                const allPalletsChecked = this.world.pallets.length > 0 && this.completedPalletIds.size >= this.world.pallets.length;
+                const resolvedPallets = this.completedPalletIds.size + this.unreachablePalletIds.size;
+                const allPalletsChecked = this.world.pallets.length > 0 && resolvedPallets >= this.world.pallets.length;
                 const hasActiveLegs = this.swarm.drones.some(d =>
                     d.status !== 'STRANDED' &&
                     (d.mission.state === 'OUTBOUND' || d.mission.state === 'EXECUTING_TOUR' || d.mission.state === 'RETURNING')

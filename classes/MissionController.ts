@@ -162,6 +162,19 @@ export class MissionController {
         return false;
     }
 
+    /**
+     * Drops the current task (single pallet or remaining cluster tour) without counting it
+     * as completed, used when the target stays unreachable after repeated re-plans.
+     */
+    public abandonTask() {
+        this.currentGoal = null;
+        this.currentCluster = null;
+        this.clusterTaskIndex = 0;
+        this.currentPalletId = null;
+        this.currentScanType = null;
+        this.state = this.mustReturnToBase ? 'RETURNING' : 'IDLE';
+    }
+
     public reset() {
         this.state = 'IDLE';
         this.currentGoal = null;

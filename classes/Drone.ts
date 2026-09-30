@@ -23,6 +23,8 @@ export class Drone implements Agent {
     currentScanType?: string;   // 'camera' | 'rfid'
     scanLog: { tick: number; palletId: string }[];  // history of completed scans
     assignedTasksLog: { startTick: number; endTick: number; palletId: string; position: Position3D; type: string; priority: number }[];
+    legFailures: number = 0;        // consecutive failed plan attempts for the current leg
+    lastLegFailed: boolean = false; // set by the planner when the latest planLeg found no path
 
     public mission: MissionController;
 
@@ -77,6 +79,12 @@ export class Drone implements Agent {
         this.deliveryTimes = [];
         this.destructionTime = undefined;
         this.assignedTasksLog = [];
+        // Re-planning reuses the same Drone objects, so clear everything the previous run produced
+        this.scanLog = [];
+        this.scanTimes = [];
+        this.battery = this.maxBattery;
+        this.legFailures = 0;
+        this.lastLegFailed = false;
 
         // Configure Controller
         this.mission.warehouseLocation = baseLocation ? { ...baseLocation } : { ...start };
@@ -293,6 +301,9 @@ export class Swarm {
     initializeScenario(world: World, maxAltitude: number) {
         // Initialize the scenario (start position, goal position, etc.) for all drones 
         const agents = this.drones;
+        // Initial pallets are drawn without replacement: two drones sharing a first target would
+        // share its hover cell, and the second arrival can never reach it (planner strands it).
+        const palletPool = [...(world.pallets || [])];
 
         for (let i = 0; i < agents.length; i++) {
             const drone = agents[i]; // Get the drone 
@@ -323,8 +334,11 @@ export class Swarm {
 
             // Assign Initial Goal — set to real pallet positions in Warehouse mode 
             if (world.pallets && world.pallets.length > 0) {
-                // Pick a random pallet for each drone 
-                const pallet = world.pallets[Math.floor(Math.random() * world.pallets.length)]; // Get a random pallet 
+                // Pick a random, not-yet-taken pallet for each drone (reuse only if drones outnumber pallets)
+                const source = palletPool.length > 0 ? palletPool : world.pallets;
+                const pickIdx = Math.floor(Math.random() * source.length);
+                const pallet = source[pickIdx];
+                if (source === palletPool) palletPool.splice(pickIdx, 1);
                 drone.goal = { ...pallet.position }; // Set the goal to the pallet position 
                 drone.currentPalletId = pallet.id; // Set the current pallet ID 
                 drone.currentScanType = pallet.payload_type; // Set the current scan type 

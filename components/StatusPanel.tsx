@@ -217,7 +217,12 @@ const StatusPanel: React.FC<StatusPanelProps> = ({
 
           const isDestroyed = agent.status === 'STRANDED' && agent.destructionTime !== undefined && tick >= agent.destructionTime;
           const isDeadBattery = snapshot.isDeadBattery;
-          const isBlocked = (agent.status === 'STRANDED' && !isDestroyed && !isDeadBattery) || (agent.path.length <= 1 && !isDestroyed && !isDeadBattery && tick < finishTime);
+          // `status` is the final planning outcome, so only show Blocked once playback reaches
+          // the point where the planner gave up (the end of the drone's path).
+          const isBlocked = !isDestroyed && !isDeadBattery && (
+            (agent.status === 'STRANDED' && agent.destructionTime === undefined && tick >= finishTime) ||
+            agent.path.length <= 1
+          );
 
           const scansDone = agent.deliveryTimes?.filter(t => t <= tick).length || 0;
           const nextScan = agent.deliveryTimes?.find(t => t > tick);
