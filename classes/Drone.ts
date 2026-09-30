@@ -2,6 +2,7 @@
 import { Agent, Position3D, MATH_CONSTANTS, MissionState } from '../types';
 import { MissionController } from './MissionController';
 import { World } from './World';
+import { random } from '../utils/Random';
 
 export class Drone implements Agent {
     // drone properties
@@ -330,9 +331,9 @@ export class Swarm {
                 let attempts = 0;
                 while (attempts < 1000) {
                     start = {
-                        x: Math.floor(Math.random() * world.size),
-                        y: Math.floor(Math.random() * Math.min(world.size, maxAltitude)),
-                        z: Math.floor(Math.random() * world.size)
+                        x: Math.floor(random() * world.size),
+                        y: Math.floor(random() * Math.min(world.size, maxAltitude)),
+                        z: Math.floor(random() * world.size)
                     };
                     if (!world.isBlocked(start.x, start.y, start.z) && !this.isOccupied(start)) {
                         const onForkliftTrack = start.y <= 1 && (world.forklifts || []).some(fl => 
@@ -350,7 +351,7 @@ export class Swarm {
             if (world.pallets && world.pallets.length > 0) {
                 // Pick a random, not-yet-taken pallet for each drone (reuse only if drones outnumber pallets)
                 const source = palletPool.length > 0 ? palletPool : world.pallets;
-                const pickIdx = Math.floor(Math.random() * source.length);
+                const pickIdx = Math.floor(random() * source.length);
                 const pallet = source[pickIdx];
                 if (source === palletPool) palletPool.splice(pickIdx, 1);
                 drone.goal = { ...pallet.position }; // Set the goal to the pallet position 
@@ -366,9 +367,9 @@ export class Swarm {
                 const minDistance = 4;
                 while (attempts < 1000) {
                     const goal = {
-                        x: Math.floor(Math.random() * world.size),
-                        y: Math.floor(Math.random() * Math.min(world.size, maxAltitude)),
-                        z: Math.floor(Math.random() * world.size)
+                        x: Math.floor(random() * world.size),
+                        y: Math.floor(random() * Math.min(world.size, maxAltitude)),
+                        z: Math.floor(random() * world.size)
                     };
                     const dist = Math.abs(start.x - goal.x) + Math.abs(start.y - goal.y) + Math.abs(start.z - goal.z);
                     if (!world.isBlocked(goal.x, goal.y, goal.z) && dist > minDistance) {

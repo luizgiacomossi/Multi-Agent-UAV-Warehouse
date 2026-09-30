@@ -1,5 +1,6 @@
 import { runAllocationTests } from './test_allocation';
 import { runPathPlanningTests } from './test_path_planning';
+import { runBenchmarkTests } from './test_benchmark';
 
 const startTime = performance.now();
 
@@ -9,9 +10,10 @@ console.log('╚═════════════════════�
 
 const allocationResults = runAllocationTests();
 const planningResults = runPathPlanningTests();
+const benchmarkResults = await runBenchmarkTests();
 
-const totalPassed = allocationResults.passed + planningResults.passed;
-const totalFailed = allocationResults.failed + planningResults.failed;
+const totalPassed = allocationResults.passed + planningResults.passed + benchmarkResults.passed;
+const totalFailed = allocationResults.failed + planningResults.failed + benchmarkResults.failed;
 const totalDuration = ((performance.now() - startTime) / 1000).toFixed(2);
 
 console.log('\n========================================');

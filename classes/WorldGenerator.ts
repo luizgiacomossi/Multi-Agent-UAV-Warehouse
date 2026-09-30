@@ -1,6 +1,7 @@
 import { World } from './World';
 import { GenerationTheme, Position3D, TaskPriorityMode } from '../types';
 import { WAREHOUSE, DEFAULT_MAX_ALTITUDE } from '../SimulationConfig';
+import { random } from '../utils/Random';
 
 export interface ReservedZone {
   minX: number; maxX: number;
@@ -10,7 +11,7 @@ export interface ReservedZone {
 
 export class WorldGenerator {
   private static getPalletWeight(priorityMode: TaskPriorityMode): number {
-    return priorityMode === 'uniform' ? 100 : Math.floor(Math.random() * 50) + 10;
+    return priorityMode === 'uniform' ? 100 : Math.floor(random() * 50) + 10;
   }
 
   static generate(world: World, theme: string, reservedZone?: ReservedZone, totalTasks: number = 50, numForklifts: number = 3, priorityMode: TaskPriorityMode = 'mixed') {
@@ -40,16 +41,16 @@ export class WorldGenerator {
         let attempts = 0;
         // Find safe spawn points across the generated obstacles
         while (world.pallets.length < totalTasks && attempts < totalTasks * 20) {
-             const x = Math.floor(Math.random() * world.size);
-             const z = Math.floor(Math.random() * world.size);
-             const y = Math.floor(Math.random() * Math.min(world.size - 1, 15));
+             const x = Math.floor(random() * world.size);
+             const z = Math.floor(random() * world.size);
+             const y = Math.floor(random() * Math.min(world.size - 1, 15));
              
              if (!this.isRestricted(x, y, z, reservedZone) && !world.isBlocked(x, y, z)) {
                  world.pallets.push({
                      id: `PLT-${this.generateUUID()}`,
                      position: { x, y, z },
                      weight: this.getPalletWeight(priorityMode),
-                     payload_type: Math.random() > 0.5 ? 'camera' : 'rfid'
+                     payload_type: random() > 0.5 ? 'camera' : 'rfid'
                  });
              }
              attempts++;
@@ -68,7 +69,7 @@ export class WorldGenerator {
   // The random part goes last: the UI shows the last 6 characters, and the timestamp
   // is identical for every pallet generated in the same run.
   private static generateUUID(): string {
-      return Date.now().toString(36) + Math.random().toString(36).substring(2, 10).padEnd(8, '0');
+      return Date.now().toString(36) + random().toString(36).substring(2, 10).padEnd(8, '0');
   }
 
   private static generateWarehouse(world: World, reservedZone?: ReservedZone, totalTasks: number = 50, numForklifts: number = 3, priorityMode: TaskPriorityMode = 'mixed') {
@@ -92,7 +93,7 @@ export class WorldGenerator {
               // If it's not an aisle in either dimension, it's a rack location
               if (!isAisleX && !isAisleZ) {
                   // Build a vertical stack of pallets
-                  const height = Math.floor(Math.random() * maxRackHeight) + 1;
+                  const height = Math.floor(random() * maxRackHeight) + 1;
                   
                   for (let y = 0; y < height; y++) {
                       if (this.isRestricted(x, y, z, reservedZone)) continue;
@@ -104,7 +105,7 @@ export class WorldGenerator {
                           id: `PLT-${this.generateUUID()}`,
                           position: { x, y, z },
                           weight: this.getPalletWeight(priorityMode),
-                          payload_type: Math.random() > 0.5 ? 'camera' : 'rfid'
+                          payload_type: random() > 0.5 ? 'camera' : 'rfid'
                       });
                   }
               }
@@ -114,7 +115,7 @@ export class WorldGenerator {
       // Truncate to the exact requested totalTasks randomly
       if (world.pallets.length > totalTasks) {
           // simple fisher-yates shuffle and slice
-          const shuffled = [...world.pallets].sort(() => 0.5 - Math.random());
+          const shuffled = [...world.pallets].sort(() => 0.5 - random());
           world.pallets = shuffled.slice(0, totalTasks);
       }
 
@@ -227,7 +228,7 @@ export class WorldGenerator {
 
                 if (isTunnelX || isTunnelY || isTunnelZ) continue;
 
-                if (Math.random() > 0.2 && Math.random() < density) {
+                if (random() > 0.2 && random() < density) {
                     world.addObstacle(x, y, z);
                 }
             }
@@ -240,7 +241,7 @@ export class WorldGenerator {
     for (let x = 0; x < world.size; x++) {
         for (let z = 0; z < world.size; z++) {
             if (x % spacing === 0 && z % spacing === 0) {
-                const height = Math.floor(Math.random() * (world.size - 2)) + 2;
+                const height = Math.floor(random() * (world.size - 2)) + 2;
                 for(let y=0; y<height; y++) {
                     if (!this.isRestricted(x, y, z, reservedZone)) {
                         world.addObstacle(x, y, z);
@@ -258,7 +259,7 @@ export class WorldGenerator {
             for (let z = 0; z < world.size; z++) {
                 if (this.isRestricted(x, y, z, reservedZone)) continue;
 
-                if (Math.random() < density) {
+                if (random() < density) {
                     world.addObstacle(x, y, z);
                 }
             }

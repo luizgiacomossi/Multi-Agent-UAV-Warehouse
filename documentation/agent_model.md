@@ -58,7 +58,7 @@ The battery bookkeeping is reconstructed by iterating through the planned path i
 
 For each time step:
 
-1. If the drone is waiting at base or at a charge station, the battery is reset to `maxBattery`.
+1. If the drone is waiting at base or at a charge station, the battery is reset to `maxBattery`. Idle drones parked on their dock take one such waiting tick before each allocation round (`SimulationManager.rechargeDockedDrones`), so they are dispatched fully charged.
 2. Otherwise a move consumes `BETA_FLY`.
 3. A wait consumes `BETA_HOVER`.
 

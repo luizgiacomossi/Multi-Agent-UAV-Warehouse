@@ -51,15 +51,16 @@ Future work:
 - compare greedy tours with exact small-cluster TSP,
 - or use insertion heuristics, 2-opt, or beam search.
 
-## 6. Monte Carlo Experimentation Is Partial
+## 6. Experimentation Coverage
 
-The Monte Carlo helper currently evaluates only the Hungarian allocation path, despite comments suggesting future comparison against greedy and random baselines.
+The strategy benchmark (`npm run bench`, see `benchmark.md`) compares the planners on seeded, reproducible scenarios across warehouse scales and swarm sizes. It records route-level metrics with confidence intervals.
+
+The in-app Monte Carlo helper still evaluates only the Hungarian allocation path, without greedy or random allocation baselines. The warehouse generator also caps forklifts at one per 4-cell aisle stride (1, 2 and 3 on 12³, 16³ and 24³ grids), whatever count is requested.
 
 Future work:
 
-- implement baseline allocators,
-- use reproducible random seeds,
-- log full route-level metrics rather than approximate summaries only.
+- implement baseline allocators and add them to the benchmark,
+- lift the forklift placement cap in `WorldGenerator`.
 
 ## 7. Fault Tolerance Experiment Is Simplified
 

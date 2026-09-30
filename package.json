@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "tsx tests/run_all_tests.ts"
+    "test": "tsx tests/run_all_tests.ts",
+    "bench": "tsx bench/run_benchmark.ts"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.3.0",

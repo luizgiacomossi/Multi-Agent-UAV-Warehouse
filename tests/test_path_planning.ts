@@ -191,8 +191,8 @@ function runCBSTests(world: World) {
   console.log('\n--- 5. Conflict-Based Search (CBS) ---');
 
   // 5a. Conflict detection and constraint indexing
-  const a = { drone: makeDrone('CA', { x: 0, y: 2, z: 0 }, { x: 2, y: 2, z: 0 }), leg: { target: { x: 2, y: 2, z: 0 }, startPos: { x: 0, y: 2, z: 0 }, startTime: 0, availableEnergy: undefined } };
-  const b = { drone: makeDrone('CB', { x: 2, y: 2, z: 0 }, { x: 0, y: 2, z: 0 }), leg: { target: { x: 0, y: 2, z: 0 }, startPos: { x: 2, y: 2, z: 0 }, startTime: 0, availableEnergy: undefined } };
+  const a = { drone: makeDrone('CA', { x: 0, y: 2, z: 0 }, { x: 2, y: 2, z: 0 }), leg: { target: { x: 2, y: 2, z: 0 }, startPos: { x: 0, y: 2, z: 0 }, startTime: 0, availableEnergy: undefined }, holdTicks: Infinity };
+  const b = { drone: makeDrone('CB', { x: 2, y: 2, z: 0 }, { x: 0, y: 2, z: 0 }), leg: { target: { x: 0, y: 2, z: 0 }, startPos: { x: 2, y: 2, z: 0 }, startTime: 0, availableEnergy: undefined }, holdTicks: Infinity };
   const swapPlans = new Map([
     ['CA', [{ x: 0, y: 2, z: 0 }, { x: 1, y: 2, z: 0 }, { x: 2, y: 2, z: 0 }]],
     ['CB', [{ x: 2, y: 2, z: 0 }, { x: 1, y: 2, z: 0 }, { x: 0, y: 2, z: 0 }]]

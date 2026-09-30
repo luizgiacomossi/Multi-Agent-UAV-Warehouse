@@ -57,6 +57,7 @@ In particular:
 - [`documentation/control_and_execution.md`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/documentation/control_and_execution.md): planning, playback, and incident timing
 - [`documentation/algorithms.md`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/documentation/algorithms.md): auxiliary algorithms and experiment helpers
 - [`documentation/design_decisions.md`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/documentation/design_decisions.md): design rationale and tradeoffs
+- [`documentation/benchmark.md`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/documentation/benchmark.md): reproducible strategy benchmark, metrics and outputs
 - [`documentation/limitations.md`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/documentation/limitations.md): current limitations and concrete future work
 
 ## Running The Project
@@ -67,3 +68,12 @@ npm run dev
 ```
 
 The default Vite dev server runs locally and the experiments can be triggered from the control panel. Their output is written to the browser console.
+
+To run the test suite and the strategy benchmark:
+
+```bash
+npm test
+npm run bench -- --preset standard
+```
+
+The benchmark compares all strategies on identical seeded scenarios across warehouse scales and swarm sizes, and writes CSV/JSON statistics to `bench-results/`; see [`documentation/benchmark.md`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/documentation/benchmark.md).

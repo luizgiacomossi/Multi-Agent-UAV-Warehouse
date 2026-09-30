@@ -102,9 +102,14 @@ export class ConstrainedReservationView implements ReservationView {
 // ─── Conflict detection ───────────────────────────────────────────────────────
 
 /** A drone taking part in this leg's joint search, with its fixed start. */
-interface CBSAgent {
+export interface CBSAgent {
   drone: Drone;
   leg: LegContext;
+  /**
+   * Ticks the drone stays on its goal after arriving: short if it departs on its next leg,
+   * Infinity if it may park there.
+   */
+  holdTicks: number;
 }
 
 /** Candidate leg plans for a set of agents, indexed by agent (drone) id. */
@@ -112,9 +117,14 @@ type PlanSet = Map<string, Position3D[]>;
 
 /** Finds the earliest vertex or swap conflict between the agents' candidate paths, ignoring exempt cells. */
 export class ConflictDetector {
-  /** Position at `time`; a drone stays parked on its last cell after its path ends. */
-  private static positionAt(path: Position3D[], startTime: number, time: number): Position3D {
-    return path[Math.min(Math.max(time - startTime, 0), path.length - 1)];
+  /**
+   * Position at `time`, or null once the drone has left its goal: after its path ends it stays on
+   * its last cell for `holdTicks`.
+   */
+  private static positionAt(agent: CBSAgent, path: Position3D[], time: number): Position3D | null {
+    const offset = time - agent.leg.startTime;
+    if (offset > path.length - 1 + agent.holdTicks) return null;
+    return path[Math.min(Math.max(offset, 0), path.length - 1)];
   }
 
   public static findFirst(agents: CBSAgent[], plans: PlanSet, isExempt: ExemptCellPredicate = NO_EXEMPT_CELLS): Conflict | null {
@@ -143,19 +153,21 @@ export class ConflictDetector {
     const startB = b.leg.startTime;
     // Before the later start, the later agent is still on its committed (already reserved) path
     const from = Math.max(startA, startB);
-    const until = Math.min(Math.max(startA + pathA.length, startB + pathB.length), before);
+    // One tick past the later path end covers a short hold; longer parking on distinct cells
+    // cannot create new conflicts once both drones are still.
+    const until = Math.min(Math.max(startA + pathA.length, startB + pathB.length) + 1, before);
 
     for (let t = from; t < until; t++) {
-      const posA = this.positionAt(pathA, startA, t);
-      const posB = this.positionAt(pathB, startB, t);
-      if (isExempt(posA) || isExempt(posB)) continue;
+      const posA = this.positionAt(a, pathA, t);
+      const posB = this.positionAt(b, pathB, t);
+      if (!posA || !posB || isExempt(posA) || isExempt(posB)) continue;
       if (samePos(posA, posB)) {
         return { kind: 'vertex', agentA: a.drone.id, agentB: b.drone.id, pos: posA, time: t };
       }
       if (t > from) {
-        const prevA = this.positionAt(pathA, startA, t - 1);
-        const prevB = this.positionAt(pathB, startB, t - 1);
-        if (!samePos(prevA, posA) && samePos(prevA, posB) && samePos(posA, prevB)) {
+        const prevA = this.positionAt(a, pathA, t - 1);
+        const prevB = this.positionAt(b, pathB, t - 1);
+        if (prevA && prevB && !samePos(prevA, posA) && samePos(prevA, posB) && samePos(posA, prevB)) {
           return { kind: 'edge', agentA: a.drone.id, agentB: b.drone.id, from: prevA, to: posA, time: t - 1 };
         }
       }
@@ -196,6 +208,19 @@ export interface CBSOptions {
 
 const DEFAULT_CBS_OPTIONS: CBSOptions = { maxExpansions: 500, timeBudgetMs: 2000 };
 
+/** Goal hold (ticks) for a drone that departs again right after arriving. */
+const TRANSIT_HOLD_TICKS = 1;
+
+/** Cumulative search counters, for experiments. */
+export interface CBSStats {
+  /** Legs handled by CBS (including those delegated to the fallback). */
+  legs: number;
+  /** Legs delegated to the fallback planner because the budget ran out. */
+  fallbacks: number;
+  /** Constraint-tree nodes expanded. */
+  nodesExpanded: number;
+}
+
 /**
  * Conflict-Based Search (Sharon et al., 2015) over each planning leg.
  *
@@ -213,10 +238,19 @@ export class CBSPlanner extends PathFindingStrategy {
   isSafe = true;
 
   private readonly options: CBSOptions;
+  private stats: CBSStats = { legs: 0, fallbacks: 0, nodesExpanded: 0 };
 
   constructor(private readonly fallback: PathFindingStrategy, options: Partial<CBSOptions> = {}) {
     super();
     this.options = { ...DEFAULT_CBS_OPTIONS, ...options };
+  }
+
+  public getStats(): CBSStats {
+    return { ...this.stats };
+  }
+
+  public resetStats(): void {
+    this.stats = { legs: 0, fallbacks: 0, nodesExpanded: 0 };
   }
 
   public setMaxTimeSteps(steps: number) {
@@ -247,6 +281,8 @@ export class CBSPlanner extends PathFindingStrategy {
 
     const search = new LegSearch(this, agents, world, reservedSpaceTime, maxAltitude, this.options, this.exemptCells(world));
     const solution = search.run();
+    this.stats.legs++;
+    this.stats.nodesExpanded += search.nodesExpanded;
 
     search.failedAgents.forEach(a =>
       this.handleLegFailure(a.drone, a.leg.startPos, a.leg.startTime, reservedSpaceTime)
@@ -257,6 +293,7 @@ export class CBSPlanner extends PathFindingStrategy {
         this.commitLeg(a.drone, solution.get(a.drone.id)!, a.leg.startTime, reservedSpaceTime)
       );
     } else if (search.plannedAgents.length > 0) {
+      this.stats.fallbacks++;
       console.info(`[CBS] Search budget exhausted for ${search.plannedAgents.length} drones; using ${this.fallback.name}.`);
       const subSwarm = new Swarm(0);
       subSwarm.drones = search.plannedAgents.map(a => a.drone);
@@ -274,7 +311,9 @@ export class CBSPlanner extends PathFindingStrategy {
     const agents: CBSAgent[] = [];
     for (const drone of swarm.drones) {
       const leg = this.getLegContext(drone, world, batteryEnabled);
-      if (leg) agents.push({ drone, leg });
+      if (!leg) continue;
+      const holdTicks = drone.mission.continuesAfterCurrentLeg() ? TRANSIT_HOLD_TICKS : Infinity;
+      agents.push({ drone, leg, holdTicks });
     }
     return agents;
   }
@@ -294,7 +333,10 @@ export class CBSPlanner extends PathFindingStrategy {
     if (table.hasVertex(spaceTimeKey(agent.leg.startPos, agent.leg.startTime))) return null;
 
     const maxLegDepth = world.size * 4;
-    const view = new ConstrainedReservationView(base, table, maxLegDepth, isExempt);
+    // A drone that departs right after arriving only needs its goal briefly; one that parks there
+    // needs it to stay clear of committed traffic for the whole look-ahead window.
+    const holdHorizon = Number.isFinite(agent.holdTicks) ? agent.holdTicks : maxLegDepth;
+    const view = new ConstrainedReservationView(base, table, holdHorizon, isExempt);
     const result = this.findPath(
       agent.leg.startPos,
       agent.leg.target,
@@ -318,6 +360,7 @@ export class CBSPlanner extends PathFindingStrategy {
 class LegSearch {
   public failedAgents: CBSAgent[] = [];
   public plannedAgents: CBSAgent[];
+  public nodesExpanded = 0;
   private readonly lowLevelDeadline = performance.now() + PATHFINDER_TIMEOUT_MS;
 
   constructor(
@@ -341,10 +384,11 @@ class LegSearch {
     open.push(root);
     const budgetEnd = performance.now() + this.options.timeBudgetMs;
 
-    for (let expanded = 0; open.size > 0; expanded++) {
-      if (expanded >= this.options.maxExpansions || performance.now() > budgetEnd) return null;
+    while (open.size > 0) {
+      if (this.nodesExpanded >= this.options.maxExpansions || performance.now() > budgetEnd) return null;
 
       const node = open.pop()!;
+      this.nodesExpanded++;
       const conflict = ConflictDetector.findFirst(this.plannedAgents, node.plans, this.isExempt);
       if (!conflict) return node.plans;
 
