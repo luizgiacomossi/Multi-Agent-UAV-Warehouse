@@ -4,6 +4,7 @@ import { AlertTriangle } from 'lucide-react';
 import VoxelWorld from './components/VoxelWorld';
 import ControlPanel from './components/ControlPanel';
 import StatusPanel from './components/StatusPanel';
+import VoiceCommandBar from './components/VoiceCommandBar';
 import { Agent, Position3D, GenerationTheme, SimulationIncident, Forklift, Pallet, ClusterVisualization, TaskPriorityMode, MissionCompletionMode } from './types';
 import { SimulationManager } from './classes/SimulationManager';
 import { Warehouse } from './classes/Warehouse';
@@ -299,6 +300,12 @@ const App: React.FC = () => {
       />
 
       <StatusPanel agents={agents} incidents={incidents} tick={tick} batteryEnabled={batteryEnabled} pallets={pallets} />
+
+      <VoiceCommandBar
+        onSendCommand={(command) => {
+          console.log('[NexTArc App Voice Command]:', command);
+        }}
+      />
 
       {error && (
         <div className="absolute inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">

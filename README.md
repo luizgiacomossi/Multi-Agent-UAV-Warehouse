@@ -1,3 +1,9 @@
+<p align="center">
+  <a href="https://nextarc.eu/">
+    <img src="public/nextarc-logo.png" alt="NexTArc Logo" width="110"/>
+  </a>
+</p>
+
 # NexTArc (UC2 - Multi-Agent UAV Warehouse Inspection)
 
 [NexTArc](https://nextarc.eu/) **Use Case 2 (UC2)** is a browser-based simulator and visualizer for centralized multi-drone task allocation and grid-based multi-agent path planning (MAPF) in discretized 3D warehouse environments. The project combines a TypeScript simulation core with a React and Three.js frontend so that planning, allocation, playback, and incident inspection can be studied from the same executable artifact.
