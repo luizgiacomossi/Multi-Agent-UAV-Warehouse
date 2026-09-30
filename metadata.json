@@ -1,5 +1,5 @@
 {
-  "name": "Cooperative Path Planning - Last Mile Delivery Drone Swarm",
-  "description": "A 3D Voxel-based Multi-Agent Path Planning visualizer for drone swarms. Features AI-generated environments and prioritized pathfinding.",
+  "name": "NexTArc - UC2 Multi-Agent UAV Warehouse Inspection",
+  "description": "NexTArc Use Case 2 (UC2): 3D Voxel-based Multi-Agent Path Planning visualizer and task allocator for drone warehouse inventory inspection.",
   "requestFramePermissions": []
 }

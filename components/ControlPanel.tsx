@@ -113,9 +113,20 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
     <div className="absolute top-4 left-4 w-80 bg-slate-800/90 backdrop-blur-md p-4 rounded-xl border border-slate-700 shadow-xl text-slate-100 flex flex-col gap-4 z-10 max-h-[90vh] overflow-y-auto">
       
       <div className="flex items-center justify-between">
-        <h1 className="text-lg font-bold bg-gradient-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent">
-          VoxelSwarm
-        </h1>
+        <div className="flex items-center gap-2">
+          <a
+            href="https://nextarc.eu/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-lg font-bold bg-gradient-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent hover:opacity-80 transition-opacity"
+            title="NexTArc EU Project"
+          >
+            NexTArc
+          </a>
+          <span className="text-[10px] font-semibold tracking-wider uppercase px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-500/30">
+            UC2
+          </span>
+        </div>
         <div className="text-xs text-slate-400 font-mono">
           T: {tick} / {maxTicks}
         </div>

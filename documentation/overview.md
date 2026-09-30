@@ -2,7 +2,7 @@
 
 ## 1. Purpose
 
-VoxelSwarm is an executable research prototype for studying centralized coordination of multiple drones in a discretized 3D environment. The system combines:
+[NexTArc](https://nextarc.eu/) (Use Case 2 - UC2) is an executable research prototype for studying centralized coordination of multiple drones in a discretized 3D warehouse environment. The system combines:
 
 - task allocation,
 - path planning,

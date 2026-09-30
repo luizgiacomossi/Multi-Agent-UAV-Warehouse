@@ -2,7 +2,7 @@
 
 ## 1. Centralized Coordination
 
-VoxelSwarm is a centralized simulator. There is no explicit peer-to-peer communication protocol between drones.
+NexTArc (UC2) is a centralized simulator. There is no explicit peer-to-peer communication protocol between drones.
 
 Coordination happens through shared centralized data structures owned by the planner:
 
