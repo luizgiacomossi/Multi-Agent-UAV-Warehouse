@@ -7,14 +7,122 @@
     <link rel="icon" type="image/png" href="/nextarc-logo.png" />
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
+      :root {
+        --theme-primary: #06b6d4;
+        --theme-primary-hover: #0891b2;
+        --theme-primary-muted: rgba(6, 182, 212, 0.15);
+        --theme-primary-glow: rgba(6, 182, 212, 0.35);
+        --theme-text-accent: #22d3ee;
+        --theme-bg-app: #0f172a;
+        --theme-bg-panel: rgba(15, 23, 42, 0.92);
+        --theme-bg-card: rgba(2, 6, 23, 0.85);
+        --theme-border: rgba(51, 65, 85, 0.7);
+        --theme-border-accent: rgba(6, 182, 212, 0.5);
+      }
+
       body, html, #root {
         margin: 0;
         padding: 0;
         height: 100%;
         width: 100%;
-        background-color: #0f172a; /* Slate 900 */
+        background-color: var(--theme-bg-app, #0f172a);
         color: white;
         overflow: hidden;
+        transition: background-color 0.3s ease;
+      }
+
+      /* Dynamic Theme Overrides for Panels and Cards */
+      [data-theme] .bg-slate-800\/90,
+      [data-theme] .bg-slate-900\/95,
+      [data-theme] .bg-slate-900\/80,
+      [data-theme] .bg-slate-800 {
+        background-color: var(--theme-bg-panel) !important;
+      }
+
+      [data-theme] .bg-slate-950\/80,
+      [data-theme] .bg-slate-950\/95,
+      [data-theme] .bg-slate-950,
+      [data-theme] .bg-slate-900\/60,
+      [data-theme] .bg-slate-900\/50,
+      [data-theme] .bg-slate-900\/40,
+      [data-theme] .bg-slate-900 {
+        background-color: var(--theme-bg-card) !important;
+      }
+
+      [data-theme] .border-slate-700,
+      [data-theme] .border-slate-700\/80,
+      [data-theme] .border-slate-700\/60,
+      [data-theme] .border-slate-700\/50,
+      [data-theme] .border-slate-800,
+      [data-theme] .border-slate-800\/80,
+      [data-theme] .border-slate-800\/60 {
+        border-color: var(--theme-border) !important;
+      }
+
+      /* Accent Colors: Text, Icons & Highlights */
+      [data-theme] .text-cyan-400,
+      [data-theme] .text-cyan-300,
+      [data-theme] .text-cyan-200 {
+        color: var(--theme-text-accent) !important;
+      }
+
+      [data-theme] .hover\:text-cyan-400:hover,
+      [data-theme] .hover\:text-cyan-300:hover,
+      [data-theme] .group:hover .group-hover\:from-cyan-300 {
+        color: var(--theme-text-accent) !important;
+      }
+
+      /* Accent Colors: Buttons & Backgrounds */
+      [data-theme] .bg-cyan-600,
+      [data-theme] .bg-cyan-500 {
+        background-color: var(--theme-primary) !important;
+      }
+
+      [data-theme] .hover\:bg-cyan-500:hover,
+      [data-theme] .hover\:bg-cyan-600:hover {
+        background-color: var(--theme-primary-hover) !important;
+      }
+
+      [data-theme] .bg-cyan-500\/10,
+      [data-theme] .bg-cyan-500\/20,
+      [data-theme] .bg-cyan-600\/20,
+      [data-theme] .bg-cyan-600\/30 {
+        background-color: var(--theme-primary-muted) !important;
+      }
+
+      /* Accent Borders & Rings */
+      [data-theme] .border-cyan-500,
+      [data-theme] .border-cyan-500\/20,
+      [data-theme] .border-cyan-500\/30,
+      [data-theme] .border-cyan-500\/40,
+      [data-theme] .border-cyan-500\/50,
+      [data-theme] .border-cyan-500\/60 {
+        border-color: var(--theme-border-accent) !important;
+      }
+
+      [data-theme] .focus\:border-cyan-500:focus {
+        border-color: var(--theme-primary) !important;
+      }
+
+      [data-theme] .focus\:ring-cyan-500\/30:focus,
+      [data-theme] .focus\:ring-cyan-500\/40:focus,
+      [data-theme] .focus\:ring-cyan-500\/50:focus {
+        --tw-ring-color: var(--theme-primary-glow) !important;
+      }
+
+      /* Gradients & Range Sliders */
+      [data-theme] .from-cyan-600.to-blue-600,
+      [data-theme] .from-cyan-500.to-blue-500 {
+        background-image: linear-gradient(to right, var(--theme-primary), var(--theme-primary-hover)) !important;
+      }
+
+      [data-theme] .from-cyan-400.to-blue-500 {
+        background-image: linear-gradient(to right, var(--theme-text-accent), var(--theme-primary)) !important;
+      }
+
+      [data-theme] input[type="range"],
+      [data-theme] .accent-cyan-500 {
+        accent-color: var(--theme-primary) !important;
       }
     </style>
 

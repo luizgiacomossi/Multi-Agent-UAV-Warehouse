@@ -91,12 +91,11 @@ The code supports a cluster allocation mode. Clusters are built locally from nea
 
 The code should not be described as containing any of the following, because it does not.
 
-- Conflict-Based Search
-- optimal coupled MAPF
+- Conflict-Based Search (CBS) or optimal coupled MAPF
 - decentralized inter-agent communication
 - exact TSP optimization inside clusters
 - full benchmark baselines for Monte Carlo experiments
-- full online replanning from actual residual battery during search
+- continuous aerodynamic simulation or physical controller dynamics
 
 ## 5. Documentation Philosophy
 

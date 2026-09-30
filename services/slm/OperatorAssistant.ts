@@ -304,6 +304,25 @@ When the operator specifies a drone (e.g. "Agent 1" or "D0"), map to its exact I
       return { text: '🔎 Camera zoomed in closer.', toolsExecuted, usedLocalFallback: true };
     }
 
+    // 11. Interface Color & Theme Settings
+    if (q.includes('theme') || q.includes('color') || q.includes('accent')) {
+      let targetTheme = 'cyan';
+      if (q.includes('amber') || q.includes('orange') || q.includes('industrial')) targetTheme = 'amber';
+      else if (q.includes('emerald') || q.includes('green') || q.includes('tactical')) targetTheme = 'emerald';
+      else if (q.includes('violet') || q.includes('purple') || q.includes('night')) targetTheme = 'violet';
+      else if (q.includes('crimson') || q.includes('red') || q.includes('alert')) targetTheme = 'crimson';
+      else if (q.includes('contrast') || q.includes('oled') || q.includes('black')) targetTheme = 'high-contrast';
+      else if (q.includes('cyan') || q.includes('blue') || q.includes('default')) targetTheme = 'cyan';
+
+      const res = await this.registry.executeTool('change_interface_theme', { theme: targetTheme });
+      toolsExecuted.push({ name: 'change_interface_theme', args: { theme: targetTheme }, result: res });
+      return {
+        text: `🎨 **Theme Updated:** Switched interface color theme to **${res.themeApplied}**.`,
+        toolsExecuted,
+        usedLocalFallback: true
+      };
+    }
+
     // Default guidance
     return {
       text: `Acknowledged: "${query}". For full neural reasoning with Function Calling, launch LM Studio on port 1234. You can also ask: "how many tasks remain", "fleet status", "tasks in progress", "pause simulation", etc.`,

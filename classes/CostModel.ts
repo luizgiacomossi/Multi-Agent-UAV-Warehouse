@@ -15,11 +15,19 @@ export class CostModel {
   }
 
   /**
+   * Get the drone's current physical position (end of current path or start location)
+   */
+  static getDroneCurrentPosition(drone: Agent): Position3D {
+    return (drone.path && drone.path.length > 0) ? drone.path[drone.path.length - 1] : drone.start;
+  }
+
+  /**
    * Equation 13: Required Energy
    * e_req = \beta_{fly} \gamma (||p_i - p_k|| + ||p_k - p_{base}||) + \beta_{hover} t_{task}
    */
   static calculate_e_req(drone: Agent, task: Task, p_base: Position3D): number {
-    const dist_to_task = this.distanceEuclidean(drone.start, task.target); // Initial pos usually represented by .start early on, later we use current location
+    const currentPos = this.getDroneCurrentPosition(drone);
+    const dist_to_task = this.distanceEuclidean(currentPos, task.target);
     const dist_to_base = this.distanceEuclidean(task.target, p_base);
     
     // Convert mathematical constants
@@ -52,11 +60,12 @@ export class CostModel {
    * Equation 13 (Cluster variant): Calculates Required Energy for an mTSP Tour
    */
   static calculate_e_req_cluster(drone: Agent, cluster: TaskCluster, p_base: Position3D): number {
+    const currentPos = this.getDroneCurrentPosition(drone);
     const firstTask = cluster.tourSequence[0];
     const lastTask = cluster.tourSequence[cluster.tourSequence.length - 1];
     
     // Fly distance to the start of the tour, and return distance from the end of the tour
-    const dist_outbound = this.distanceEuclidean(drone.start, firstTask.target);
+    const dist_outbound = this.distanceEuclidean(currentPos, firstTask.target);
     const dist_return = this.distanceEuclidean(lastTask.target, p_base);
     
     // The tourCost already contains the internal kinetic flight and structural hovering
@@ -83,7 +92,8 @@ export class CostModel {
    * c_{dist} = ||p_i - p_k|| / D_{max}
    */
   static calculate_c_dist(drone: Agent, task: Task, D_max: number): number {
-    const dist = this.distanceEuclidean(drone.start, task.target);
+    const currentPos = this.getDroneCurrentPosition(drone);
+    const dist = this.distanceEuclidean(currentPos, task.target);
     return dist / D_max;
   }
 
@@ -98,10 +108,12 @@ export class CostModel {
 
   /**
    * Equation 15: Final Cost Score
-   * C_ik = (w_1 * c_dist + w_2 * c_batt) * pi_k
+   * C_ik = (w_1 * c_dist + w_2 * c_batt) / pi_k
+   * Note: Hungarian algorithm minimizes total cost. Higher priority tasks (higher pi_k)
+   * must yield a lower assignment cost to be matched first.
    */
   static calculate_C_ik(c_dist: number, c_batt: number, pi_k: number): number {
-    return (MATH_CONSTANTS.W1 * c_dist + MATH_CONSTANTS.W2 * c_batt) * pi_k;
+    return (MATH_CONSTANTS.W1 * c_dist + MATH_CONSTANTS.W2 * c_batt) / Math.max(0.01, pi_k);
   }
 
   /**
@@ -185,7 +197,8 @@ export class CostModel {
           row.push(OMEGA);
         } else {
           // Centroid distance used for Munkres geometrical bidding
-          const dist_to_centroid = this.distanceEuclidean(drone.start, cluster.centroid);
+          const currentPos = this.getDroneCurrentPosition(drone);
+          const dist_to_centroid = this.distanceEuclidean(currentPos, cluster.centroid);
           const c_dist = dist_to_centroid / D_max;
           const c_batt = this.calculate_c_batt(drone);
           

@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { Play, Pause, RotateCcw, Box, Grid3X3, Settings, Building2, ShieldCheck, Skull, Shuffle, Cpu, Repeat, Battery, Zap, Infinity as InfinityIcon, ArrowUpToLine, Power } from 'lucide-react';
+import { Play, Pause, RotateCcw, Box, Grid3X3, Settings, Building2, ShieldCheck, Skull, Shuffle, Cpu, Repeat, Battery, Zap, Infinity as InfinityIcon, ArrowUpToLine, Power, Palette } from 'lucide-react';
 import { GenerationTheme, TaskPriorityMode, MissionCompletionMode } from '../types';
 
 interface ControlPanelProps {
@@ -59,6 +59,7 @@ interface ControlPanelProps {
 
   onRunMonteCarlo: () => void;
   onRunFaultTolerance: () => void;
+  onOpenThemeModal?: () => void;
 }
 
 const ControlPanel: React.FC<ControlPanelProps> = ({
@@ -107,7 +108,8 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   taskPriorityMode,
   setTaskPriorityMode,
   onRunMonteCarlo,
-  onRunFaultTolerance
+  onRunFaultTolerance,
+  onOpenThemeModal
 }) => {
   return (
     <div className="absolute top-4 left-4 w-80 bg-slate-800/90 backdrop-blur-md p-4 rounded-xl border border-slate-700 shadow-xl text-slate-100 flex flex-col gap-4 z-10 max-h-[90vh] overflow-y-auto">
@@ -137,8 +139,20 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
             <span className="text-[10px] text-slate-400 font-medium">UAV Warehouse Inspection</span>
           </div>
         </a>
-        <div className="text-xs text-slate-400 font-mono bg-slate-900/60 px-2 py-1 rounded border border-slate-700/50">
-          T: {tick}/{maxTicks}
+        <div className="flex items-center gap-1.5">
+          <div className="text-xs text-slate-400 font-mono bg-slate-900/60 px-2 py-1 rounded border border-slate-700/50">
+            T: {tick}/{maxTicks}
+          </div>
+          {onOpenThemeModal && (
+            <button
+              type="button"
+              onClick={onOpenThemeModal}
+              className="p-1.5 rounded-md bg-slate-900/60 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700/50 transition-colors"
+              title="Interface Color & Theme Settings"
+            >
+              <Palette size={13} />
+            </button>
+          )}
         </div>
       </div>
 

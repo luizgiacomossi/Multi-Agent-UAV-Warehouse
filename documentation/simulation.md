@@ -64,13 +64,25 @@ The open generator creates sparse pillars. The random generator creates voxel oc
 
 ## 4. Warehouse Base and Stations
 
-If the simulation is configured to deploy from base, `World.setupWarehouse(...)` clears a protected spawn and airspace region near the origin. Optional charging stations can also be generated.
+If the simulation is configured to deploy from base (`deployFromBase = true`), `World.setupWarehouse(...)` clears a protected spawn and airspace region near the origin. Optional charging stations can also be generated.
 
-This means the warehouse base is not just a visual convention; it actively modifies the occupancy map.
+In `CollisionAnalyzer.detect(...)`, base exclusion is strictly scoped to resting floor level (\(y = \text{warehouse.position.y}\)), ensuring resting drones on charge pads are not falsely flagged as colliding with each other while all mid-air flight collisions over the base structure are detected.
 
-## 5. Dynamic Obstacles
+## 5. Dynamic Obstacles (Forklifts)
 
-Forklifts are represented as periodic paths at ground level, with an additional occupied voxel one unit above the base pose. In `SimulationManager.runPathfinding(...)`, these positions are inserted into the reservation table for the full planning horizon, so the planners treat them as time-indexed obstacles.
+Forklifts patrol along warehouse aisles with periodic trajectories. Each forklift occupies:
+
+- a ground-level body at \(y = 0\),
+- an overhead safety cage at \(y = 1\).
+
+In [`classes/SimulationManager.ts`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/classes/SimulationManager.ts), forklifts are pre-allocated across the entire planning horizon with both:
+
+- **Vertex reservations** at \(y = 0\) and \(y = 1\),
+- **Directed edge reservations** \((u \to v)\) at \(y = 0\) and \(y = 1\), preventing head-on swapping through oncoming vehicles.
+
+Furthermore:
+- `nearestFreeNeighbor(...)` excludes forklift patrol corridors at \(y \le 1\), requiring drones to inspect low rack shelves from a safe hover altitude (\(y \ge 2\)).
+- Drones completing their flight paths inside a forklift aisle automatically ascend to \(y = 2\) so they cannot be run over while idle.
 
 ## 6. Modeling Assumptions
 

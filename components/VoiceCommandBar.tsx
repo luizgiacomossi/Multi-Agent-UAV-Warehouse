@@ -268,15 +268,35 @@ export const VoiceCommandBar: React.FC<VoiceCommandBarProps> = ({
         <div className="flex items-center justify-between px-1 text-xs">
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-1.5 font-semibold text-slate-300">
-              <Radio size={14} className={isListening ? 'text-red-400 animate-pulse' : 'text-slate-400'} />
-              <span>Voice & SLM Toolset Bar</span>
+              <Radio size={14} className={isListening ? 'text-red-400 animate-pulse' : 'text-cyan-400'} />
+              <span>Voice & SLM Toolset</span>
             </div>
 
-            {/* Provider Pill */}
+            {/* Dynamic Activity Badge (only shown during active processing) */}
+            {isListening ? (
+              <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg text-[10px] font-medium bg-red-500/20 text-red-300 border border-red-500/30 animate-pulse">
+                <span className="w-1.5 h-1.5 rounded-full bg-red-400" />
+                Listening...
+              </span>
+            ) : isAudioProcessing ? (
+              <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg text-[10px] font-medium bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                <Loader2 size={10} className="animate-spin text-amber-400" />
+                Whisper AI...
+              </span>
+            ) : isProcessingCommand ? (
+              <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg text-[10px] font-medium bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                <Loader2 size={10} className="animate-spin text-cyan-400" />
+                SLM Thinking...
+              </span>
+            ) : null}
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            {/* Speech Recognition Engine Toggle */}
             <button
               type="button"
               onClick={handleProviderToggle}
-              className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium border transition-colors ${
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium border transition-colors ${
                 providerType === 'whisper-local'
                   ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40 hover:bg-indigo-500/30'
                   : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/30'
@@ -285,47 +305,22 @@ export const VoiceCommandBar: React.FC<VoiceCommandBarProps> = ({
             >
               {providerType === 'whisper-local' ? (
                 <>
-                  <Cpu size={11} className="text-indigo-400" />
-                  <span>Local Whisper</span>
+                  <Cpu size={12} className="text-indigo-400" />
+                  <span>Whisper</span>
                 </>
               ) : (
                 <>
-                  <Globe size={11} className="text-emerald-400" />
+                  <Globe size={12} className="text-emerald-400" />
                   <span>Web Speech</span>
                 </>
               )}
             </button>
 
-            {/* Recording / Processing Status */}
-            {isListening ? (
-              <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-red-500/20 text-red-300 border border-red-500/30 animate-pulse">
-                <span className="w-1.5 h-1.5 rounded-full bg-red-400" />
-                Listening...
-              </span>
-            ) : isAudioProcessing ? (
-              <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                <Loader2 size={10} className="animate-spin text-amber-400" />
-                Whisper AI...
-              </span>
-            ) : isProcessingCommand ? (
-              <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
-                <Loader2 size={10} className="animate-spin text-cyan-400" />
-                SLM Thinking...
-              </span>
-            ) : (
-              <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-800 text-slate-400 border border-slate-700">
-                <span className="w-1.5 h-1.5 rounded-full bg-slate-500" />
-                Ready
-              </span>
-            )}
-          </div>
-
-          <div className="flex items-center gap-2">
             {/* LM Studio Connection Indicator */}
             <button
               type="button"
               onClick={() => setShowSettings(!showSettings)}
-              className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700/60 transition-colors text-[11px]"
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700/60 transition-colors text-[11px]"
               title="Configure LM Studio local endpoint"
             >
               <span
@@ -333,8 +328,8 @@ export const VoiceCommandBar: React.FC<VoiceCommandBarProps> = ({
                   isLMStudioConnected ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'
                 }`}
               />
-              <span className="font-mono text-[10px]">LM Studio</span>
-              <Settings size={11} className="text-slate-400 ml-0.5" />
+              <span className="font-mono">LM Studio</span>
+              <Settings size={12} className="text-slate-400 ml-0.5" />
             </button>
 
             {/* Voice Output Toggle */}
@@ -347,7 +342,7 @@ export const VoiceCommandBar: React.FC<VoiceCommandBarProps> = ({
                 }
                 setTtsEnabled(!ttsEnabled);
               }}
-              className={`flex items-center gap-1 px-2 py-0.5 rounded-md border transition-colors text-[11px] ${
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border transition-colors text-[11px] ${
                 ttsEnabled
                   ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40 hover:bg-cyan-500/30'
                   : 'bg-slate-800 text-slate-400 border-slate-700/60 hover:text-slate-300'
@@ -369,7 +364,7 @@ export const VoiceCommandBar: React.FC<VoiceCommandBarProps> = ({
 
             {/* Language Badge */}
             <div
-              className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-800 text-slate-300 border border-slate-700/60 text-[11px]"
+              className="flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-800/80 text-slate-400 border border-slate-700/60 text-[11px]"
               title="Speech & SLM Language: English"
             >
               <Languages size={12} className="text-cyan-400" />
@@ -381,9 +376,9 @@ export const VoiceCommandBar: React.FC<VoiceCommandBarProps> = ({
               <button
                 type="button"
                 onClick={() => setShowHistory((h) => !h)}
-                className="text-[11px] text-slate-400 hover:text-slate-200 underline decoration-slate-600 underline-offset-2"
+                className="text-[11px] text-slate-400 hover:text-slate-200 underline decoration-slate-600 underline-offset-2 ml-1"
               >
-                {showHistory ? 'Hide feed' : `Recent (${lastCommands.length})`}
+                {showHistory ? 'Hide' : `Recent (${lastCommands.length})`}
               </button>
             )}
           </div>

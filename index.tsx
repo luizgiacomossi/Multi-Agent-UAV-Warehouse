@@ -1,6 +1,10 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
+import { ThemeService } from './services/theme/ThemeService';
+
+// Initialize and apply saved theme tokens immediately to DOM
+ThemeService.getInstance();
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {

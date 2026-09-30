@@ -54,7 +54,7 @@ export class MissionController {
 
     /**
      * Determines the target for the next leg of travel based on current state.
-     * Returns null if the drone is finished.
+     * Pure query: does not mutate controller state. Returns null if the drone is finished.
      */
     public getNextTarget(): Position3D | null {
         if (this.state === 'OUTBOUND') {
@@ -62,11 +62,11 @@ export class MissionController {
         }
 
         if (this.state === 'EXECUTING_TOUR' && this.currentCluster) {
-            // Next target is the NEXT task in the clustered sequence array
-            const nextTask = this.currentCluster.tourSequence[this.clusterTaskIndex + 1];
-            this.currentPalletId = nextTask.palletId || null;
-            this.currentScanType = nextTask.req_payload;
-            return nextTask.target;
+            const nextIdx = this.clusterTaskIndex + 1;
+            if (nextIdx < this.currentCluster.tourSequence.length) {
+                return this.currentCluster.tourSequence[nextIdx].target;
+            }
+            return null;
         }
 
         if (this.state === 'RETURNING') {
@@ -88,10 +88,17 @@ export class MissionController {
             if (this.currentCluster && this.currentCluster.tourSequence.length > 1) {
                 // Multi-task cluster execution logic
                 this.state = 'EXECUTING_TOUR';
+                const nextTask = this.currentCluster.tourSequence[this.clusterTaskIndex + 1];
+                if (nextTask) {
+                    this.currentPalletId = nextTask.palletId || null;
+                    this.currentScanType = nextTask.req_payload;
+                }
                 return false;
             } else {
                 this.currentCluster = null;
                 this.clusterTaskIndex = 0;
+                this.currentPalletId = null;
+                this.currentScanType = null;
                 // Baseline 1-to-1 logic (1 leg = 1 mission)
                 this.missionsCompleted++;
 
@@ -113,9 +120,11 @@ export class MissionController {
             this.clusterTaskIndex++;
 
             // Check if we reached the final item in the sequence array
-            if (this.clusterTaskIndex >= this.currentCluster!.tourSequence.length - 1) {
+            if (this.currentCluster && this.clusterTaskIndex >= this.currentCluster.tourSequence.length - 1) {
                 this.currentCluster = null;
                 this.clusterTaskIndex = 0;
+                this.currentPalletId = null;
+                this.currentScanType = null;
                 this.missionsCompleted++; // The entire cluster counts as 1 "mission leg" completed, or we can count each one. We count the cluster as 1 mission dispatch.
                 if (this.mustReturnToBase) {
                     this.state = 'RETURNING';
@@ -130,9 +139,16 @@ export class MissionController {
                     }
                 }
             } else {
+                if (this.currentCluster && this.clusterTaskIndex + 1 < this.currentCluster.tourSequence.length) {
+                    const nextTask = this.currentCluster.tourSequence[this.clusterTaskIndex + 1];
+                    this.currentPalletId = nextTask.palletId || null;
+                    this.currentScanType = nextTask.req_payload;
+                }
                 return false; // Still executing intra-cluster tour
             }
         } else if (this.state === 'RETURNING') {
+            this.currentPalletId = null;
+            this.currentScanType = null;
             // Returned to base
             if (this.missionsCompleted < this.maxMissions) {
                 this.state = 'IDLE';
@@ -149,6 +165,8 @@ export class MissionController {
     public reset() {
         this.state = 'IDLE';
         this.currentGoal = null;
+        this.currentPalletId = null;
+        this.currentScanType = null;
         this.currentCluster = null;
         this.clusterTaskIndex = 0;
         this.missionsCompleted = 0;

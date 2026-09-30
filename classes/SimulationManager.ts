@@ -296,10 +296,28 @@ export class SimulationManager {
             if (!fl.path || fl.path.length === 0) return;
             for (let t = 0; t < MAX_GLOBAL_TIME; t++) {
                 const pos = fl.path[t % fl.path.length];
-                const h1 = (pos.x) | (pos.y << 6) | (pos.z << 12) | (t << 18);
-                const h2 = (pos.x) | ((pos.y + 1) << 6) | (pos.z << 12) | (t << 18);
+                const h1 = (pos.x) + (pos.y * 64) + (pos.z * 4096) + (t * 262144);
+                const h2 = (pos.x) + ((pos.y + 1) * 64) + (pos.z * 4096) + (t * 262144);
                 reservedSpaceTime.addVertex(h1, 'FORKLIFT');
                 reservedSpaceTime.addVertex(h2, 'FORKLIFT'); // Extra height block
+
+                if (t > 0) {
+                    const prevPos = fl.path[(t - 1) % fl.path.length];
+                    // Directed edge at ground level
+                    reservedSpaceTime.addEdge(
+                        { x: prevPos.x, y: prevPos.y, z: prevPos.z },
+                        { x: pos.x, y: pos.y, z: pos.z },
+                        t - 1,
+                        'FORKLIFT'
+                    );
+                    // Directed edge at height block level
+                    reservedSpaceTime.addEdge(
+                        { x: prevPos.x, y: prevPos.y + 1, z: prevPos.z },
+                        { x: pos.x, y: pos.y + 1, z: pos.z },
+                        t - 1,
+                        'FORKLIFT'
+                    );
+                }
             }
         });
 
@@ -419,7 +437,15 @@ export class SimulationManager {
                     const unscanned = this.world.pallets ? this.getAvailablePallets() : [];
 
                     if (unscanned.length > 0) {
-                        const pendingTasks: Task[] = unscanned.slice(0, idleDrones.length).map(plt => ({
+                        // Gather compatible pallets for idle drones based on payload requirements
+                        const availablePayloads = new Set(idleDrones.flatMap(d => d.payload));
+                        const compatiblePallets = unscanned.filter(plt => availablePayloads.has(plt.payload_type));
+                        
+                        // Candidate pool: provide a wider window so Munkres is never starved by incompatible tasks
+                        const candidateLimit = Math.max(idleDrones.length * 4, 20);
+                        const pool = (compatiblePallets.length > 0 ? compatiblePallets : unscanned).slice(0, candidateLimit);
+
+                        const pendingTasks: Task[] = pool.map(plt => ({
                             id: 'T-' + Math.random().toString(36).substr(2, 9),
                             target: { ...plt.position },
                             req_payload: plt.payload_type,
@@ -478,6 +504,21 @@ export class SimulationManager {
             const everyoneDone = this.swarm.drones.every(d => d.mission.state === 'COMPLETED' || d.status === 'STRANDED');
             if (everyoneDone) break;
         }
+
+        // Ensure any drone completing flight at ground/clearance level in a forklift aisle ascends to safe hover altitude (y >= 2)
+        this.swarm.drones.forEach(drone => {
+            if (drone.path.length > 0 && drone.status !== 'STRANDED') {
+                const last = drone.path[drone.path.length - 1];
+                const isForkliftCorridor = last.y <= 1 && (this.world.forklifts || []).some(fl => 
+                    fl.path && fl.path.some(p => p.x === last.x && p.z === last.z)
+                );
+                if (isForkliftCorridor) {
+                    for (let safeY = last.y + 1; safeY <= 2; safeY++) {
+                        drone.path.push({ x: last.x, y: safeY, z: last.z });
+                    }
+                }
+            }
+        });
 
         // 3. Detect Collisions (drone-drone and drone-forklift)
         let collisions = CollisionAnalyzer.detect(this.swarm, this.world.forklifts, this.world.warehouse);

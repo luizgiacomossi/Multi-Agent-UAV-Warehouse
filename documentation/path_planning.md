@@ -18,35 +18,40 @@ The successor relation uses the six cardinal moves plus wait.
 
 ## 2. Reservation Encoding
 
-The implemented reservation table stores occupied vertex-time pairs in a `Set<number>`. The hash function is
+The implemented `SpaceTimeReservations` table stores:
+
+- **Vertex reservations** in a `Map<number, string>`, mapping safe 53-bit spatio-temporal integer keys to their `ownerId`.
+- **Directed edge reservations** in a `Map<string, string>`, mapping directed transitions `${time}:${fromKey}->${toKey}` to their `ownerId`.
+
+The spatio-temporal hash function uses safe JavaScript double-precision arithmetic to avoid 32-bit signed integer overflow at large \(t\):
 
 \[
 \operatorname{key}(x,y,z,t)
 =
-x + (y \ll 6) + (z \ll 12) + (t \ll 18).
+x + 64y + 4096z + 262144t.
 \]
 
-This encoding assumes the relevant coordinate ranges fit within those bit fields.
+Given grid dimensions \(x,y,z < 64\), the time coordinate is recovered uniquely by \(\lfloor \operatorname{key} / 262144 \rfloor\).
 
-The reservation table is used by the cooperative planners to reject successor states already claimed by previously planned drones or by forklifts.
+The reservation table supports selective clearing by owner ID (`clearOwnerFromTime(ownerId, fromTime)`) and owner filtering (`cloneForOwner(ownerId)`), ensuring agent re-planning never wipes out other drones' or forklifts' space-time commitments.
 
-## 3. Blocked-Goal Repair
+## 3. Blocked-Goal Repair & Forklift Corridor Safety
 
 Warehouse pallets occupy blocked voxels. To make those tasks reachable, `nearestFreeNeighbor(...)` performs a bounded breadth-first search around the requested goal until a free adjacent voxel is found.
 
 The search:
 
 - expands only non-wait neighbors,
+- respects the flight ceiling constraint (`ny <= maxAltitude`),
+- actively identifies dynamic forklift patrol corridors and rejects ground-level/cage-height cells (\(y \le 1\)), steering drones to hover at a safe altitude (\(y \ge 2\)) directly overlooking bottom pallets,
 - stops after at most 200 visited states,
-- returns the original blocked goal if no repair is found.
-
-Thus reachability is improved heuristically, not guaranteed.
+- returns the safest unblocked neighbor or original position.
 
 ## 4. Implemented A* Variants
 
 ### 4.1 `NaivePlanner`
 
-`NaivePlanner` ignores the shared reservation table and runs A* independently for each drone. It therefore does not attempt dynamic deconfliction between drones. Collisions are detected after planning.
+`NaivePlanner` simulates selfish baseline behavior: agents plan paths independently without coordinating with other drones. However, dynamic ground machinery (forklifts) represents physical environment hazards; `NaivePlanner` copies forklift reservations (`cloneForOwner('FORKLIFT')`) while ignoring other drones. Drone-drone collisions are analyzed post hoc.
 
 Its A* objective is time-step minimization:
 
@@ -62,65 +67,67 @@ h(n)=\lVert pos(n)-goal \rVert_1.
 
 ### 4.2 `CooperativePlanner`
 
-`CooperativePlanner` uses the same A* cost function as the naive planner, but it rejects reserved vertex-time states.
+`CooperativePlanner` uses prioritized time-expanded A* with joint vertex and directed edge reservation.
 
-For each previously planned path \(\pi_i\), the planner inserts:
+For each previously planned trajectory \(\pi_i\), the planner registers:
 
 - every occupied vertex-time pair on the path,
-- the goal voxel for four extra time steps after arrival.
-
-This introduces a simple yielding mechanism for later-planned drones.
+- every directed edge transition \((p_i(t-1) \to p_i(t))\),
+- the arrival voxel for an idle tail duration (up to 500 ticks), preventing other drones from colliding into resting or scanning agents.
 
 ### 4.3 `EnergySaverPlanner`
 
-`EnergySaverPlanner` changes the A* objective to an energy-like additive cost.
+`EnergySaverPlanner` minimizes total flight and hover energy.
 
 For a move action:
 
 \[
-c_{move}=\beta_{fly},
+c_{move}=\beta_{fly} = 0.10,
 \]
 
 and for a wait action:
 
 \[
-c_{wait}=\beta_{hover}.
+c_{wait}=\beta_{hover} = 0.05.
 \]
 
-The accumulated path cost becomes
+The accumulated path cost is:
 
 \[
 g(n)=\sum_{\ell \le n} c_{\ell}.
 \]
 
-The heuristic is
+The heuristic is:
 
 \[
 h(n)=\beta_{fly}\lVert pos(n)-goal \rVert_1.
 \]
 
-Because \(\beta_{hover} > \beta_{fly}\) in the current configuration, waiting is actually more expensive than moving. That is the opposite of what the older documentation claimed.
+Unlike naive binary closed-set pruning, `EnergySaverPlanner` tracks minimal cost-to-reach via a continuous `bestG` map (`Map<number, number>`). Nodes arriving at the same space-time voxel with strictly lower energy are permitted to relax and re-expand, guaranteeing optimal energy paths are preserved.
 
 ## 5. Battery Constraint During Planning
 
-Each search state also tracks an `energy` field. Successors are pruned if this exceeds `maxEnergy`.
+Each search state tracks an `energy` field representing accumulated consumption along that leg. Successors are pruned if `energy > maxEnergy`.
 
-However, the runtime planners currently pass `drone.maxBattery`, not the drone's actual residual battery at the current mission stage. So the search horizon is energy-bounded only by nominal full capacity, not by exact remaining charge after earlier legs.
+At the start of each mission leg, the planner computes the drone's true residual battery by simulating its complete flight and recharge history up to `startTime` via `drone.calculateStateAt(...)`. This residual battery is passed as `availableEnergy`, ensuring that multi-leg flights accurately reflect battery depletion across consecutive dispatches.
 
-This is one of the most important implementation gaps between the mathematical intention and the current planner behavior.
+## 6. Safety Constraints and Edge Conflict Prevention
 
-## 6. What Safety Is Actually Enforced
+The planning stack enforces both vertex and directed edge conflict prevention:
 
-The current planners enforce only vertex-time avoidance through reservations. They do not explicitly reserve directed edges, so the standard MAPF edge-swap constraint
+1. **Vertex Conflict:**
+   No two agents may occupy the same voxel at the same time:
+   \[
+   \pi_i(t) \neq \pi_j(t) \quad \forall i \neq j.
+   \]
 
-\[
-\pi_i(t)=\pi_j(t+1), \quad
-\pi_i(t+1)=\pi_j(t)
-\]
+2. **Directed Edge Swapping Conflict:**
+   Head-on swaps across adjacent cells are forbidden:
+   \[
+   \neg \left(\pi_i(t) = \pi_j(t+1) \land \pi_i(t+1) = \pi_j(t)\right).
+   \]
 
-is not directly prevented for drone-drone interactions.
-
-Therefore the code should not be described as implementing the full classical MAPF conflict model. It implements a weaker reservation scheme that works well in many cases but is not complete with respect to all pairwise conflicts.
+Both constraints are enforced during A* expansion against previously planned drones as well as moving forklifts (at both body and clearance height levels).
 
 ## 7. Complexity
 

@@ -82,16 +82,16 @@ export class MinHeap<T> {
  */
 export class SpaceTimeReservations {
   private vertexOwners = new Map<number, string>();
-  private edgeReservations = new Set<string>();
+  private edgeOwners = new Map<string, string>();
 
   public addVertex(key: number, ownerId: string): void {
     this.vertexOwners.set(key, ownerId);
   }
 
   public addEdge(fromPos: Position3D, toPos: Position3D, time: number, ownerId: string): void {
-    const fromKey = (fromPos.x) | (fromPos.y << 6) | (fromPos.z << 12);
-    const toKey = (toPos.x) | (toPos.y << 6) | (toPos.z << 12);
-    this.edgeReservations.add(`${time}:${fromKey}->${toKey}`);
+    const fromKey = (fromPos.x) + (fromPos.y * 64) + (fromPos.z * 4096);
+    const toKey = (toPos.x) + (toPos.y * 64) + (toPos.z * 4096);
+    this.edgeOwners.set(`${time}:${fromKey}->${toKey}`, ownerId);
   }
 
   public isVertexReserved(key: number, requesterId?: string): boolean {
@@ -101,29 +101,35 @@ export class SpaceTimeReservations {
     return true;
   }
 
-  public isEdgeConflict(fromPos: Position3D, toPos: Position3D, time: number): boolean {
-    const fromKey = (fromPos.x) | (fromPos.y << 6) | (fromPos.z << 12);
-    const toKey = (toPos.x) | (toPos.y << 6) | (toPos.z << 12);
+  public isEdgeConflict(fromPos: Position3D, toPos: Position3D, time: number, requesterId?: string): boolean {
+    const fromKey = (fromPos.x) + (fromPos.y * 64) + (fromPos.z * 4096);
+    const toKey = (toPos.x) + (toPos.y * 64) + (toPos.z * 4096);
     // Conflict occurs if another agent moves from toPos to fromPos between time and time+1
-    return this.edgeReservations.has(`${time}:${toKey}->${fromKey}`);
+    const oppositeEdgeKey = `${time}:${toKey}->${fromKey}`;
+    const owner = this.edgeOwners.get(oppositeEdgeKey);
+    if (!owner) return false;
+    if (requesterId && owner === requesterId) return false;
+    return true;
   }
 
   public clearOwnerFromTime(ownerId: string, fromTime: number): void {
     for (const [key, owner] of this.vertexOwners.entries()) {
       if (owner === ownerId) {
-        const t = key >>> 18;
+        const t = Math.floor(key / 262144);
         if (t >= fromTime) {
           this.vertexOwners.delete(key);
         }
       }
     }
 
-    for (const edge of this.edgeReservations) {
-      const colonIdx = edge.indexOf(':');
-      if (colonIdx !== -1) {
-        const t = parseInt(edge.substring(0, colonIdx), 10);
-        if (t >= fromTime) {
-          this.edgeReservations.delete(edge);
+    for (const [edgeKey, owner] of this.edgeOwners.entries()) {
+      if (owner === ownerId) {
+        const colonIdx = edgeKey.indexOf(':');
+        if (colonIdx !== -1) {
+          const t = parseInt(edgeKey.substring(0, colonIdx), 10);
+          if (t >= fromTime) {
+            this.edgeOwners.delete(edgeKey);
+          }
         }
       }
     }
@@ -137,6 +143,17 @@ export class SpaceTimeReservations {
   public add(key: number): this {
     this.vertexOwners.set(key, 'RESERVED');
     return this;
+  }
+
+  public cloneForOwner(retainedOwner: string): SpaceTimeReservations {
+    const copy = new SpaceTimeReservations();
+    for (const [key, owner] of this.vertexOwners.entries()) {
+      if (owner === retainedOwner) copy.vertexOwners.set(key, owner);
+    }
+    for (const [edgeKey, owner] of this.edgeOwners.entries()) {
+      if (owner === retainedOwner) copy.edgeOwners.set(edgeKey, owner);
+    }
+    return copy;
   }
 
   public get size(): number {
@@ -174,13 +191,24 @@ export abstract class PathFindingStrategy {
   /**
    * If `pos` is blocked, BFS outward (max 5 steps) to find the nearest free neighbor.
    * This allows drone goals to be set to pallet center positions even though pallets are blocked voxels.
+   * Guarantees safe hover positions outside forklift sweep corridors at y <= 1.
    */
-  protected nearestFreeNeighbor(pos: Position3D, world: World): Position3D {
-    if (!world.isBlocked(pos.x, pos.y, pos.z)) return pos;
+  protected nearestFreeNeighbor(pos: Position3D, world: World, maxAltitude?: number): Position3D {
+    const isForkliftZone = (x: number, y: number, z: number) => {
+      if (y > 1) return false;
+      return (world.forklifts || []).some(fl => fl.path && fl.path.some(p => p.x === x && p.z === z));
+    };
+
+    if (!world.isBlocked(pos.x, pos.y, pos.z) && 
+        (maxAltitude === undefined || pos.y <= maxAltitude) && 
+        !isForkliftZone(pos.x, pos.y, pos.z)) {
+      return pos;
+    }
 
     const queue: Position3D[] = [pos];
     const visited = new Set<string>();
     visited.add(`${pos.x},${pos.y},${pos.z}`);
+    let fallbackFree: Position3D | null = null;
 
     while (queue.length > 0) {
       const curr = queue.shift()!;
@@ -193,11 +221,15 @@ export abstract class PathFindingStrategy {
         if (visited.has(key)) continue;
         visited.add(key);
         if (nx < 0 || ny < 0 || nz < 0 || nx >= world.size || ny >= world.size || nz >= world.size) continue;
-        if (!world.isBlocked(nx, ny, nz)) return { x: nx, y: ny, z: nz };
+        if (maxAltitude !== undefined && ny > maxAltitude) continue;
+        if (!world.isBlocked(nx, ny, nz)) {
+          if (!isForkliftZone(nx, ny, nz)) return { x: nx, y: ny, z: nz };
+          if (!fallbackFree) fallbackFree = { x: nx, y: ny, z: nz };
+        }
         if (visited.size < 200) queue.push({ x: nx, y: ny, z: nz });
       }
     }
-    return pos;
+    return fallbackFree || pos;
   }
 
   protected reconstructPath(node: PathNode): Position3D[] {
@@ -211,7 +243,7 @@ export abstract class PathFindingStrategy {
   }
 
   protected key(p: Position3D, t: number): number {
-    return (p.x) | (p.y << 6) | (p.z << 12) | (t << 18);
+    return (p.x) + (p.y * 64) + (p.z * 4096) + (t * 262144);
   }
 
   protected isCellReserved(
@@ -229,10 +261,11 @@ export abstract class PathFindingStrategy {
     reserved: SpaceTimeReservations | Set<number>,
     fromPos: Position3D,
     toPos: Position3D,
-    time: number
+    time: number,
+    requesterId?: string
   ): boolean {
     if (reserved instanceof SpaceTimeReservations) {
-      return reserved.isEdgeConflict(fromPos, toPos, time);
+      return reserved.isEdgeConflict(fromPos, toPos, time, requesterId);
     }
     return false;
   }
@@ -250,7 +283,7 @@ export abstract class PathFindingStrategy {
     requesterId?: string
   ): { path: Position3D[], finalEnergy: number } | null {
 
-    const effectiveGoal = this.nearestFreeNeighbor(goal, world);
+    const effectiveGoal = this.nearestFreeNeighbor(goal, world, maxAltitude);
 
     const startNode: PathNode = {
       ...start, g: 0, h: this.heuristic(start, effectiveGoal), f: 0, parent: null, time: startTime, energy: 0
@@ -299,7 +332,7 @@ export abstract class PathFindingStrategy {
 
         if (this.isCellReserved(reserved, nextKey, requesterId)) continue;
         if (nx !== current.x || ny !== current.y || nz !== current.z) {
-          if (this.isEdgeConflict(reserved, current, nextPos, current.time)) continue;
+          if (this.isEdgeConflict(reserved, current, nextPos, current.time, requesterId)) continue;
         }
 
         const stepCost = (nx === current.x && ny === current.y && nz === current.z) ? MATH_CONSTANTS.BETA_HOVER : MATH_CONSTANTS.BETA_FLY;
@@ -340,7 +373,10 @@ export class NaivePlanner extends PathFindingStrategy {
   ) {
     const deadline = performance.now() + TIMEOUT_MS;
     const maxLegDepth = world.size * 4;
-    const naiveReservations = new SpaceTimeReservations();
+    // In Naive planning, drones ignore each other, but must still avoid dynamic moving machinery (forklifts)
+    const naiveReservations = reservedSpaceTime instanceof SpaceTimeReservations
+      ? reservedSpaceTime.cloneForOwner('FORKLIFT')
+      : new SpaceTimeReservations();
 
     for (const drone of swarm.drones) {
       const target = drone.mission.getNextTarget();
@@ -348,7 +384,9 @@ export class NaivePlanner extends PathFindingStrategy {
 
       const startPos = drone.path[drone.path.length - 1] || drone.start;
       const startTime = drone.path.length > 0 ? drone.path.length - 1 : 0;
-      const availableEnergy = batteryEnabled ? drone.maxBattery : undefined;
+      const availableEnergy = batteryEnabled 
+        ? drone.calculateStateAt(startTime, world.chargeStations, batteryEnabled).battery 
+        : undefined;
 
       const result = this.findPath(
         startPos,
@@ -394,7 +432,9 @@ export class CooperativePlanner extends PathFindingStrategy {
 
       const startPos = drone.path[drone.path.length - 1] || drone.start;
       const startTime = drone.path.length > 0 ? drone.path.length - 1 : 0;
-      const availableEnergy = batteryEnabled ? drone.maxBattery : undefined;
+      const availableEnergy = batteryEnabled 
+        ? drone.calculateStateAt(startTime, world.chargeStations, batteryEnabled).battery 
+        : undefined;
 
       const result = this.findPath(
         startPos,
@@ -476,7 +516,7 @@ export class EnergySaverPlanner extends PathFindingStrategy {
   ): { path: Position3D[], finalEnergy: number } | null {
 
     // Resolve blocked goal to the nearest free neighbor so A* can reach pallets
-    const effectiveGoal = this.nearestFreeNeighbor(goal, world);
+    const effectiveGoal = this.nearestFreeNeighbor(goal, world, maxAltitude);
 
     const startNode: PathNode = {
       ...start, g: 0, h: this.heuristic(start, effectiveGoal) * MATH_CONSTANTS.BETA_FLY, f: 0, parent: null, time: startTime, energy: 0
@@ -488,7 +528,6 @@ export class EnergySaverPlanner extends PathFindingStrategy {
     const bestG = new Map<number, number>();
     bestG.set(this.key(start, startTime), 0);
 
-    const closedSet = new Set<number>();
     let nodesExpanded = 0;
 
     while (openHeap.size > 0) {
@@ -506,9 +545,8 @@ export class EnergySaverPlanner extends PathFindingStrategy {
       if (current.time >= this.maxTimeSteps) continue;
       if (maxSearchDepth !== undefined && (current.time - startTime) >= maxSearchDepth) continue;
 
-      const closedKey = this.key(current, current.time);
-      if (closedSet.has(closedKey)) continue;
-      closedSet.add(closedKey);
+      const currentKey = this.key(current, current.time);
+      if (bestG.has(currentKey) && current.g > bestG.get(currentKey)!) continue;
 
       for (const dir of DIRECTIONS) {
         const nx = current.x + dir.x;
@@ -524,7 +562,7 @@ export class EnergySaverPlanner extends PathFindingStrategy {
 
         if (this.isCellReserved(reserved, nextKey, requesterId)) continue;
         if (nx !== current.x || ny !== current.y || nz !== current.z) {
-          if (this.isEdgeConflict(reserved, current, nextPos, current.time)) continue;
+          if (this.isEdgeConflict(reserved, current, nextPos, current.time, requesterId)) continue;
         }
 
         const stepCost = (nx === current.x && ny === current.y && nz === current.z) ? MATH_CONSTANTS.BETA_HOVER : MATH_CONSTANTS.BETA_FLY;
@@ -565,7 +603,9 @@ export class EnergySaverPlanner extends PathFindingStrategy {
 
       const startPos = drone.path[drone.path.length - 1] || drone.start;
       const startTime = drone.path.length > 0 ? drone.path.length - 1 : 0;
-      const availableEnergy = batteryEnabled ? drone.maxBattery : undefined;
+      const availableEnergy = batteryEnabled 
+        ? drone.calculateStateAt(startTime, world.chargeStations, batteryEnabled).battery 
+        : undefined;
 
       const result = this.findPathEnergy(
         startPos,
@@ -638,7 +678,7 @@ export class CollisionAnalyzer {
       if (!warehouse) return false;
       const b = warehouse.getBounds();
       return pos.x >= b.minX && pos.x <= b.maxX &&
-        pos.y >= b.minY && pos.y <= b.maxY &&
+        pos.y === warehouse.position.y &&
         pos.z >= b.minZ && pos.z <= b.maxZ;
     };
 

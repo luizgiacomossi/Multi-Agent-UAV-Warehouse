@@ -4,41 +4,39 @@
 
 The revised documentation is now closer to the code, but the implementation still has several substantive modeling and algorithmic limitations. These are not cosmetic issues; they affect what can be claimed in a thesis or paper.
 
-## 2. Allocation Is Not Over The Full Remaining Task Set
+## 2. Windowed vs Full-Set Allocation
 
-In 1-to-1 mode, `SimulationManager` truncates candidate pallets to the first `idleDrones.length` unscanned items before calling the Hungarian solver.
-
-Therefore the runtime is not solving
+In 1-to-1 mode, `SimulationManager` constructs a candidate task pool scaled dynamically with swarm size:
 
 \[
-\min_{\text{matching over all remaining tasks}} \sum C_{ik},
+\min\left(|\text{unscanned}|, \max(4 \cdot |\text{idleDrones}|, 20)\right),
 \]
 
-but a smaller subproblem chosen by list order.
+screened to match the payload types supported by the active idle drones.
+
+While this prevents starvation caused by sensor mismatches and keeps runtime performance snappy, it is a windowed matching rather than a global Hungarian match over the entirety of hundreds of remaining pallets simultaneously.
 
 Future work:
+- evaluate the optimality gap between windowed candidate allocation and full-warehouse matching,
+- investigate hierarchical spatial bisection for multi-bay warehouses.
 
-- allocate over all currently available tasks,
-- or justify a deliberate candidate-pruning policy mathematically.
+## 3. Dynamic Battery Horizon and Recharging Integration
 
-## 3. Planner Battery Bounds Use Full Capacity Rather Than True Residual Charge
-
-The path planners currently bound search with `drone.maxBattery`, not exact residual battery after previously planned legs.
-
-Future work:
-
-- propagate true residual energy into each leg planner,
-- integrate recharge events directly into feasibility and path planning,
-- optionally plan in a hybrid state space \((x,y,z,t,B)\).
-
-## 4. No Explicit Drone-Drone Edge Conflict Prevention
-
-The cooperative planners reserve vertex-time states, but they do not explicitly reserve traversed edges. Thus classical edge-swap conflicts between drones are not prevented by construction.
+The path planners now bound search using true residual battery calculated at dispatch time (`drone.calculateStateAt(...)`).
 
 Future work:
+- integrate automated en-route detour to charging pads directly inside A* search when remaining battery is insufficient for a return journey,
+- optionally plan in a fully coupled hybrid state space \((x,y,z,t,B)\).
 
-- reserve directed edges \((u,v,t)\),
-- or adopt CBS or another conflict-resolution framework.
+## 4. Prioritized Planning vs Coupled MAPF
+
+The cooperative planners enforce both vertex reservations and directed edge reservations \((u \to v, t)\), preventing head-on swap conflicts by construction across drones and dynamic forklifts.
+
+However, prioritized planning is fundamentally incomplete and can result in lower-priority drones becoming stranded if high-priority reservations block all paths within `maxTimeSteps`.
+
+Future work:
+- implement Conflict-Based Search (CBS) or ECBS for scenarios with extreme space-time congestion,
+- support priority re-ordering or dynamic priority inversion when lower-priority drones become trapped.
 
 ## 5. Cluster Routing Is Heuristic
 

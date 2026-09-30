@@ -18,6 +18,7 @@ export interface SimulationContext {
   onChangeAlgorithm?: (algo: string) => void;
   getAvailableAlgorithms?: () => string[];
   onControlCamera?: (action: { mode: 'overview' | 'drone' | 'zoom_in' | 'zoom_out'; droneId?: string }) => void;
+  onChangeTheme?: (themeId: string) => void;
   isPlaying?: boolean;
 }
 
@@ -212,6 +213,25 @@ export class SimulationToolRegistry {
             required: ['action']
           }
         }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'change_interface_theme',
+          description:
+            'Change the visual interface color theme and HUD contrast palette. Options include "cyan" (NexTArc Cyan), "amber" (Industrial Amber), "emerald" (Emerald Ops), "violet" (Midnight Violet), "crimson" (Crimson Tactical), and "high-contrast" (OLED High-Contrast).',
+          parameters: {
+            type: 'object',
+            properties: {
+              theme: {
+                type: 'string',
+                enum: ['cyan', 'amber', 'emerald', 'violet', 'crimson', 'high-contrast'],
+                description: 'The theme name or ID to apply.'
+              }
+            },
+            required: ['theme']
+          }
+        }
       }
     ];
   }
@@ -243,6 +263,8 @@ export class SimulationToolRegistry {
         return this.generateNewMissions();
       case 'control_camera':
         return this.controlCamera(args.action, args.droneId);
+      case 'change_interface_theme':
+        return this.changeInterfaceTheme(args.theme);
       default:
         return { error: `Tool "${name}" is not implemented.` };
     }
@@ -554,5 +576,17 @@ export class SimulationToolRegistry {
     }
 
     return { success: false, error: `Unknown camera action: ${action}` };
+  }
+
+  private changeInterfaceTheme(themeName: string) {
+    if (!themeName) return { success: false, error: 'No theme specified.' };
+    const valid = ['cyan', 'amber', 'emerald', 'violet', 'crimson', 'high-contrast'];
+    const norm = themeName.toLowerCase().trim();
+    const match = valid.find((v) => norm.includes(v)) || 'cyan';
+    if (this.context.onChangeTheme) {
+      this.context.onChangeTheme(match);
+      return { success: true, themeApplied: match, message: `Interface theme set to "${match}".` };
+    }
+    return { success: false, error: 'Theme switching not supported in current context.' };
   }
 }

@@ -309,7 +309,12 @@ export class Swarm {
                         y: Math.floor(Math.random() * Math.min(world.size, maxAltitude)),
                         z: Math.floor(Math.random() * world.size)
                     };
-                    if (!world.isBlocked(start.x, start.y, start.z) && !this.isOccupied(start)) break;
+                    if (!world.isBlocked(start.x, start.y, start.z) && !this.isOccupied(start)) {
+                        const onForkliftTrack = start.y <= 1 && (world.forklifts || []).some(fl => 
+                            fl.path && fl.path.some(p => p.x === start.x && p.z === start.z)
+                        );
+                        if (!onForkliftTrack) break;
+                    }
                     attempts++;
                 }
                 if (attempts >= 1000) start = { x: 0, y: 0, z: 0 };

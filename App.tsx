@@ -10,6 +10,9 @@ import { Agent, Position3D, GenerationTheme, SimulationIncident, Forklift, Palle
 import { SimulationManager } from './classes/SimulationManager';
 import { Warehouse } from './classes/Warehouse';
 import { GRID_SIZE, DEFAULT_AGENT_COUNT } from './SimulationConfig';
+import { ThemeModal } from './components/ThemeModal';
+import { ThemeService } from './services/theme/ThemeService';
+import { ThemeId } from './services/theme/ThemeTypes';
 
 const App: React.FC = () => {
   // -- UI Config State --
@@ -32,6 +35,7 @@ const App: React.FC = () => {
   const [taskPriorityMode, setTaskPriorityMode] = useState<TaskPriorityMode>('mixed');
   const [missionCompletionMode, setMissionCompletionMode] = useState<MissionCompletionMode>('count');
   const [currentTheme, setCurrentTheme] = useState<string>(GenerationTheme.WAREHOUSE);
+  const [isThemeModalOpen, setIsThemeModalOpen] = useState(false);
 
   // -- Simulation Data State --
   // We store snapshots of the simulation data for rendering
@@ -264,6 +268,7 @@ const App: React.FC = () => {
         onChangeAlgorithm: (algo: string) => setSelectedAlgorithm(algo),
         getAvailableAlgorithms: () => engineRef.current.getAvailableAlgorithms(),
         onControlCamera: handleControlCamera,
+        onChangeTheme: (themeId: string) => ThemeService.getInstance().setTheme(themeId as ThemeId),
         isPlaying
       },
       undefined,
@@ -289,6 +294,7 @@ const App: React.FC = () => {
       onChangeAlgorithm: (algo: string) => setSelectedAlgorithm(algo),
       getAvailableAlgorithms: () => engineRef.current.getAvailableAlgorithms(),
       onControlCamera: handleControlCamera,
+      onChangeTheme: (themeId: string) => ThemeService.getInstance().setTheme(themeId as ThemeId),
       isPlaying
     });
   }
@@ -396,6 +402,7 @@ const App: React.FC = () => {
           console.clear();
           engineRef.current.runFaultToleranceScenario();
         }}
+        onOpenThemeModal={() => setIsThemeModalOpen(true)}
       />
 
       <StatusPanel agents={agents} incidents={incidents} tick={tick} batteryEnabled={batteryEnabled} pallets={pallets} />
@@ -406,6 +413,8 @@ const App: React.FC = () => {
         onUpdateLMStudioUrl={handleUpdateLMStudioUrl}
         isLMStudioConnected={isLMStudioConnected}
       />
+
+      <ThemeModal isOpen={isThemeModalOpen} onClose={() => setIsThemeModalOpen(false)} />
 
       {error && (
         <div className="absolute inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
