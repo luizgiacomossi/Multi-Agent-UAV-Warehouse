@@ -55,8 +55,11 @@ export class Metrics {
                 effectiveTick = Math.min(tick, agent.path.length - 1);
             }
 
-            // Blocked Check
-            if (agent.status === 'STRANDED' || agent.path.length <= 1) {
+            // Blocked Check: `status` is the final planning outcome, so a planner-stranded drone
+            // only counts as blocked once playback reaches the end of its path. Crashed and
+            // battery-dead drones fall through so they are counted as lost below.
+            const isPlannerStranded = agent.status === 'STRANDED' && agent.destructionTime === undefined && !isDeadBattery;
+            if (agent.path.length <= 1 || (isPlannerStranded && tick >= agent.path.length - 1)) {
                 blocked++;
                 return;
             }

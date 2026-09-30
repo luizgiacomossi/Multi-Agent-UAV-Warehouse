@@ -64,9 +64,11 @@ export class WorldGenerator {
              z >= zone.minZ && z <= zone.maxZ;
   }
 
-  // Simple pseudo-random UUID generator for Pallets
+  // Simple pseudo-random UUID generator for Pallets.
+  // The random part goes last: the UI shows the last 6 characters, and the timestamp
+  // is identical for every pallet generated in the same run.
   private static generateUUID(): string {
-      return Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
+      return Date.now().toString(36) + Math.random().toString(36).substring(2, 10).padEnd(8, '0');
   }
 
   private static generateWarehouse(world: World, reservedZone?: ReservedZone, totalTasks: number = 50, numForklifts: number = 3, priorityMode: TaskPriorityMode = 'mixed') {

@@ -1,9 +1,14 @@
 import { Position3D, PathNode, SimulationIncident, MATH_CONSTANTS } from '../types';
 import { World } from './World';
-import { Swarm } from './Drone';
+import { Swarm, Drone } from './Drone';
 import { PATHFINDER_TIMEOUT_MS, MAX_TIMESTEPS } from '../SimulationConfig';
 
 const TIMEOUT_MS = PATHFINDER_TIMEOUT_MS;
+
+/** Failed plan attempts a drone may retry (waiting in place between tries) before giving up on a leg. */
+export const MAX_LEG_RETRIES = 5;
+/** Ticks a drone hovers in place after a failed plan before the next attempt. */
+export const RETRY_WAIT_TICKS = 3;
 
 const DIRECTIONS = [ // these are the 6 directions + wait
   { x: 1, y: 0, z: 0 }, { x: -1, y: 0, z: 0 }, // x-axis
@@ -269,6 +274,75 @@ export abstract class PathFindingStrategy {
     return path;
   }
 
+  /**
+   * Resolves a (possibly blocked) goal to a hover cell. Cells another drone is reserved on at the
+   * end of the search horizon are skipped: those are drones parked at their own goal, and a goal
+   * sharing their cell can never be reached.
+   */
+  protected resolveGoal(
+    goal: Position3D,
+    world: World,
+    maxAltitude: number | undefined,
+    reserved: SpaceTimeReservations | Set<number>,
+    startTime: number,
+    maxSearchDepth: number | undefined,
+    requesterId?: string
+  ): Position3D {
+    const horizon = startTime + (maxSearchDepth ?? world.size * 4);
+    return this.nearestFreeNeighbor(goal, world, maxAltitude, reserved, horizon, requesterId);
+  }
+
+  /** Resets a drone's retry bookkeeping after a leg was planned successfully. */
+  protected markLegPlanned(drone: Drone): void {
+    drone.legFailures = 0;
+    drone.lastLegFailed = false;
+  }
+
+  /**
+   * Handles a leg with no path. The drone hovers in place for RETRY_WAIT_TICKS so the next cycle
+   * re-plans against a later, less congested reservation state. A drone carrying a task is never
+   * stranded here: after MAX_LEG_RETRIES the SimulationManager abandons the task instead. A drone
+   * that cannot get home (or has nothing to abandon) is stranded once the retries run out.
+   */
+  protected handleLegFailure(
+    drone: Drone,
+    startPos: Position3D,
+    startTime: number,
+    reserved: SpaceTimeReservations | Set<number>
+  ): void {
+    drone.legFailures++;
+    drone.lastLegFailed = true;
+
+    const hasTask = drone.mission.state === 'OUTBOUND' || drone.mission.state === 'EXECUTING_TOUR';
+    const outOfTime = startTime + RETRY_WAIT_TICKS >= this.maxTimeSteps;
+
+    if (outOfTime || (!hasTask && drone.legFailures > MAX_LEG_RETRIES)) {
+      drone.status = 'STRANDED';
+      if (reserved instanceof SpaceTimeReservations) {
+        const tailEnd = Math.min(startTime + 500, this.maxTimeSteps);
+        for (let t = startTime; t <= tailEnd; t++) {
+          const k = this.key(startPos, t);
+          if (!reserved.isVertexReserved(k, drone.id)) reserved.addVertex(k, drone.id);
+        }
+      } else {
+        reserved.add(this.key(startPos, startTime + 1));
+      }
+      return;
+    }
+
+    // Hover in place, then retry next cycle. Cells already owned by someone else are not
+    // overwritten (the drone's own parking tail from its previous leg normally covers them).
+    const waitLeg: Position3D[] = [];
+    for (let w = 0; w <= RETRY_WAIT_TICKS; w++) {
+      waitLeg.push({ ...startPos });
+      if (w > 0 && reserved instanceof SpaceTimeReservations) {
+        const k = this.key(startPos, startTime + w);
+        if (!reserved.isVertexReserved(k, drone.id)) reserved.addVertex(k, drone.id);
+      }
+    }
+    drone.appendPath(waitLeg, false);
+  }
+
   protected key(p: Position3D, t: number): number {
     return (p.x) + (p.y * 64) + (p.z * 4096) + (t * 262144);
   }
@@ -310,7 +384,7 @@ export abstract class PathFindingStrategy {
     requesterId?: string
   ): { path: Position3D[], finalEnergy: number } | null {
 
-    const effectiveGoal = this.nearestFreeNeighbor(goal, world, maxAltitude);
+    const effectiveGoal = this.resolveGoal(goal, world, maxAltitude, reserved, startTime, maxSearchDepth, requesterId);
 
     const startNode: PathNode = {
       ...start, g: 0, h: this.heuristic(start, effectiveGoal), f: 0, parent: null, time: startTime, energy: 0
@@ -430,8 +504,9 @@ export class NaivePlanner extends PathFindingStrategy {
 
       if (result) {
         drone.appendPath(result.path, drone.mission.state === 'OUTBOUND' || drone.mission.state === 'EXECUTING_TOUR');
+        this.markLegPlanned(drone);
       } else {
-        drone.status = 'STRANDED';
+        this.handleLegFailure(drone, startPos, startTime, naiveReservations);
       }
     }
   }
@@ -478,6 +553,7 @@ export class CooperativePlanner extends PathFindingStrategy {
 
       if (result) {
         drone.appendPath(result.path, drone.mission.state === 'OUTBOUND' || drone.mission.state === 'EXECUTING_TOUR');
+        this.markLegPlanned(drone);
 
         if (reservedSpaceTime instanceof SpaceTimeReservations) {
           // Clear old idle tail reservations for this drone from startTime onwards
@@ -510,15 +586,7 @@ export class CooperativePlanner extends PathFindingStrategy {
           }
         }
       } else {
-        drone.status = 'STRANDED';
-        if (reservedSpaceTime instanceof SpaceTimeReservations) {
-          const tailEnd = Math.min(startTime + 500, this.maxTimeSteps);
-          for (let t = startTime; t <= tailEnd; t++) {
-            reservedSpaceTime.addVertex(this.key(startPos, t), drone.id);
-          }
-        } else {
-          reservedSpaceTime.add(this.key(startPos, startTime + 1));
-        }
+        this.handleLegFailure(drone, startPos, startTime, reservedSpaceTime);
       }
     }
   }
@@ -543,7 +611,7 @@ export class EnergySaverPlanner extends PathFindingStrategy {
   ): { path: Position3D[], finalEnergy: number } | null {
 
     // Resolve blocked goal to the nearest free neighbor so A* can reach pallets
-    const effectiveGoal = this.nearestFreeNeighbor(goal, world, maxAltitude);
+    const effectiveGoal = this.resolveGoal(goal, world, maxAltitude, reserved, startTime, maxSearchDepth, requesterId);
 
     const startNode: PathNode = {
       ...start, g: 0, h: this.heuristic(start, effectiveGoal) * MATH_CONSTANTS.BETA_FLY, f: 0, parent: null, time: startTime, energy: 0
@@ -649,6 +717,7 @@ export class EnergySaverPlanner extends PathFindingStrategy {
 
       if (result) {
         drone.appendPath(result.path, drone.mission.state === 'OUTBOUND' || drone.mission.state === 'EXECUTING_TOUR');
+        this.markLegPlanned(drone);
 
         if (reservedSpaceTime instanceof SpaceTimeReservations) {
           reservedSpaceTime.clearOwnerFromTime(drone.id, startTime);
@@ -678,15 +747,7 @@ export class EnergySaverPlanner extends PathFindingStrategy {
           }
         }
       } else {
-        drone.status = 'STRANDED';
-        if (reservedSpaceTime instanceof SpaceTimeReservations) {
-          const tailEnd = Math.min(startTime + 500, this.maxTimeSteps);
-          for (let t = startTime; t <= tailEnd; t++) {
-            reservedSpaceTime.addVertex(this.key(startPos, t), drone.id);
-          }
-        } else {
-          reservedSpaceTime.add(this.key(startPos, startTime + 1));
-        }
+        this.handleLegFailure(drone, startPos, startTime, reservedSpaceTime);
       }
     }
   }

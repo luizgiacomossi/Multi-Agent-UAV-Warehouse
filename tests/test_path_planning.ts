@@ -59,7 +59,7 @@ export function runPathPlanningTests(): { passed: number; failed: number } {
   console.log('\n--- 2. Cooperative MAPF (CBS) Multi-Agent Avoidance ---');
 
   const world = new World(12);
-  const swarm = new Swarm();
+  const swarm = new Swarm(0);
   swarm.drones = [];
 
   // Two drones on direct collision course in a narrow 1D corridor
@@ -131,7 +131,7 @@ export function runPathPlanningTests(): { passed: number; failed: number } {
 
   // Drone path across the forklift patrol corridor:
   // Starts at (1, 0, 4) and wants to cross to (7, 0, 4)
-  const crossSwarm = new Swarm();
+  const crossSwarm = new Swarm(0);
   const crossingDrone = new Drone('D_cross', 'Crosser', '#8b5cf6');
   crossingDrone.start = { x: 1, y: 0, z: 4 };
   crossingDrone.goal = { x: 7, y: 0, z: 4 };
@@ -150,7 +150,7 @@ export function runPathPlanningTests(): { passed: number; failed: number } {
   console.log('\n--- 4. EnergySaverPlanner Minimum Cost Relaxation ---');
 
   const energyPlanner = new EnergySaverPlanner();
-  const energySwarm = new Swarm();
+  const energySwarm = new Swarm(0);
   const ecoDrone = new Drone('D_eco', 'Eco Drone', '#06b6d4');
   ecoDrone.start = { x: 1, y: 1, z: 1 };
   ecoDrone.goal = { x: 5, y: 1, z: 1 };
