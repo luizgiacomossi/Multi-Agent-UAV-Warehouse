@@ -19,6 +19,7 @@ import { CostModel } from './CostModel';
 import { CBSPlanner } from './CBSPlanner';
 import { Task } from '../types';
 import { MAX_TIMESTEPS, GRID_SIZE, DEFAULT_AGENT_COUNT, MATH_CONSTANTS } from '../SimulationConfig';
+import { random } from '../utils/Random';
 
 type PalletReservation = {
     droneId: string;
@@ -54,6 +55,11 @@ export class SimulationManager {
 
     public getAvailableAlgorithms(): string[] {
         return Object.keys(this.algorithms);
+    }
+
+    /** The registered strategy instance, e.g. to read planner-specific statistics in experiments. */
+    public getStrategy(name: string): PathFindingStrategy | undefined {
+        return this.algorithms[name];
     }
 
     public getAlgorithmDescription(name: string): string {
@@ -101,7 +107,7 @@ export class SimulationManager {
     ): Task {
         let attempts = 0;
         let p: Position3D = { x: 0, y: 0, z: 0 };
-        let reqPayload = Math.random() > 0.5 ? 'camera' : 'rfid';
+        let reqPayload = random() > 0.5 ? 'camera' : 'rfid';
         let palletId: string | undefined = undefined;
 
         // Try to assign a real Pallet if in Warehouse mode
@@ -111,12 +117,12 @@ export class SimulationManager {
             // If all pallets done, reset and re-scan everything (full cycle complete)
             const pool = unscanned.length > 0 ? unscanned : this.world.pallets;
 
-            const plt = pool[Math.floor(Math.random() * pool.length)];
+            const plt = pool[Math.floor(random() * pool.length)];
             p = { x: plt.position.x, y: plt.position.y, z: plt.position.z };
             reqPayload = plt.payload_type;
             palletId = plt.id;
             return {
-                id: 'T-' + Math.random().toString(36).substr(2, 9),
+                id: 'T-' + random().toString(36).substr(2, 9),
                 target: p,
                 req_payload: reqPayload,
                 palletId: palletId,
@@ -132,9 +138,9 @@ export class SimulationManager {
 
             while (attempts < 200) {
                 p = {
-                    x: Math.floor(Math.random() * worldSizeX),
-                    y: Math.floor(Math.random() * yLimit),
-                    z: Math.floor(Math.random() * worldSizeZ)
+                    x: Math.floor(random() * worldSizeX),
+                    y: Math.floor(random() * yLimit),
+                    z: Math.floor(random() * worldSizeZ)
                 };
 
                 const inWarehouse = warehouse ?
@@ -153,11 +159,11 @@ export class SimulationManager {
         }
 
         return {
-            id: 'T-' + Math.random().toString(36).substr(2, 9),
+            id: 'T-' + random().toString(36).substr(2, 9),
             target: p,
             req_payload: reqPayload,
             palletId: palletId,
-            pi_k: Math.random() * 0.9 + 0.1,
+            pi_k: random() * 0.9 + 0.1,
             t_hover: 5,
             status: 'PENDING'
         };
@@ -172,7 +178,7 @@ export class SimulationManager {
         const clusters: TaskCluster[] = [];
 
         while (pool.length > 0 && clusters.length < maxClusters) {
-            const seed = pool[Math.floor(Math.random() * pool.length)];
+            const seed = pool[Math.floor(random() * pool.length)];
             const kdTree = new KDTree<Pallet>(pool, p => p.position);
 
             const neighbors = kdTree
@@ -182,7 +188,7 @@ export class SimulationManager {
                 .slice(0, Math.max(1, maxClusterSize));
 
             const clusterTasks = neighbors.map(plt => ({
-                id: 'T-' + Math.random().toString(36).substr(2, 9),
+                id: 'T-' + random().toString(36).substr(2, 9),
                 target: { ...plt.position },
                 req_payload: plt.payload_type,
                 palletId: plt.id,
@@ -250,6 +256,28 @@ export class SimulationManager {
         if (!palletId) return;
         this.palletAssignments.delete(palletId);
         this.completedPalletIds.add(palletId);
+    }
+
+    /**
+     * Idle drones parked on their dock swap/charge their battery before the next dispatch. The
+     * battery model recharges on a waiting tick at the dock (Drone.calculateStateAt), so a single
+     * hover tick restores full capacity. Without it, drones returning below the task threshold
+     * were never dispatched again and the fleet ran dry.
+     */
+    private rechargeDockedDrones(drones: Drone[]) {
+        drones.forEach(drone => {
+            const pos = drone.path[drone.path.length - 1];
+            const dock = drone.mission.warehouseLocation;
+            if (!pos || drone.battery >= drone.maxBattery) return;
+            if (pos.x !== dock.x || pos.y !== dock.y || pos.z !== dock.z) return;
+            drone.path.push({ ...pos });
+            drone.battery = drone.maxBattery;
+        });
+    }
+
+    /** Scans planned after a drone was lost (crash or dead battery) never happened. */
+    private discardScansAfter(drone: Drone, tick: number) {
+        drone.scanLog = drone.scanLog.filter(entry => entry.tick <= tick);
     }
 
     private getAvailablePallets(): Pallet[] {
@@ -469,6 +497,7 @@ export class SimulationManager {
                         const tick = drone.path.length > 0 ? drone.path.length - 1 : 0;
                         drone.battery = drone.calculateStateAt(tick, this.world.chargeStations, batteryEnabled).battery;
                     });
+                    this.rechargeDockedDrones(idleDrones);
                 }
 
                 const dMax = this.world.size * 2; // Approximate valid maximum structural traversal
@@ -534,7 +563,7 @@ export class SimulationManager {
                         const pool = (compatiblePallets.length > 0 ? compatiblePallets : unscanned).slice(0, candidateLimit);
 
                         const pendingTasks: Task[] = pool.map(plt => ({
-                            id: 'T-' + Math.random().toString(36).substr(2, 9),
+                            id: 'T-' + random().toString(36).substr(2, 9),
                             target: { ...plt.position },
                             req_payload: plt.payload_type,
                             palletId: plt.id,
@@ -592,6 +621,11 @@ export class SimulationManager {
             // Break early if everyone is finished/blocked
             const everyoneDone = this.swarm.drones.every(d => d.mission.state === 'COMPLETED' || d.status === 'STRANDED');
             if (everyoneDone) break;
+
+            // Stop once nothing can progress: no drone has a leg to fly and allocation found no
+            // feasible task (e.g. the remaining pallets are incompatible or unreachable).
+            const anyActiveLeg = this.swarm.drones.some(d => d.status !== 'STRANDED' && d.mission.getNextTarget() !== null);
+            if (!anyActiveLeg) break;
         }
 
         // Ensure any drone completing flight at ground/clearance level in a forklift aisle ascends to safe hover altitude (y >= 2)
@@ -630,6 +664,7 @@ export class SimulationManager {
                         agentNames: [d.name]
                     });
                     d.status = 'STRANDED';
+                    this.discardScansAfter(d, deathTick);
                 }
             });
         }
@@ -653,6 +688,7 @@ export class SimulationManager {
                     if (drone.path.length > col.time + 1) {
                         drone.path = drone.path.slice(0, col.time + 1);
                     }
+                    this.discardScansAfter(drone, col.time);
                     destroyedIds.add(id);
                 }
             });
@@ -693,8 +729,8 @@ export class SimulationManager {
             for (let d = 0; d < droneCount; d++) {
                 const drone = new Drone(`MC_D${d}`, `Agent ${d}`, '#ef4444');
                 drone.start = this.generateRandomTask(null, 24).target; // hack to get free pos
-                drone.battery = Math.floor(Math.random() * 50) + 50; // 50 to 100%
-                drone.payload = [Math.random() > 0.5 ? 'camera' : 'rfid']; // 1 item
+                drone.battery = Math.floor(random() * 50) + 50; // 50 to 100%
+                drone.payload = [random() > 0.5 ? 'camera' : 'rfid']; // 1 item
                 syntheticDrones.push(drone);
             }
 

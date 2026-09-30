@@ -120,7 +120,13 @@ The root plans each drone alone. For a node, `ConflictDetector` finds the earlie
 
 Each child re-plans only the constrained drone. The first conflict-free node is committed through the same `commitLeg(...)` path as the prioritized planners.
 
-**Low level.** The shared time-expanded A* (`findPath`) is reused unchanged. `ConstrainedReservationView` decorates the shared `SpaceTimeReservations` with the drone's `ConstraintTable`, through the `ReservationView` interface. It also implements `canHoldGoal`: a goal only counts as reached if no constraint, and no committed reservation of another drone, needs the cell within the next `world.size * 4` ticks. This is what removes the goal-parking conflicts left over by prioritized planning.
+**Low level.** The shared time-expanded A* (`findPath`) is reused unchanged. `ConstrainedReservationView` decorates the shared `SpaceTimeReservations` with the drone's `ConstraintTable`, through the `ReservationView` interface. It also implements `canHoldGoal`: a goal only counts as reached if no constraint, and no committed reservation of another drone, needs the cell during the drone's *hold time* after arrival. This is what removes the goal-parking conflicts left over by prioritized planning.
+
+**Hold time.** `MissionController.continuesAfterCurrentLeg()` tells whether the drone departs again right after the leg, e.g. a pallet on a round trip or an intermediate cluster stop.
+- If it does, its next leg is planned from the arrival tick, so it holds its goal for only 1 tick.
+- Otherwise it may park, and holds the goal for the whole look-ahead window (`world.size * 4` ticks).
+
+`ConflictDetector` applies the same hold time. Assuming every drone parks forever over-constrained round trips: it pushed required arrivals past the search depth, causing exhaustive failed searches of about 2.5 s each on 24³ grids.
 
 **Scope rules.**
 - Committed traffic (forklifts, and drones not re-planned this cycle) is treated as fixed obstacles, as in the other planners.
@@ -129,11 +135,11 @@ Each child re-plans only the constrained drone. The first conflict-free node is 
 
 **Budget and fallback.** A leg whose search exceeds `maxExpansions` (default 500 constraint-tree nodes) or `timeBudgetMs` (default 2000 ms) is delegated to an injected fallback strategy, `CooperativePlanner` by default. Drones with no path even unconstrained go through the normal retry/abandon handling.
 
-**Measured behaviour** (20 warehouse runs per configuration, 12³ grid, 4–8 drones):
-- zero collisions and zero stranded drones in all configurations, where `Cooperative` still had 0–3 collisions per 20 runs;
+**Measured behaviour** (`npm run bench -- --preset full --runs 3`: 432 runs over 12³–24³ grids, 2–8 drones, both allocation modes, both completion modes; see [`benchmark.md`](benchmark.md)):
+- zero collisions, zero stranded drones and 100% pallet coverage in full-coverage missions. `Cooperative` and `Energy Saver` had 0.04–0.07 collisions per run and 98.4–98.5% coverage;
 - the fallback was never triggered;
-- makespan was within about ±4% of `Cooperative`, because CBS minimises the sum of leg durations rather than the makespan;
-- planning took about 30–250 ms per mission on average (up to about 1.2 s), against 20–40 ms for `Cooperative`.
+- makespan was the same as `Cooperative` on average (1241 vs 1242 ticks in full-coverage missions), because CBS minimises the sum of leg durations rather than the makespan;
+- planning took 236 ms per full-coverage mission on average (at most 0.7 s), against 147 ms for `Cooperative`.
 
 ## 5. Battery Constraint During Planning
 

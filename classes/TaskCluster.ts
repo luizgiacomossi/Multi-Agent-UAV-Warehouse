@@ -1,4 +1,5 @@
 import { Task, Position3D, MATH_CONSTANTS } from '../types';
+import { random } from '../utils/Random';
 
 export class TaskCluster {
     public id: string;
@@ -9,7 +10,7 @@ export class TaskCluster {
 
     constructor(tasks: Task[]) { // Lets start empty and add tasks later
         if (tasks.length === 0) throw new Error("Cluster initialized with no tasks");
-        this.id = `cluster-${Math.random().toString(36).slice(2, 10)}`;
+        this.id = `cluster-${random().toString(36).slice(2, 10)}`;
         this.tasks = tasks;
         this.centroid = this.calculateCentroid();
         this.calculateTour();

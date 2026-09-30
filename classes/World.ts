@@ -1,6 +1,7 @@
 import { Position3D, Pallet, Forklift, TaskPriorityMode } from '../types';
 import { WorldGenerator, ReservedZone } from './WorldGenerator';
 import { Warehouse } from './Warehouse';
+import { random } from '../utils/Random';
 
 export class World {
   size: number;
@@ -80,8 +81,8 @@ export class World {
       let placed = 0;
       let attempts = 0;
       while(placed < count && attempts < 1000) {
-          const x = Math.floor(Math.random() * this.size);
-          const z = Math.floor(Math.random() * this.size);
+          const x = Math.floor(random() * this.size);
+          const z = Math.floor(random() * this.size);
           
           let y = 0;
           for(let h = this.size - 1; h >= 0; h--) {

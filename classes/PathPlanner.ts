@@ -100,6 +100,27 @@ export interface ReservationView {
   canHoldGoal?(pos: Position3D, arrivalTime: number, requesterId?: string): boolean;
 }
 
+/**
+ * Read-only view that only exposes reservations held by the given owners (e.g. forklifts for
+ * Naive planning, which ignores other drones). Reads through to the shared table without copying.
+ */
+export class OwnerFilteredView implements ReservationView {
+  constructor(
+    private readonly base: SpaceTimeReservations,
+    private readonly owners: ReadonlySet<string>
+  ) {}
+
+  public isVertexReserved(key: number, requesterId?: string): boolean {
+    const owner = this.base.getVertexOwner(key);
+    return owner !== undefined && owner !== requesterId && this.owners.has(owner);
+  }
+
+  public isEdgeConflict(fromPos: Position3D, toPos: Position3D, time: number, requesterId?: string): boolean {
+    const owner = this.base.getOpposingEdgeOwner(fromPos, toPos, time);
+    return owner !== undefined && owner !== requesterId && this.owners.has(owner);
+  }
+}
+
 /** Anything the search can query: a reservation view or a legacy set of vertex keys. */
 export type ReservationSource = ReservationView | Set<number>;
 
@@ -136,14 +157,20 @@ export class SpaceTimeReservations implements ReservationView {
   }
 
   public isEdgeConflict(fromPos: Position3D, toPos: Position3D, time: number, requesterId?: string): boolean {
-    const fromKey = (fromPos.x) + (fromPos.y * 64) + (fromPos.z * 4096);
-    const toKey = (toPos.x) + (toPos.y * 64) + (toPos.z * 4096);
-    // Conflict occurs if another agent moves from toPos to fromPos between time and time+1
-    const oppositeEdgeKey = `${time}:${toKey}->${fromKey}`;
-    const owner = this.edgeOwners.get(oppositeEdgeKey);
+    const owner = this.getOpposingEdgeOwner(fromPos, toPos, time);
     if (!owner) return false;
     if (requesterId && owner === requesterId) return false;
     return true;
+  }
+
+  /** Owner of the vertex reservation, if any. */
+  public getVertexOwner(key: number): string | undefined {
+    return this.vertexOwners.get(key);
+  }
+
+  /** Owner of a move from `toPos` to `fromPos` in the same step, i.e. a head-on swap partner. */
+  public getOpposingEdgeOwner(fromPos: Position3D, toPos: Position3D, time: number): string | undefined {
+    return this.edgeOwners.get(`${time}:${cellKey(toPos)}->${cellKey(fromPos)}`);
   }
 
   public clearOwnerFromTime(ownerId: string, fromTime: number): void {
@@ -177,17 +204,6 @@ export class SpaceTimeReservations implements ReservationView {
   public add(key: number): this {
     this.vertexOwners.set(key, 'RESERVED');
     return this;
-  }
-
-  public cloneForOwner(retainedOwner: string): SpaceTimeReservations {
-    const copy = new SpaceTimeReservations();
-    for (const [key, owner] of this.vertexOwners.entries()) {
-      if (owner === retainedOwner) copy.vertexOwners.set(key, owner);
-    }
-    for (const [edgeKey, owner] of this.edgeOwners.entries()) {
-      if (owner === retainedOwner) copy.edgeOwners.set(edgeKey, owner);
-    }
-    return copy;
   }
 
   public get size(): number {
@@ -559,9 +575,9 @@ export class NaivePlanner extends PathFindingStrategy {
     const deadline = performance.now() + TIMEOUT_MS;
     const maxLegDepth = world.size * 4;
     // In Naive planning, drones ignore each other, but must still avoid dynamic moving machinery (forklifts)
-    const naiveReservations = reservedSpaceTime instanceof SpaceTimeReservations
-      ? reservedSpaceTime.cloneForOwner('FORKLIFT')
-      : new SpaceTimeReservations();
+    const naiveReservations: ReservationSource = reservedSpaceTime instanceof SpaceTimeReservations
+      ? new OwnerFilteredView(reservedSpaceTime, new Set(['FORKLIFT']))
+      : new Set<number>();
 
     for (const drone of swarm.drones) {
       const leg = this.getLegContext(drone, world, batteryEnabled);
@@ -585,7 +601,8 @@ export class NaivePlanner extends PathFindingStrategy {
         drone.appendPath(result.path, drone.mission.state === 'OUTBOUND' || drone.mission.state === 'EXECUTING_TOUR');
         this.markLegPlanned(drone);
       } else {
-        this.handleLegFailure(drone, startPos, startTime, naiveReservations);
+        // Wait cells go to the shared table; other Naive drones never read them
+        this.handleLegFailure(drone, startPos, startTime, reservedSpaceTime);
       }
     }
   }

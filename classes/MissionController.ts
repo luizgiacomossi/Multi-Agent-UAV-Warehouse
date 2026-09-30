@@ -163,6 +163,22 @@ export class MissionController {
     }
 
     /**
+     * Whether the drone departs again right after the current leg, so it only occupies the leg's
+     * goal briefly (its next leg is planned from the arrival tick). Otherwise it may park there.
+     */
+    public continuesAfterCurrentLeg(): boolean {
+        const tourLength = this.currentCluster?.tourSequence.length ?? 0;
+        if (this.state === 'OUTBOUND') {
+            return tourLength > 1 || this.mustReturnToBase;
+        }
+        if (this.state === 'EXECUTING_TOUR') {
+            // This leg targets tourSequence[clusterTaskIndex + 1]; more stops follow if one remains after it
+            return this.clusterTaskIndex + 2 < tourLength || this.mustReturnToBase;
+        }
+        return false; // RETURNING ends at the dock, where the drone may idle
+    }
+
+    /**
      * Drops the current task (single pallet or remaining cluster tour) without counting it
      * as completed, used when the target stays unreachable after repeated re-plans.
      */
