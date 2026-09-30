@@ -1,7 +1,12 @@
 
 import React, { useMemo } from 'react';
-import { CheckCircle2, Activity, ShieldAlert, Skull, Zap, ScanLine, Navigation, Warehouse, Undo2, BatteryWarning, Camera, Wifi, History, Target } from 'lucide-react';
+import { 
+  CheckCircle2, Activity, ShieldAlert, Skull, Zap, ScanLine, Navigation, Warehouse, 
+  Undo2, BatteryWarning, Camera, Wifi, History, Target, Battery, BatteryCharging, 
+  BatteryFull, BatteryMedium, BatteryLow 
+} from 'lucide-react';
 import { Agent, SimulationIncident, Pallet, Position3D } from '../types';
+import { Drone } from '../classes/Drone';
 import { Metrics } from '../classes/Metrics';
 import { AlertLog } from '../classes/AlertLog';
 
@@ -11,11 +16,37 @@ interface StatusPanelProps {
   tick: number;
   batteryEnabled: boolean;
   pallets: Pallet[];
+  chargeStations?: Position3D[];
 }
 
-const StatusPanel: React.FC<StatusPanelProps> = ({ agents, incidents, tick, batteryEnabled, pallets }) => {
+const StatusPanel: React.FC<StatusPanelProps> = ({ 
+  agents, 
+  incidents, 
+  tick, 
+  batteryEnabled, 
+  pallets, 
+  chargeStations = [] 
+}) => {
 
   const stats = useMemo(() => Metrics.calculate(agents, tick, batteryEnabled), [agents, tick, batteryEnabled]);
+
+  // Helper to obtain the accurate physical snapshot at the current tick
+  const getSnapshot = (agent: Agent) => {
+    if (agent instanceof Drone) {
+      return agent.getSnapshotAt(tick, chargeStations, batteryEnabled);
+    }
+    if (typeof (agent as any).getSnapshotAt === 'function') {
+      return (agent as any).getSnapshotAt(tick, chargeStations, batteryEnabled);
+    }
+    return {
+      position: (agent.path && agent.path.length > 0) ? agent.path[Math.min(tick, agent.path.length - 1)] : agent.start,
+      battery: agent.battery ?? 100,
+      isDestroyed: false,
+      isDeadBattery: false,
+      isRecharging: false,
+      hasPackage: true
+    };
+  };
   
   // Cross-reference agent completion logs with the 3D Pallet array
   const historicalTasks = useMemo(() => {
@@ -43,22 +74,24 @@ const StatusPanel: React.FC<StatusPanelProps> = ({ agents, incidents, tick, batt
   }, [agents, historicalTasks, pallets, tick]);
 
   const activeMatrixRows = useMemo(() => {
-      const rows: { agent: Agent; taskId: string; position: Position3D; type: string; priority: number }[] = [];
+      const rows: { agent: Agent; taskId: string; position: Position3D; type: string; priority: number; battery: number }[] = [];
       agents.forEach(a => {
           if (a.status === 'STRANDED' || tick >= a.path.length) return;
           const activeTask = (a.assignedTasksLog || []).find(t => tick >= t.startTick && tick <= t.endTick);
           if (activeTask) {
+              const snap = getSnapshot(a);
               rows.push({
                   agent: a,
                   taskId: activeTask.palletId,
                   position: activeTask.position,
                   type: activeTask.type,
-                  priority: activeTask.priority
+                  priority: activeTask.priority,
+                  battery: snap.battery
               });
           }
       });
       return rows;
-  }, [agents, tick]);
+  }, [agents, tick, chargeStations, batteryEnabled]);
 
   return (
     <div className="absolute top-4 right-4 w-80 bg-slate-900/90 backdrop-blur-md p-4 rounded-xl border border-slate-700 shadow-xl text-slate-100 flex flex-col gap-4 z-10 max-h-[90vh] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent">
@@ -178,9 +211,13 @@ const StatusPanel: React.FC<StatusPanelProps> = ({ agents, incidents, tick, batt
         
         {agents.map((agent) => {
           const finishTime = agent.path.length - 1;
+          const snapshot = getSnapshot(agent);
+          const currentBattery = Math.max(0, Math.min(100, snapshot.battery));
+          const isRecharging = snapshot.isRecharging;
+
           const isDestroyed = agent.status === 'STRANDED' && agent.destructionTime !== undefined && tick >= agent.destructionTime;
-          const isDeadBattery = agent.status === 'STRANDED' && agent.destructionTime === undefined;
-          const isBlocked = agent.path.length <= 1 && !isDestroyed && !isDeadBattery;
+          const isDeadBattery = snapshot.isDeadBattery;
+          const isBlocked = (agent.status === 'STRANDED' && !isDestroyed && !isDeadBattery) || (agent.path.length <= 1 && !isDestroyed && !isDeadBattery && tick < finishTime);
 
           const scansDone = agent.deliveryTimes?.filter(t => t <= tick).length || 0;
           const nextScan = agent.deliveryTimes?.find(t => t > tick);
@@ -215,10 +252,36 @@ const StatusPanel: React.FC<StatusPanelProps> = ({ agents, incidents, tick, batt
 
           const ScanIcon = scanType === 'camera' ? Camera : scanType === 'rfid' ? Wifi : null;
 
+          let BatteryIcon: React.ElementType = BatteryFull;
+          let batteryColor = "text-emerald-400";
+          let barColor = "bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.4)]";
+
+          if (isRecharging) {
+            BatteryIcon = BatteryCharging;
+            batteryColor = "text-emerald-400 animate-pulse";
+            barColor = "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]";
+          } else if (isDestroyed || isDeadBattery || currentBattery <= 0) {
+            BatteryIcon = BatteryWarning;
+            batteryColor = "text-red-500";
+            barColor = "bg-red-500";
+          } else if (currentBattery <= 20) {
+            BatteryIcon = BatteryLow;
+            batteryColor = "text-red-400 font-bold animate-pulse";
+            barColor = "bg-red-500 shadow-[0_0_6px_rgba(239,68,68,0.5)]";
+          } else if (currentBattery <= 50) {
+            BatteryIcon = BatteryMedium;
+            batteryColor = "text-amber-400";
+            barColor = "bg-amber-400";
+          } else {
+            BatteryIcon = BatteryFull;
+            batteryColor = "text-emerald-400";
+            barColor = "bg-emerald-500";
+          }
+
           return (
             <div 
               key={agent.id} 
-              className={`flex flex-col p-2 rounded-lg border transition-colors ${
+              className={`flex flex-col p-2.5 rounded-lg border transition-colors ${
                   isDestroyed ? 'bg-red-900/10 border-red-900/30' : 
                   isDeadBattery ? 'bg-amber-900/10 border-amber-900/30' :
                   tick >= finishTime ? 'bg-slate-700/30 border-slate-600' :
@@ -228,10 +291,10 @@ const StatusPanel: React.FC<StatusPanelProps> = ({ agents, incidents, tick, batt
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <div 
-                    className="w-1.5 h-1.5 rounded-full"
+                    className="w-2 h-2 rounded-full"
                     style={{ backgroundColor: isDestroyed || isDeadBattery ? '#555' : agent.color }} 
                   />
-                  <span className={`text-xs font-medium ${isDestroyed ? 'text-red-400' : isDeadBattery ? 'text-amber-500' : 'text-slate-200'}`}>
+                  <span className={`text-xs font-semibold ${isDestroyed ? 'text-red-400' : isDeadBattery ? 'text-amber-500' : 'text-slate-200'}`}>
                     {agent.name}
                   </span>
                 </div>
@@ -242,7 +305,7 @@ const StatusPanel: React.FC<StatusPanelProps> = ({ agents, incidents, tick, batt
 
               {/* Pallet Inspection Details */}
               {palletShortId && !isDestroyed && !isDeadBattery && tick < finishTime && (
-                <div className="mt-1.5 ml-3.5 flex items-center gap-2 text-[9px] text-slate-500 font-mono">
+                <div className="mt-1.5 ml-3 flex items-center gap-2 text-[9px] text-slate-400 font-mono">
                   {ScanIcon && <ScanIcon size={9} className={scanType === 'camera' ? 'text-blue-400' : 'text-green-400'} />}
                   <span>PLT-{palletShortId}</span>
                   <span className={`uppercase px-1 py-0.5 rounded text-[8px] border ${
@@ -254,6 +317,32 @@ const StatusPanel: React.FC<StatusPanelProps> = ({ agents, incidents, tick, batt
                   </span>
                 </div>
               )}
+
+              {/* Individual Drone Battery Telemetry */}
+              <div className="mt-2 pt-1.5 border-t border-slate-700/50 flex flex-col gap-1">
+                <div className="flex items-center justify-between text-[9px] font-mono">
+                  <span className="flex items-center gap-1.5 text-slate-400">
+                    <BatteryIcon size={12} className={batteryColor} />
+                    <span className="text-[10px]">Battery</span>
+                    {isRecharging && (
+                      <span className="text-[8px] text-emerald-400 font-bold uppercase px-1 py-0.2 bg-emerald-500/10 border border-emerald-500/20 rounded animate-pulse">
+                        Charging
+                      </span>
+                    )}
+                  </span>
+                  <span className={`font-semibold ${batteryColor}`}>
+                    {batteryEnabled ? `${currentBattery.toFixed(1)}%` : '∞'}
+                  </span>
+                </div>
+                {batteryEnabled && (
+                  <div className="w-full h-1.5 bg-slate-900/60 rounded-full overflow-hidden border border-slate-700/30">
+                    <div 
+                      className={`h-full rounded-full transition-all duration-300 ${barColor}`} 
+                      style={{ width: `${currentBattery}%` }} 
+                    />
+                  </div>
+                )}
+              </div>
             </div>
           );
         })}
@@ -272,6 +361,7 @@ const StatusPanel: React.FC<StatusPanelProps> = ({ agents, incidents, tick, batt
               <tr>
                 <th className="p-1.5 font-semibold">TASK ID</th>
                 <th className="p-1.5 font-semibold">POSITION</th>
+                <th className="p-1.5 font-semibold text-center">BATT</th>
                 <th className="p-1.5 font-semibold text-center">PRIORITY</th>
                 <th className="p-1.5 font-semibold text-right">AGENT</th>
               </tr>
@@ -281,6 +371,14 @@ const StatusPanel: React.FC<StatusPanelProps> = ({ agents, incidents, tick, batt
                 <tr key={`matrix-${row.agent.id}-${row.taskId}-${idx}`} className="border-b border-slate-700/50 last:border-0 hover:bg-slate-700/30">
                   <td className="p-1.5 font-mono text-cyan-400">PLT-{row.taskId.slice(-6).toUpperCase()}</td>
                   <td className="p-1.5 font-mono opacity-80">[{row.position.x}, {row.position.y}, {row.position.z}]</td>
+                  <td className="p-1.5 font-mono text-center">
+                    <span className={
+                      row.battery <= 20 ? 'text-red-400 font-bold' :
+                      row.battery <= 50 ? 'text-amber-400' : 'text-emerald-400'
+                    }>
+                      {batteryEnabled ? `${row.battery.toFixed(0)}%` : "∞"}
+                    </span>
+                  </td>
                   <td className="p-1.5 font-mono text-emerald-400 text-center">{row.priority ? row.priority.toFixed(2) : "1.00"}</td>
                   <td className="p-1.5 font-medium flex items-center justify-end gap-1.5">
                     {row.agent.name}
@@ -290,7 +388,7 @@ const StatusPanel: React.FC<StatusPanelProps> = ({ agents, incidents, tick, batt
               ))}
               {activeMatrixRows.length === 0 && (
                 <tr>
-                  <td colSpan={4} className="p-3 text-center text-slate-500 italic font-mono opacity-70">
+                  <td colSpan={5} className="p-3 text-center text-slate-500 italic font-mono opacity-70">
                     No active targets registered.
                   </td>
                 </tr>

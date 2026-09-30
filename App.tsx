@@ -405,7 +405,14 @@ const App: React.FC = () => {
         onOpenThemeModal={() => setIsThemeModalOpen(true)}
       />
 
-      <StatusPanel agents={agents} incidents={incidents} tick={tick} batteryEnabled={batteryEnabled} pallets={pallets} />
+      <StatusPanel 
+        agents={agents} 
+        incidents={incidents} 
+        tick={tick} 
+        batteryEnabled={batteryEnabled} 
+        pallets={pallets} 
+        chargeStations={chargeStations}
+      />
 
       <VoiceCommandBar
         onSendCommand={handleExecuteVoiceCommand}

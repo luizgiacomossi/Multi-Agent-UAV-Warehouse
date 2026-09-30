@@ -69,7 +69,7 @@ export class Drone implements Agent {
         return d;
     }
 
-    setMissionConfig(start: Position3D, firstGoal: Position3D, maxMissions: number, isRoundTrip: boolean) {
+    setMissionConfig(start: Position3D, firstGoal: Position3D, maxMissions: number, isRoundTrip: boolean, baseLocation?: Position3D) {
         this.start = { ...start };
         this.goal = { ...firstGoal };
         this.path = [this.start]; // Initialize path with start pos
@@ -79,7 +79,7 @@ export class Drone implements Agent {
         this.assignedTasksLog = [];
 
         // Configure Controller
-        this.mission.warehouseLocation = { ...start };
+        this.mission.warehouseLocation = baseLocation ? { ...baseLocation } : { ...start };
         this.mission.configure(maxMissions, isRoundTrip);
         this.mission.reset();
         this.mission.assignNewMission(firstGoal);

@@ -40,8 +40,8 @@ export class Metrics {
                 // Dead Battery check mimics Drone.ts falling logic
                 // Only count as "Fell" if we are past the point where it ran out
                 if (agent.status === 'STRANDED') {
-                    const pathEnd = agent.path.length - 1;
-                    if (tick >= pathEnd) isDeadBattery = true;
+                    const snap = agent.calculateStateAt(tick, [], batteryEnabled);
+                    if (snap.deathTick !== undefined && tick >= snap.deathTick) isDeadBattery = true;
                 }
 
                 // Count pallet scans that have actually happened by this tick.
