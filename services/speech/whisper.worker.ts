@@ -40,7 +40,7 @@ self.addEventListener('message', async (e: MessageEvent) => {
         self.postMessage({ type: 'PROGRESS', data: progress });
       });
 
-      const langCode = language === 'pt-BR' ? 'portuguese' : 'english';
+      const langCode = 'english';
 
       const output = await transcriber(audio, {
         language: langCode,

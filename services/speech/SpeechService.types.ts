@@ -3,7 +3,7 @@
  * Adheres to Interface Segregation Principle (ISP) and Dependency Inversion Principle (DIP).
  */
 
-export type SpeechLanguage = 'en-US' | 'pt-BR';
+export type SpeechLanguage = 'en-US';
 
 export type SpeechRecognizerState = 'idle' | 'listening' | 'loading-model' | 'processing' | 'error';
 

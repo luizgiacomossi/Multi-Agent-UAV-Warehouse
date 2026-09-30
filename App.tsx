@@ -1,10 +1,11 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { AlertTriangle } from 'lucide-react';
-import VoxelWorld from './components/VoxelWorld';
+import VoxelWorld, { CameraFocusCommand } from './components/VoxelWorld';
 import ControlPanel from './components/ControlPanel';
 import StatusPanel from './components/StatusPanel';
 import VoiceCommandBar from './components/VoiceCommandBar';
+import { OperatorAssistant } from './services/slm/OperatorAssistant';
 import { Agent, Position3D, GenerationTheme, SimulationIncident, Forklift, Pallet, ClusterVisualization, TaskPriorityMode, MissionCompletionMode } from './types';
 import { SimulationManager } from './classes/SimulationManager';
 import { Warehouse } from './classes/Warehouse';
@@ -226,6 +227,103 @@ const App: React.FC = () => {
     return ids;
   }, [agents, tick]);
 
+  // -- Camera Focus & Zoom State --
+  const [cameraFocus, setCameraFocus] = useState<CameraFocusCommand | null>(null);
+
+  const handleControlCamera = (action: { mode: 'overview' | 'drone' | 'zoom_in' | 'zoom_out'; droneId?: string }) => {
+    setCameraFocus({
+      ...action,
+      triggerId: Date.now()
+    });
+  };
+
+  // -- LM Studio & SLM Assistant --
+  const [lmStudioUrl, setLmStudioUrl] = useState<string>('http://localhost:1234/v1');
+  const [isLMStudioConnected, setIsLMStudioConnected] = useState<boolean>(false);
+  const assistantRef = useRef<OperatorAssistant | null>(null);
+
+  // Initialize or update assistant context synchronously on render
+  if (!assistantRef.current) {
+    assistantRef.current = new OperatorAssistant(
+      {
+        getAgents: () => agents,
+        getPallets: () => pallets,
+        getCurrentTick: () => tick,
+        getMaxTicks: () => maxTicks,
+        getChargeStations: () => chargeStations,
+        getIncidents: () => incidents,
+        getScannedPalletIds: () => scannedPalletIds,
+        getActivePalletIds: () => activePalletIds,
+        onTogglePlay: handleTogglePlay,
+        onReset: () => {
+          setIsPlaying(false);
+          setTick(0);
+        },
+        onSetTick: (t: number) => setTick(t),
+        onNewMissions: handleNewMissions,
+        onChangeAlgorithm: (algo: string) => setSelectedAlgorithm(algo),
+        getAvailableAlgorithms: () => engineRef.current.getAvailableAlgorithms(),
+        onControlCamera: handleControlCamera,
+        isPlaying
+      },
+      undefined,
+      { baseUrl: lmStudioUrl }
+    );
+  } else {
+    assistantRef.current.updateContext({
+      getAgents: () => agents,
+      getPallets: () => pallets,
+      getCurrentTick: () => tick,
+      getMaxTicks: () => maxTicks,
+      getChargeStations: () => chargeStations,
+      getIncidents: () => incidents,
+      getScannedPalletIds: () => scannedPalletIds,
+      getActivePalletIds: () => activePalletIds,
+      onTogglePlay: handleTogglePlay,
+      onReset: () => {
+        setIsPlaying(false);
+        setTick(0);
+      },
+      onSetTick: (t: number) => setTick(t),
+      onNewMissions: handleNewMissions,
+      onChangeAlgorithm: (algo: string) => setSelectedAlgorithm(algo),
+      getAvailableAlgorithms: () => engineRef.current.getAvailableAlgorithms(),
+      onControlCamera: handleControlCamera,
+      isPlaying
+    });
+  }
+
+  // Periodic health check of LM Studio local server
+  useEffect(() => {
+    let active = true;
+    const checkAvailability = async () => {
+      if (assistantRef.current) {
+        const available = await assistantRef.current.isAvailable();
+        if (active) setIsLMStudioConnected(available);
+      }
+    };
+
+    checkAvailability();
+    const timer = setInterval(checkAvailability, 8000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [lmStudioUrl]);
+
+  const handleUpdateLMStudioUrl = (url: string) => {
+    setLmStudioUrl(url);
+    if (assistantRef.current) {
+      assistantRef.current.setConfig({ baseUrl: url });
+      assistantRef.current.isAvailable().then(setIsLMStudioConnected);
+    }
+  };
+
+  const handleExecuteVoiceCommand = async (command: string) => {
+    if (!assistantRef.current) return;
+    return await assistantRef.current.processCommand(command);
+  };
+
   return (
     <div className="w-full h-full overflow-hidden relative bg-slate-950">
       <VoxelWorld
@@ -242,6 +340,7 @@ const App: React.FC = () => {
         clusters={clusters}
         scannedPalletIds={scannedPalletIds}
         activePalletIds={activePalletIds}
+        cameraFocus={cameraFocus}
       />
 
       <ControlPanel
@@ -302,9 +401,10 @@ const App: React.FC = () => {
       <StatusPanel agents={agents} incidents={incidents} tick={tick} batteryEnabled={batteryEnabled} pallets={pallets} />
 
       <VoiceCommandBar
-        onSendCommand={(command) => {
-          console.log('[NexTArc App Voice Command]:', command);
-        }}
+        onSendCommand={handleExecuteVoiceCommand}
+        lmStudioUrl={lmStudioUrl}
+        onUpdateLMStudioUrl={handleUpdateLMStudioUrl}
+        isLMStudioConnected={isLMStudioConnected}
       />
 
       {error && (

@@ -1,6 +1,6 @@
 
-import React, { useMemo, useRef, useLayoutEffect } from 'react';
-import { Canvas, useFrame } from '@react-three/fiber';
+import React, { useMemo, useRef, useLayoutEffect, useEffect } from 'react';
+import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls, Text, Environment, ContactShadows, Stars, Float, Line, Billboard } from '@react-three/drei';
 import * as THREE from 'three';
 import { Agent, Position3D, SimulationIncident, Forklift, ClusterVisualization } from '../types';
@@ -535,11 +535,87 @@ interface VoxelWorldProps {
   clusters?: ClusterVisualization[];
   scannedPalletIds?: Set<string>;
   activePalletIds?: Set<string>;
+  cameraFocus?: CameraFocusCommand | null;
 }
+
+export interface CameraFocusCommand {
+  mode: 'overview' | 'drone' | 'zoom_in' | 'zoom_out';
+  droneId?: string;
+  triggerId?: number;
+}
+
+const CameraController: React.FC<{
+  cameraFocus?: CameraFocusCommand | null;
+  agents: Agent[];
+  tick: number;
+  center: THREE.Vector3;
+  camPos: THREE.Vector3;
+  gridSize: Position3D;
+}> = ({ cameraFocus, agents, tick, center, camPos, gridSize }) => {
+  const { camera } = useThree();
+  const controlsRef = useRef<any>(null);
+  const lastTriggerRef = useRef<number | undefined>(undefined);
+
+  // Handle discrete zoom actions when triggerId changes
+  useEffect(() => {
+    if (!controlsRef.current || !cameraFocus) return;
+    if (cameraFocus.triggerId !== lastTriggerRef.current) {
+      lastTriggerRef.current = cameraFocus.triggerId;
+      const target = controlsRef.current.target as THREE.Vector3;
+      const dir = new THREE.Vector3().subVectors(target, camera.position);
+      if (cameraFocus.mode === 'zoom_in') {
+        camera.position.addScaledVector(dir, 0.35);
+        controlsRef.current.update();
+      } else if (cameraFocus.mode === 'zoom_out') {
+        camera.position.addScaledVector(dir, -0.35);
+        controlsRef.current.update();
+      }
+    }
+  }, [cameraFocus?.triggerId, cameraFocus?.mode]);
+
+  useFrame(() => {
+    if (!controlsRef.current) return;
+
+    if (cameraFocus?.mode === 'drone' && cameraFocus.droneId) {
+      const droneIdLower = cameraFocus.droneId.toLowerCase();
+      const targetAgent = agents.find(
+        (a) => a.id.toLowerCase() === droneIdLower || a.name.toLowerCase() === droneIdLower
+      );
+      if (targetAgent) {
+        const t = Math.min(tick, targetAgent.path.length - 1);
+        const pos = targetAgent.path[t] || targetAgent.start;
+        const droneVec = new THREE.Vector3(pos.x, pos.y, pos.z);
+
+        // Smoothly lerp orbit target to follow drone position
+        controlsRef.current.target.lerp(droneVec, 0.08);
+
+        // Cinematic close-up follow position: offset above and beside the drone
+        const desiredPos = new THREE.Vector3(pos.x + 3.2, pos.y + 2.5, pos.z + 3.2);
+        camera.position.lerp(desiredPos, 0.08);
+        controlsRef.current.update();
+      }
+    } else if (cameraFocus?.mode === 'overview') {
+      controlsRef.current.target.lerp(center, 0.06);
+      camera.position.lerp(camPos, 0.06);
+      controlsRef.current.update();
+    }
+  });
+
+  return (
+    <OrbitControls
+      ref={controlsRef}
+      makeDefault
+      target={center}
+      minPolarAngle={0}
+      maxPolarAngle={Math.PI / 1.8}
+      maxDistance={gridSize.x * 3}
+    />
+  );
+};
 
 const VoxelWorld: React.FC<VoxelWorldProps> = ({ 
     gridSize, obstacles, agents, incidents, tick, warehouse, chargeStations = [], batteryEnabled, forklifts = [], pallets = [], clusters = [],
-    scannedPalletIds = new Set(), activePalletIds = new Set()
+    scannedPalletIds = new Set(), activePalletIds = new Set(), cameraFocus = null
 }) => {
   const camPos = useMemo(() => new THREE.Vector3(gridSize.x * 1.5, gridSize.y * 1.2, gridSize.z * 1.5), [gridSize]);
   const center = useMemo(() => new THREE.Vector3((gridSize.x-1)/2, (gridSize.y-1)/2, (gridSize.z-1)/2), [gridSize]);
@@ -563,12 +639,13 @@ const VoxelWorld: React.FC<VoxelWorldProps> = ({
         <pointLight position={[gridSize.x, gridSize.y * 2, gridSize.z]} intensity={1} castShadow />
         <Environment preset="city" />
 
-        <OrbitControls 
-           makeDefault 
-           target={center}
-           minPolarAngle={0}
-           maxPolarAngle={Math.PI / 1.8}
-           maxDistance={gridSize.x * 3}
+        <CameraController
+          cameraFocus={cameraFocus}
+          agents={agents}
+          tick={tick}
+          center={center}
+          camPos={camPos}
+          gridSize={gridSize}
         />
 
         <GridBase size={gridSize} />

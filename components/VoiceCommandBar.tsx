@@ -5,35 +5,48 @@ import {
   Trash2,
   Languages,
   Radio,
-  Sparkles,
   AlertCircle,
   CornerDownLeft,
   Cpu,
   Globe,
-  Loader2
+  Loader2,
+  Bot,
+  Settings,
+  X,
+  Wrench,
+  CheckCircle2
 } from 'lucide-react';
 import { useSpeechRecognition, SpeechProviderType } from '../hooks/useSpeechRecognition';
+import { AssistantProcessResult } from '../services/slm/OperatorAssistant';
 
 export interface VoiceCommandBarProps {
-  onSendCommand?: (command: string) => void;
-  defaultLanguage?: 'en-US' | 'pt-BR';
+  onSendCommand?: (command: string) => Promise<AssistantProcessResult | void> | void;
+  defaultLanguage?: 'en-US';
   defaultProvider?: SpeechProviderType;
+  lmStudioUrl?: string;
+  onUpdateLMStudioUrl?: (url: string) => void;
+  isLMStudioConnected?: boolean;
 }
 
 /**
- * Voice & Text Operator Command Panel
+ * Operator Voice & Text Command Bar with SLM Toolset integration.
  * Placed in the bottom-center of the screen.
- * Follows Single Responsibility Principle (SRP) by delegating speech lifecycle to useSpeechRecognition.
  */
 export const VoiceCommandBar: React.FC<VoiceCommandBarProps> = ({
   onSendCommand,
   defaultLanguage = 'en-US',
-  defaultProvider = 'whisper-local'
+  defaultProvider = 'whisper-local',
+  lmStudioUrl = 'http://localhost:1234/v1',
+  onUpdateLMStudioUrl,
+  isLMStudioConnected = false
 }) => {
   const [inputText, setInputText] = useState('');
   const [lastCommands, setLastCommands] = useState<string[]>([]);
   const [showHistory, setShowHistory] = useState(false);
-  const [feedbackNotice, setFeedbackNotice] = useState<string | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
+  const [urlInput, setUrlInput] = useState(lmStudioUrl);
+  const [isProcessingCommand, setIsProcessingCommand] = useState(false);
+  const [assistantReply, setAssistantReply] = useState<AssistantProcessResult | null>(null);
 
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -42,8 +55,7 @@ export const VoiceCommandBar: React.FC<VoiceCommandBarProps> = ({
     setProvider,
     isSupported,
     isListening,
-    isProcessing,
-    recognizerState,
+    isProcessing: isAudioProcessing,
     transcript,
     interimTranscript,
     errorMessage,
@@ -57,7 +69,7 @@ export const VoiceCommandBar: React.FC<VoiceCommandBarProps> = ({
     initialLanguage: defaultLanguage
   });
 
-  // Whenever speech recognition yields transcript, sync it to the editable input field
+  // Whenever speech recognition yields transcript, sync it to the input field
   useEffect(() => {
     if (transcript) {
       setInputText(transcript);
@@ -67,60 +79,104 @@ export const VoiceCommandBar: React.FC<VoiceCommandBarProps> = ({
   const handleClear = () => {
     setInputText('');
     clearTranscript();
-    setFeedbackNotice(null);
     inputRef.current?.focus();
-  };
-
-  const handleLanguageToggle = () => {
-    const nextLang = language === 'en-US' ? 'pt-BR' : 'en-US';
-    setLanguage(nextLang);
-    setFeedbackNotice(`Language set to ${nextLang === 'en-US' ? 'English (US)' : 'Português (BR)'}`);
-    setTimeout(() => setFeedbackNotice(null), 2500);
   };
 
   const handleProviderToggle = () => {
     const nextProv: SpeechProviderType = providerType === 'whisper-local' ? 'web-speech' : 'whisper-local';
     setProvider(nextProv);
-    setFeedbackNotice(`Engine switched to: ${nextProv === 'whisper-local' ? 'Local Whisper (On-Device AI)' : 'Web Speech API'}`);
-    setTimeout(() => setFeedbackNotice(null), 3000);
   };
 
-  const handleSubmit = (e?: React.FormEvent) => {
+  const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     const commandToSend = (inputText + (interimTranscript ? ` ${interimTranscript}` : '')).trim();
-    if (!commandToSend) return;
-
-    console.log('[NexTArc Voice/Text Operator Input]:', commandToSend);
+    if (!commandToSend || isProcessingCommand) return;
 
     // Save to command history
     setLastCommands((prev) => [commandToSend, ...prev.slice(0, 9)]);
 
-    if (onSendCommand) {
-      onSendCommand(commandToSend);
-    }
-
-    setFeedbackNotice(`Command captured: "${commandToSend}"`);
     setInputText('');
     clearTranscript();
+    setIsProcessingCommand(true);
 
-    setTimeout(() => {
-      setFeedbackNotice(null);
-    }, 4000);
+    try {
+      if (onSendCommand) {
+        const result = await onSendCommand(commandToSend);
+        if (result && typeof result === 'object' && 'text' in result) {
+          setAssistantReply(result);
+        }
+      }
+    } catch (err: any) {
+      console.error('Error executing assistant command:', err);
+    } finally {
+      setIsProcessingCommand(false);
+    }
+  };
+
+  const handleSaveSettings = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (onUpdateLMStudioUrl) {
+      onUpdateLMStudioUrl(urlInput.trim());
+    }
+    setShowSettings(false);
   };
 
   const displayedText = inputText + (interimTranscript ? (inputText ? ` ${interimTranscript}` : interimTranscript) : '');
 
   return (
     <div className="absolute bottom-5 left-1/2 -translate-x-1/2 z-30 w-full max-w-2xl px-4 pointer-events-auto">
-      {/* Floating Glassmorphic Container */}
       <div className="bg-slate-900/95 backdrop-blur-xl border border-slate-700/80 rounded-2xl p-3 shadow-2xl flex flex-col gap-2 transition-all duration-300">
         
+        {/* Assistant Response Bubble (When SLM responds) */}
+        {assistantReply && (
+          <div className="p-3 rounded-xl bg-slate-950/80 border border-cyan-500/30 text-xs flex flex-col gap-1.5 animate-fadeIn">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5 font-bold text-cyan-400">
+                <Bot size={15} />
+                <span>NexTArc Operator AI (SLM)</span>
+                {assistantReply.usedLocalFallback && (
+                  <span className="text-[10px] font-normal px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                    Rule Engine
+                  </span>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setAssistantReply(null)}
+                className="text-slate-400 hover:text-slate-200"
+              >
+                <X size={14} />
+              </button>
+            </div>
+
+            {/* Tools Executed Badges */}
+            {assistantReply.toolsExecuted && assistantReply.toolsExecuted.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 my-1">
+                {assistantReply.toolsExecuted.map((t, idx) => (
+                  <span
+                    key={idx}
+                    className="flex items-center gap-1 px-2 py-0.5 rounded bg-blue-950/60 border border-blue-700/50 text-[10px] font-mono text-blue-300"
+                  >
+                    <Wrench size={10} className="text-blue-400" />
+                    <span>{t.name}()</span>
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {/* Response Text */}
+            <p className="text-slate-200 leading-relaxed whitespace-pre-line font-medium">
+              {assistantReply.text}
+            </p>
+          </div>
+        )}
+
         {/* Top Meta Bar */}
         <div className="flex items-center justify-between px-1 text-xs">
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-1.5 font-semibold text-slate-300">
               <Radio size={14} className={isListening ? 'text-red-400 animate-pulse' : 'text-slate-400'} />
-              <span>Operator Voice & Command Bar</span>
+              <span>Voice & SLM Toolset Bar</span>
             </div>
 
             {/* Provider Pill */}
@@ -137,26 +193,31 @@ export const VoiceCommandBar: React.FC<VoiceCommandBarProps> = ({
               {providerType === 'whisper-local' ? (
                 <>
                   <Cpu size={11} className="text-indigo-400" />
-                  <span>Local Whisper (AI)</span>
+                  <span>Local Whisper</span>
                 </>
               ) : (
                 <>
                   <Globe size={11} className="text-emerald-400" />
-                  <span>Web Speech API</span>
+                  <span>Web Speech</span>
                 </>
               )}
             </button>
 
-            {/* Recording / Processing State Badge */}
+            {/* Recording / Processing Status */}
             {isListening ? (
               <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-red-500/20 text-red-300 border border-red-500/30 animate-pulse">
                 <span className="w-1.5 h-1.5 rounded-full bg-red-400" />
                 Listening...
               </span>
-            ) : isProcessing ? (
+            ) : isAudioProcessing ? (
               <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-500/20 text-amber-300 border border-amber-500/30">
                 <Loader2 size={10} className="animate-spin text-amber-400" />
-                Processing...
+                Whisper AI...
+              </span>
+            ) : isProcessingCommand ? (
+              <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                <Loader2 size={10} className="animate-spin text-cyan-400" />
+                SLM Thinking...
               </span>
             ) : (
               <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-800 text-slate-400 border border-slate-700">
@@ -167,16 +228,30 @@ export const VoiceCommandBar: React.FC<VoiceCommandBarProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
-            {/* Language Switcher */}
+            {/* LM Studio Connection Indicator */}
             <button
               type="button"
-              onClick={handleLanguageToggle}
+              onClick={() => setShowSettings(!showSettings)}
               className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700/60 transition-colors text-[11px]"
-              title="Toggle Recognition Language"
+              title="Configure LM Studio local endpoint"
+            >
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  isLMStudioConnected ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'
+                }`}
+              />
+              <span className="font-mono text-[10px]">LM Studio</span>
+              <Settings size={11} className="text-slate-400 ml-0.5" />
+            </button>
+
+            {/* Language Badge */}
+            <div
+              className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-800 text-slate-300 border border-slate-700/60 text-[11px]"
+              title="Speech & SLM Language: English"
             >
               <Languages size={12} className="text-cyan-400" />
-              <span>{language === 'en-US' ? 'EN (US)' : 'PT (BR)'}</span>
-            </button>
+              <span>EN</span>
+            </div>
 
             {/* History Feed Toggle */}
             {lastCommands.length > 0 && (
@@ -191,24 +266,47 @@ export const VoiceCommandBar: React.FC<VoiceCommandBarProps> = ({
           </div>
         </div>
 
+        {/* LM Studio Endpoint Settings Drawer */}
+        {showSettings && (
+          <form
+            onSubmit={handleSaveSettings}
+            className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 flex items-center gap-2 text-xs"
+          >
+            <span className="text-slate-400 font-medium shrink-0">LM Studio URL:</span>
+            <input
+              type="text"
+              value={urlInput}
+              onChange={(e) => setUrlInput(e.target.value)}
+              placeholder="http://localhost:1234/v1"
+              className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-slate-200 font-mono text-[11px] focus:outline-none focus:border-cyan-500"
+            />
+            <button
+              type="submit"
+              className="px-2.5 py-1 bg-cyan-600 hover:bg-cyan-500 text-white font-medium rounded-lg text-[11px]"
+            >
+              Save
+            </button>
+          </form>
+        )}
+
         {/* Input & Action Form */}
         <form onSubmit={handleSubmit} className="flex items-center gap-2">
           {/* Microphone Action Button */}
           <button
             type="button"
             onClick={toggleListening}
-            disabled={!isSupported || isProcessing}
+            disabled={!isSupported || isAudioProcessing || isProcessingCommand}
             className={`relative flex items-center justify-center w-11 h-11 rounded-xl font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 ${
               isListening
                 ? 'bg-red-600 hover:bg-red-500 text-white shadow-lg shadow-red-500/30 scale-105'
-                : isProcessing
+                : isAudioProcessing || isProcessingCommand
                 ? 'bg-amber-600 text-white cursor-wait opacity-80'
                 : 'bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white shadow-md'
             } ${!isSupported ? 'opacity-40 cursor-not-allowed' : ''}`}
             title={
               isListening
-                ? 'Click to Stop Recording & Transcribe'
-                : isProcessing
+                ? 'Click to Stop Recording'
+                : isAudioProcessing
                 ? 'Transcribing audio...'
                 : 'Click to Speak (Microphone)'
             }
@@ -218,34 +316,34 @@ export const VoiceCommandBar: React.FC<VoiceCommandBarProps> = ({
                 <span className="absolute inset-0 rounded-xl bg-red-500 animate-ping opacity-25" />
                 <MicOff size={20} className="relative z-10" />
               </>
-            ) : isProcessing ? (
+            ) : isAudioProcessing || isProcessingCommand ? (
               <Loader2 size={20} className="animate-spin relative z-10" />
             ) : (
               <Mic size={20} className="relative z-10" />
             )}
           </button>
 
-          {/* Real-time Transcription & Input Field */}
+          {/* Interactive Text Field */}
           <div className="relative flex-1">
             <input
               ref={inputRef}
               type="text"
               value={displayedText}
-              onChange={(e) => {
-                setInputText(e.target.value);
-              }}
+              onChange={(e) => setInputText(e.target.value)}
               placeholder={
                 isListening
                   ? 'Listening to speech... Click mic when done to transcribe.'
-                  : isProcessing
+                  : isAudioProcessing
                   ? 'Local Whisper AI is transcribing audio...'
-                  : 'Speak into mic or type operator command...'
+                  : isProcessingCommand
+                  ? 'SLM is interpreting command & invoking simulation tools...'
+                  : 'Ask about tasks, drones, or give command (e.g. "how many tasks remain", "pause simulation")...'
               }
               className={`w-full bg-slate-950/80 border rounded-xl py-2.5 pl-3.5 pr-9 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 transition-all ${
                 isListening
                   ? 'border-red-500/60 focus:ring-red-500/30'
-                  : isProcessing
-                  ? 'border-amber-500/60 focus:ring-amber-500/30'
+                  : isAudioProcessing || isProcessingCommand
+                  ? 'border-cyan-500/60 focus:ring-cyan-500/30'
                   : 'border-slate-700/80 focus:ring-cyan-500/40 focus:border-cyan-500/60'
               }`}
             />
@@ -266,11 +364,11 @@ export const VoiceCommandBar: React.FC<VoiceCommandBarProps> = ({
           {/* Submit Button */}
           <button
             type="submit"
-            disabled={!displayedText.trim() || isProcessing}
+            disabled={!displayedText.trim() || isAudioProcessing || isProcessingCommand}
             className="flex items-center justify-center gap-1.5 px-4 h-11 bg-slate-800 hover:bg-slate-700 disabled:opacity-30 disabled:hover:bg-slate-800 text-cyan-400 hover:text-cyan-300 font-semibold rounded-xl border border-slate-700/70 transition-all text-xs focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
-            title="Submit Command (Enter)"
+            title="Send to SLM (Enter)"
           >
-            <span>Submit</span>
+            {isProcessingCommand ? <Loader2 size={14} className="animate-spin" /> : <span>Ask SLM</span>}
             <CornerDownLeft size={14} />
           </button>
         </form>
@@ -283,27 +381,11 @@ export const VoiceCommandBar: React.FC<VoiceCommandBarProps> = ({
           </div>
         )}
 
-        {/* Feedback / Transcription Notice */}
-        {feedbackNotice && (
-          <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-cyan-950/40 border border-cyan-800/40 text-[11px] text-cyan-300">
-            <Sparkles size={12} className="text-cyan-400 shrink-0" />
-            <span className="truncate">{feedbackNotice}</span>
-          </div>
-        )}
-
         {/* Error Notice */}
         {errorMessage && (
           <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-red-950/40 border border-red-800/40 text-[11px] text-red-300">
             <AlertCircle size={12} className="text-red-400 shrink-0" />
             <span className="truncate">{errorMessage}</span>
-          </div>
-        )}
-
-        {/* Browser Support Warning */}
-        {!isSupported && (
-          <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-amber-950/40 border border-amber-800/40 text-[11px] text-amber-300">
-            <AlertCircle size={12} className="text-amber-400 shrink-0" />
-            <span>Local audio / Web Worker is unavailable in this environment. You can still type commands manually in the input above.</span>
           </div>
         )}
 
