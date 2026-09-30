@@ -9,6 +9,13 @@ const TIMEOUT_MS = PATHFINDER_TIMEOUT_MS;
 export const MAX_LEG_RETRIES = 5;
 /** Ticks a drone hovers in place after a failed plan before the next attempt. */
 export const RETRY_WAIT_TICKS = 3;
+/** Packs a grid cell into a number (valid for grid sides <= 64). */
+export const cellKey = (p: Position3D): number => p.x + p.y * 64 + p.z * 4096;
+/** Packs a grid cell and a time step into a number, as used by the reservation tables. */
+export const spaceTimeKey = (p: Position3D, t: number): number => cellKey(p) + t * 262144;
+
+/** Ticks a drone's goal cell stays reserved after arrival, so later plans avoid the parked drone. */
+export const PARKING_TAIL_TICKS = 500;
 
 const DIRECTIONS = [ // these are the 6 directions + wait
   { x: 1, y: 0, z: 0 }, { x: -1, y: 0, z: 0 }, // x-axis
@@ -83,9 +90,31 @@ export class MinHeap<T> {
 }
 
 /**
+ * Read-only view of space-time occupancy. The A* search depends on this abstraction rather than
+ * on the concrete table, so planners can layer extra constraints (e.g. CBS) over shared reservations.
+ */
+export interface ReservationView {
+  isVertexReserved(key: number, requesterId?: string): boolean;
+  isEdgeConflict(fromPos: Position3D, toPos: Position3D, time: number, requesterId?: string): boolean;
+  /** Optional: whether `requesterId` may stay parked at `pos` from `arrivalTime` onward. */
+  canHoldGoal?(pos: Position3D, arrivalTime: number, requesterId?: string): boolean;
+}
+
+/** Anything the search can query: a reservation view or a legacy set of vertex keys. */
+export type ReservationSource = ReservationView | Set<number>;
+
+/** Where a drone starts its next leg and what it may spend on it. */
+export interface LegContext {
+  target: Position3D;
+  startPos: Position3D;
+  startTime: number;
+  availableEnergy: number | undefined;
+}
+
+/**
  * 4D Space-Time Reservation Table with vertex ownership and edge conflict prevention.
  */
-export class SpaceTimeReservations {
+export class SpaceTimeReservations implements ReservationView {
   private vertexOwners = new Map<number, string>();
   private edgeOwners = new Map<string, string>();
 
@@ -202,7 +231,7 @@ export abstract class PathFindingStrategy {
     pos: Position3D,
     world: World,
     maxAltitude?: number,
-    reserved?: SpaceTimeReservations | Set<number>,
+    reserved?: ReservationSource,
     time?: number,
     requesterId?: string
   ): Position3D {
@@ -283,13 +312,60 @@ export abstract class PathFindingStrategy {
     goal: Position3D,
     world: World,
     maxAltitude: number | undefined,
-    reserved: SpaceTimeReservations | Set<number>,
+    reserved: ReservationSource,
     startTime: number,
     maxSearchDepth: number | undefined,
     requesterId?: string
   ): Position3D {
     const horizon = startTime + (maxSearchDepth ?? world.size * 4);
     return this.nearestFreeNeighbor(goal, world, maxAltitude, reserved, horizon, requesterId);
+  }
+
+  /** Resolves where a drone starts its next leg, or null if it has nothing to plan. */
+  protected getLegContext(drone: Drone, world: World, batteryEnabled: boolean): LegContext | null {
+    const target = drone.mission.getNextTarget();
+    if (!target || drone.status === 'STRANDED') return null;
+
+    const startPos = drone.path[drone.path.length - 1] || drone.start;
+    const startTime = drone.path.length > 0 ? drone.path.length - 1 : 0;
+    const availableEnergy = batteryEnabled
+      ? drone.calculateStateAt(startTime, world.chargeStations, batteryEnabled).battery
+      : undefined;
+    return { target, startPos, startTime, availableEnergy };
+  }
+
+  /**
+   * Appends a planned leg to the drone and publishes it to the shared reservations: the trajectory,
+   * its directed edges, and a parking tail at the goal so later planners avoid the resting drone.
+   */
+  protected commitLeg(
+    drone: Drone,
+    path: Position3D[],
+    startTime: number,
+    reserved: SpaceTimeReservations | Set<number>
+  ): void {
+    drone.appendPath(path, drone.mission.state === 'OUTBOUND' || drone.mission.state === 'EXECUTING_TOUR');
+    this.markLegPlanned(drone);
+
+    const lastPos = path[path.length - 1];
+    const arrivalTime = startTime + path.length - 1;
+
+    if (reserved instanceof SpaceTimeReservations) {
+      // Drop the stale parking tail from the previous leg before publishing the new trajectory
+      reserved.clearOwnerFromTime(drone.id, startTime);
+      path.forEach((p, idx) => {
+        const t = startTime + idx;
+        reserved.addVertex(this.key(p, t), drone.id);
+        if (idx > 0) reserved.addEdge(path[idx - 1], p, t - 1, drone.id);
+      });
+      const tailEnd = Math.min(arrivalTime + PARKING_TAIL_TICKS, this.maxTimeSteps);
+      for (let t = arrivalTime + 1; t <= tailEnd; t++) {
+        reserved.addVertex(this.key(lastPos, t), drone.id);
+      }
+    } else {
+      path.forEach((p, idx) => reserved.add(this.key(p, startTime + idx)));
+      for (let w = 1; w < 50; w++) reserved.add(this.key(lastPos, arrivalTime + w));
+    }
   }
 
   /** Resets a drone's retry bookkeeping after a leg was planned successfully. */
@@ -319,7 +395,7 @@ export abstract class PathFindingStrategy {
     if (outOfTime || (!hasTask && drone.legFailures > MAX_LEG_RETRIES)) {
       drone.status = 'STRANDED';
       if (reserved instanceof SpaceTimeReservations) {
-        const tailEnd = Math.min(startTime + 500, this.maxTimeSteps);
+        const tailEnd = Math.min(startTime + PARKING_TAIL_TICKS, this.maxTimeSteps);
         for (let t = startTime; t <= tailEnd; t++) {
           const k = this.key(startPos, t);
           if (!reserved.isVertexReserved(k, drone.id)) reserved.addVertex(k, drone.id);
@@ -344,31 +420,38 @@ export abstract class PathFindingStrategy {
   }
 
   protected key(p: Position3D, t: number): number {
-    return (p.x) + (p.y * 64) + (p.z * 4096) + (t * 262144);
+    return spaceTimeKey(p, t);
   }
 
   protected isCellReserved(
-    reserved: SpaceTimeReservations | Set<number>,
+    reserved: ReservationSource,
     key: number,
     requesterId?: string
   ): boolean {
-    if (reserved instanceof SpaceTimeReservations) {
-      return reserved.isVertexReserved(key, requesterId);
-    }
-    return reserved.has(key);
+    if (reserved instanceof Set) return reserved.has(key);
+    return reserved.isVertexReserved(key, requesterId);
   }
 
   protected isEdgeConflict(
-    reserved: SpaceTimeReservations | Set<number>,
+    reserved: ReservationSource,
     fromPos: Position3D,
     toPos: Position3D,
     time: number,
     requesterId?: string
   ): boolean {
-    if (reserved instanceof SpaceTimeReservations) {
-      return reserved.isEdgeConflict(fromPos, toPos, time, requesterId);
-    }
-    return false;
+    if (reserved instanceof Set) return false;
+    return reserved.isEdgeConflict(fromPos, toPos, time, requesterId);
+  }
+
+  /** A goal only counts as reached if the drone may stay parked there (when the view can tell). */
+  protected canHoldGoal(
+    reserved: ReservationSource,
+    pos: Position3D,
+    arrivalTime: number,
+    requesterId?: string
+  ): boolean {
+    if (reserved instanceof Set || !reserved.canHoldGoal) return true;
+    return reserved.canHoldGoal(pos, arrivalTime, requesterId);
   }
 
   protected findPath(
@@ -376,7 +459,7 @@ export abstract class PathFindingStrategy {
     goal: Position3D,
     startTime: number,
     world: World,
-    reserved: SpaceTimeReservations | Set<number>,
+    reserved: ReservationSource,
     maxEnergy?: number,
     deadline?: number,
     maxAltitude?: number,
@@ -407,7 +490,8 @@ export abstract class PathFindingStrategy {
 
       const current = openHeap.pop()!;
 
-      if (current.x === effectiveGoal.x && current.y === effectiveGoal.y && current.z === effectiveGoal.z) {
+      if (current.x === effectiveGoal.x && current.y === effectiveGoal.y && current.z === effectiveGoal.z &&
+          this.canHoldGoal(reserved, current, current.time, requesterId)) {
         return { path: this.reconstructPath(current), finalEnergy: current.energy };
       }
 
@@ -480,14 +564,9 @@ export class NaivePlanner extends PathFindingStrategy {
       : new SpaceTimeReservations();
 
     for (const drone of swarm.drones) {
-      const target = drone.mission.getNextTarget();
-      if (!target || drone.status === 'STRANDED') continue;
-
-      const startPos = drone.path[drone.path.length - 1] || drone.start;
-      const startTime = drone.path.length > 0 ? drone.path.length - 1 : 0;
-      const availableEnergy = batteryEnabled 
-        ? drone.calculateStateAt(startTime, world.chargeStations, batteryEnabled).battery 
-        : undefined;
+      const leg = this.getLegContext(drone, world, batteryEnabled);
+      if (!leg) continue;
+      const { target, startPos, startTime, availableEnergy } = leg;
 
       const result = this.findPath(
         startPos,
@@ -529,14 +608,9 @@ export class CooperativePlanner extends PathFindingStrategy {
     const maxLegDepth = world.size * 4;
 
     for (const drone of swarm.drones) {
-      const target = drone.mission.getNextTarget();
-      if (!target || drone.status === 'STRANDED') continue;
-
-      const startPos = drone.path[drone.path.length - 1] || drone.start;
-      const startTime = drone.path.length > 0 ? drone.path.length - 1 : 0;
-      const availableEnergy = batteryEnabled 
-        ? drone.calculateStateAt(startTime, world.chargeStations, batteryEnabled).battery 
-        : undefined;
+      const leg = this.getLegContext(drone, world, batteryEnabled);
+      if (!leg) continue;
+      const { target, startPos, startTime, availableEnergy } = leg;
 
       const result = this.findPath(
         startPos,
@@ -552,39 +626,7 @@ export class CooperativePlanner extends PathFindingStrategy {
       );
 
       if (result) {
-        drone.appendPath(result.path, drone.mission.state === 'OUTBOUND' || drone.mission.state === 'EXECUTING_TOUR');
-        this.markLegPlanned(drone);
-
-        if (reservedSpaceTime instanceof SpaceTimeReservations) {
-          // Clear old idle tail reservations for this drone from startTime onwards
-          reservedSpaceTime.clearOwnerFromTime(drone.id, startTime);
-
-          // Reserve the newly planned trajectory and directed edges
-          result.path.forEach((p, idx) => {
-            const t = startTime + idx;
-            reservedSpaceTime.addVertex(this.key(p, t), drone.id);
-            if (idx > 0) {
-              reservedSpaceTime.addEdge(result.path[idx - 1], p, t - 1, drone.id);
-            }
-          });
-
-          // Reserve resting position for idle duration so other drones won't collide with it
-          const lastPos = result.path[result.path.length - 1];
-          const arrivalTime = startTime + result.path.length - 1;
-          const tailEnd = Math.min(arrivalTime + 500, this.maxTimeSteps);
-          for (let w = 1; arrivalTime + w <= tailEnd; w++) {
-            reservedSpaceTime.addVertex(this.key(lastPos, arrivalTime + w), drone.id);
-          }
-        } else {
-          result.path.forEach((p, idx) => {
-            reservedSpaceTime.add(this.key(p, startTime + idx));
-          });
-          const lastPos = result.path[result.path.length - 1];
-          const arrivalTime = startTime + result.path.length - 1;
-          for (let w = 1; w < 50; w++) {
-            reservedSpaceTime.add(this.key(lastPos, arrivalTime + w));
-          }
-        }
+        this.commitLeg(drone, result.path, startTime, reservedSpaceTime);
       } else {
         this.handleLegFailure(drone, startPos, startTime, reservedSpaceTime);
       }
@@ -602,7 +644,7 @@ export class EnergySaverPlanner extends PathFindingStrategy {
     goal: Position3D,
     startTime: number,
     world: World,
-    reserved: SpaceTimeReservations | Set<number>,
+    reserved: ReservationSource,
     maxEnergy: number | undefined,
     deadline: number,
     maxAltitude?: number,
@@ -633,7 +675,8 @@ export class EnergySaverPlanner extends PathFindingStrategy {
 
       const current = openHeap.pop()!;
 
-      if (current.x === effectiveGoal.x && current.y === effectiveGoal.y && current.z === effectiveGoal.z) {
+      if (current.x === effectiveGoal.x && current.y === effectiveGoal.y && current.z === effectiveGoal.z &&
+          this.canHoldGoal(reserved, current, current.time, requesterId)) {
         return { path: this.reconstructPath(current), finalEnergy: current.energy };
       }
 
@@ -693,14 +736,9 @@ export class EnergySaverPlanner extends PathFindingStrategy {
     const maxLegDepth = world.size * 4;
 
     for (const drone of swarm.drones) {
-      const target = drone.mission.getNextTarget();
-      if (!target || drone.status === 'STRANDED') continue;
-
-      const startPos = drone.path[drone.path.length - 1] || drone.start;
-      const startTime = drone.path.length > 0 ? drone.path.length - 1 : 0;
-      const availableEnergy = batteryEnabled 
-        ? drone.calculateStateAt(startTime, world.chargeStations, batteryEnabled).battery 
-        : undefined;
+      const leg = this.getLegContext(drone, world, batteryEnabled);
+      if (!leg) continue;
+      const { target, startPos, startTime, availableEnergy } = leg;
 
       const result = this.findPathEnergy(
         startPos,
@@ -716,36 +754,7 @@ export class EnergySaverPlanner extends PathFindingStrategy {
       );
 
       if (result) {
-        drone.appendPath(result.path, drone.mission.state === 'OUTBOUND' || drone.mission.state === 'EXECUTING_TOUR');
-        this.markLegPlanned(drone);
-
-        if (reservedSpaceTime instanceof SpaceTimeReservations) {
-          reservedSpaceTime.clearOwnerFromTime(drone.id, startTime);
-
-          result.path.forEach((p, idx) => {
-            const t = startTime + idx;
-            reservedSpaceTime.addVertex(this.key(p, t), drone.id);
-            if (idx > 0) {
-              reservedSpaceTime.addEdge(result.path[idx - 1], p, t - 1, drone.id);
-            }
-          });
-
-          const lastPos = result.path[result.path.length - 1];
-          const arrivalTime = startTime + result.path.length - 1;
-          const tailEnd = Math.min(arrivalTime + 500, this.maxTimeSteps);
-          for (let w = 1; arrivalTime + w <= tailEnd; w++) {
-            reservedSpaceTime.addVertex(this.key(lastPos, arrivalTime + w), drone.id);
-          }
-        } else {
-          result.path.forEach((p, idx) => {
-            reservedSpaceTime.add(this.key(p, startTime + idx));
-          });
-          const lastPos = result.path[result.path.length - 1];
-          const arrivalTime = startTime + result.path.length - 1;
-          for (let w = 1; w < 50; w++) {
-            reservedSpaceTime.add(this.key(lastPos, arrivalTime + w));
-          }
-        }
+        this.commitLeg(drone, result.path, startTime, reservedSpaceTime);
       } else {
         this.handleLegFailure(drone, startPos, startTime, reservedSpaceTime);
       }
@@ -762,13 +771,7 @@ export class CollisionAnalyzer {
     const incidents: SimulationIncident[] = [];
     const timeLocationMap = new Map<string, string[]>();
 
-    const isInsideBase = (pos: import('../types').Position3D) => {
-      if (!warehouse) return false;
-      const b = warehouse.getBounds();
-      return pos.x >= b.minX && pos.x <= b.maxX &&
-        pos.y === warehouse.position.y &&
-        pos.z >= b.minZ && pos.z <= b.maxZ;
-    };
+    const isInsideBase = (pos: import('../types').Position3D) => warehouse?.isOnDockFloor(pos) ?? false;
 
     const maxTicks = Math.max(...swarm.drones.map(d => d.path.length), 0) + 10;
 

@@ -7,6 +7,7 @@ import {
   SpaceTimeReservations,
   CollisionAnalyzer
 } from '../classes/PathPlanner';
+import { CBSPlanner, ConflictDetector, ConstraintTable } from '../classes/CBSPlanner';
 import { Forklift, Position3D } from '../types';
 
 let passed = 0;
@@ -56,7 +57,7 @@ export function runPathPlanningTests(): { passed: number; failed: number } {
   // ─────────────────────────────────────────────────────────────
   // 2. Multi-Agent Head-On Conflict Resolution (Cooperative MAPF)
   // ─────────────────────────────────────────────────────────────
-  console.log('\n--- 2. Cooperative MAPF (CBS) Multi-Agent Avoidance ---');
+  console.log('\n--- 2. Cooperative (Prioritized A*) Multi-Agent Avoidance ---');
 
   const world = new World(12);
   const swarm = new Swarm(0);
@@ -165,7 +166,87 @@ export function runPathPlanningTests(): { passed: number; failed: number } {
   const finalEcoPos = ecoDrone.path[ecoDrone.path.length - 1];
   assert(finalEcoPos.x === 5 && finalEcoPos.y === 1 && finalEcoPos.z === 1, 'Eco Drone reached target with optimal energy path');
 
+  runCBSTests(world);
+
   return { passed, failed };
+}
+
+function makeDrone(id: string, start: Position3D, goal: Position3D): Drone {
+  const drone = new Drone(id, id, '#a855f7');
+  drone.start = { ...start };
+  drone.goal = { ...goal };
+  drone.path = [{ ...start }];
+  drone.mission.assignNewMission(goal);
+  return drone;
+}
+
+function samePosition(a: Position3D, b: Position3D): boolean {
+  return a.x === b.x && a.y === b.y && a.z === b.z;
+}
+
+function runCBSTests(world: World) {
+  // ─────────────────────────────────────────────────────────────
+  // 5. Conflict-Based Search (CBS)
+  // ─────────────────────────────────────────────────────────────
+  console.log('\n--- 5. Conflict-Based Search (CBS) ---');
+
+  // 5a. Conflict detection and constraint indexing
+  const a = { drone: makeDrone('CA', { x: 0, y: 2, z: 0 }, { x: 2, y: 2, z: 0 }), leg: { target: { x: 2, y: 2, z: 0 }, startPos: { x: 0, y: 2, z: 0 }, startTime: 0, availableEnergy: undefined } };
+  const b = { drone: makeDrone('CB', { x: 2, y: 2, z: 0 }, { x: 0, y: 2, z: 0 }), leg: { target: { x: 0, y: 2, z: 0 }, startPos: { x: 2, y: 2, z: 0 }, startTime: 0, availableEnergy: undefined } };
+  const swapPlans = new Map([
+    ['CA', [{ x: 0, y: 2, z: 0 }, { x: 1, y: 2, z: 0 }, { x: 2, y: 2, z: 0 }]],
+    ['CB', [{ x: 2, y: 2, z: 0 }, { x: 1, y: 2, z: 0 }, { x: 0, y: 2, z: 0 }]]
+  ]);
+  const vertexConflict = ConflictDetector.findFirst([a, b], swapPlans);
+  assert(vertexConflict?.kind === 'vertex' && vertexConflict.time === 1, 'Detects vertex conflict at the shared middle cell');
+
+  const edgePlans = new Map([
+    ['CA', [{ x: 0, y: 2, z: 0 }, { x: 1, y: 2, z: 0 }]],
+    ['CB', [{ x: 1, y: 2, z: 0 }, { x: 0, y: 2, z: 0 }]]
+  ]);
+  const edgeConflict = ConflictDetector.findFirst([a, b], edgePlans);
+  assert(edgeConflict?.kind === 'edge' && edgeConflict.time === 0, 'Detects head-on edge swap conflict');
+
+  const table = new ConstraintTable(ConflictDetector.constraintsFor(vertexConflict!).filter(c => c.agentId === 'CA'));
+  assert(table.isConstrainedFrom({ x: 1, y: 2, z: 0 }, 1) && !table.isConstrainedFrom({ x: 1, y: 2, z: 0 }, 2),
+    'Constraint table blocks parking only up to the latest constrained tick');
+
+  // 5b. Head-on corridor swap resolved jointly
+  const swapSwarm = new Swarm(0);
+  const left = makeDrone('CBS_L', { x: 2, y: 2, z: 5 }, { x: 8, y: 2, z: 5 });
+  const right = makeDrone('CBS_R', { x: 8, y: 2, z: 5 }, { x: 2, y: 2, z: 5 });
+  swapSwarm.drones = [left, right];
+  new CBSPlanner(new CooperativePlanner()).planLeg(swapSwarm, world, 0, new SpaceTimeReservations(), 6, false);
+  assert(samePosition(left.path[left.path.length - 1], left.goal) && samePosition(right.path[right.path.length - 1], right.goal),
+    'CBS: both drones reach their goals in a head-on swap');
+  assert(CollisionAnalyzer.detect(swapSwarm, [], undefined).length === 0, 'CBS: zero collisions in a head-on swap');
+
+  // 5c. Goal parking: a drone that parks early must not block another drone's later pass.
+  // Prioritized A* plans the passer first and only checks the parker's goal on arrival.
+  const parkSwarm = new Swarm(0);
+  const passer = makeDrone('CBS_PASS', { x: 0, y: 2, z: 5 }, { x: 10, y: 2, z: 5 });
+  const parker = makeDrone('CBS_PARK', { x: 5, y: 2, z: 7 }, { x: 5, y: 2, z: 5 });
+  parkSwarm.drones = [passer, parker];
+  new CBSPlanner(new CooperativePlanner()).planLeg(parkSwarm, world, 0, new SpaceTimeReservations(), 6, false);
+  assert(samePosition(passer.path[passer.path.length - 1], passer.goal) && samePosition(parker.path[parker.path.length - 1], parker.goal),
+    'CBS: passer and parker both reach their goals');
+  assert(CollisionAnalyzer.detect(parkSwarm, [], undefined).length === 0, 'CBS: parked drone never collides with a later pass');
+
+  // 5d. Budget exhaustion delegates the whole leg to the injected fallback planner
+  class CountingPlanner extends CooperativePlanner {
+    public calls = 0;
+    planLeg(...args: Parameters<CooperativePlanner['planLeg']>) {
+      this.calls++;
+      super.planLeg(...args);
+    }
+  }
+  const fallback = new CountingPlanner();
+  const budgetSwarm = new Swarm(0);
+  const d1 = makeDrone('CBS_B1', { x: 2, y: 2, z: 5 }, { x: 8, y: 2, z: 5 });
+  const d2 = makeDrone('CBS_B2', { x: 8, y: 2, z: 5 }, { x: 2, y: 2, z: 5 });
+  budgetSwarm.drones = [d1, d2];
+  new CBSPlanner(fallback, { maxExpansions: 0 }).planLeg(budgetSwarm, world, 0, new SpaceTimeReservations(), 6, false);
+  assert(fallback.calls === 1 && d1.path.length > 1 && d2.path.length > 1, 'CBS: exhausted budget falls back to the injected planner');
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

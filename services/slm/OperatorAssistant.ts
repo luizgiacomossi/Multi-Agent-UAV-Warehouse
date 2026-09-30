@@ -55,7 +55,7 @@ export class OperatorAssistant {
   private buildSystemPrompt(): string {
     const agents = this.context.getAgents();
     const droneList = agents.map((a) => `${a.id}: "${a.name}"`).join(', ');
-    const algos = this.context.getAvailableAlgorithms ? this.context.getAvailableAlgorithms().join(', ') : 'Cooperative, Energy Saver, Independent';
+    const algos = this.context.getAvailableAlgorithms ? this.context.getAvailableAlgorithms().join(', ') : 'Naive, Cooperative, Energy Saver, CBS';
     const tick = this.context.getCurrentTick();
     const maxTicks = this.context.getMaxTicks ? this.context.getMaxTicks() : 0;
     const palletCount = this.context.getPallets().length;
@@ -265,9 +265,8 @@ When the operator specifies a drone (e.g. "Agent 1" or "D0"), map to its exact I
     if (q.includes('algorithm')) {
       let targetAlgo = 'Cooperative';
       if (q.includes('energy') || q.includes('saver')) targetAlgo = 'Energy Saver';
-      else if (q.includes('independent')) targetAlgo = 'Independent';
-      else if (q.includes('cbs')) targetAlgo = 'Enhanced CBS';
-      else if (q.includes('priority')) targetAlgo = 'Priority-Based';
+      else if (q.includes('naive') || q.includes('independent')) targetAlgo = 'Naive';
+      else if (q.includes('cbs') || q.includes('conflict')) targetAlgo = 'CBS';
 
       const res = await this.registry.executeTool('change_algorithm', { algorithm: targetAlgo });
       toolsExecuted.push({ name: 'change_algorithm', args: { algorithm: targetAlgo }, result: res });

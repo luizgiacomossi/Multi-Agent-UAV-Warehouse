@@ -16,6 +16,7 @@ import {
     MAX_LEG_RETRIES
 } from './PathPlanner';
 import { CostModel } from './CostModel';
+import { CBSPlanner } from './CBSPlanner';
 import { Task } from '../types';
 import { MAX_TIMESTEPS, GRID_SIZE, DEFAULT_AGENT_COUNT, MATH_CONSTANTS } from '../SimulationConfig';
 
@@ -47,6 +48,7 @@ export class SimulationManager {
             'Naive': new NaivePlanner(),
             'Cooperative': new CooperativePlanner(),
             'Energy Saver': new EnergySaverPlanner(),
+            'CBS': new CBSPlanner(new CooperativePlanner()),
         };
     }
 
@@ -288,7 +290,8 @@ export class SimulationManager {
         const dockFor = (index: number, drone: Drone): Position3D =>
             this.world.warehouse ? this.world.warehouse.getSpawnLocation(index) : { ...drone.start };
         this.swarm.drones.forEach((drone, index) => {
-            // drone.goal was set in initializeScenario to the pallet position
+            // Every run starts from the scenario's first targets (set in initializeScenario)
+            drone.restoreInitialAssignment();
             // sync MissionController with the correct pallet context and docking slot
             drone.setMissionConfig(drone.start, drone.goal, effectiveMissionCount, isRoundTrip, dockFor(index, drone));
             // Re-apply pallet metadata that initializeScenario set, since setMissionConfig resets mission

@@ -67,7 +67,8 @@ The repository currently implements the following stack.
 
 - `NaivePlanner`,
 - `CooperativePlanner`,
-- `EnergySaverPlanner`.
+- `EnergySaverPlanner`,
+- `CBSPlanner` (Conflict-Based Search, in [`classes/CBSPlanner.ts`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/classes/CBSPlanner.ts)).
 
 These planners search a time-expanded grid and append one mission leg at a time; see [`classes/PathPlanner.ts`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/classes/PathPlanner.ts).
 
