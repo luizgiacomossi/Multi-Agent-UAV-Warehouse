@@ -7,7 +7,7 @@ The benchmark in [`bench/`](../bench) compares the planning strategies (`Naive`,
 ```bash
 npm run bench                                   # "quick" preset (seconds)
 npm run bench -- --preset standard              # scales x swarm sizes x allocation modes (~20 s)
-npm run bench -- --preset full                  # standard + full-coverage missions (~2 min)
+npm run bench -- --preset full                  # standard + full-coverage missions (~3 min)
 npm run bench -- --algos Cooperative,CBS --grids 16,24 --drones 4,8 --alloc Cluster --runs 20 --seed 7
 npm run bench -- --help
 ```

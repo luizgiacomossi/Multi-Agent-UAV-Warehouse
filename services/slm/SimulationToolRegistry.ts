@@ -1,6 +1,8 @@
 import { Agent, Pallet, Position3D, SimulationIncident } from '../../types';
 import { OpenAITool } from './SLMService.types';
 import { MATH_CONSTANTS } from '../../SimulationConfig';
+import { Drone } from '../../classes/Drone';
+import { DroneActivity, activityAt, isFlying } from '../../classes/DroneActivity';
 
 export interface SimulationContext {
   getAgents: () => Agent[];
@@ -383,23 +385,17 @@ export class SimulationToolRegistry {
     let highestBatteryDrone: { name: string; battery: number } | null = null;
     const lowBatteryAlerts: string[] = [];
 
+    const stations = this.context.getChargeStations();
     agents.forEach((a) => {
-      // Calculate active battery at tick
-      let batt = a.battery;
-      if (a.path && a.path.length > 0) {
-        const step = Math.min(currentTick, a.path.length - 1);
-        const flySteps = Math.max(0, step);
-        batt = Math.max(0, a.maxBattery - flySteps * MATH_CONSTANTS.BETA_FLY);
-      }
-
+      const batt = this.batteryAt(a, currentTick);
       totalBattery += batt;
 
-      const normStatus = a.status ? a.status.toLowerCase() : 'idle';
-      if (normStatus in statusCounts) {
-        (statusCounts as any)[normStatus]++;
-      } else {
-        statusCounts.idle++;
-      }
+      // Status at the current tick (a.status is only the final planning outcome)
+      const activity = activityAt(a, currentTick, stations);
+      if (this.isLost(activity)) statusCounts.stranded++;
+      else if (activity.kind === 'charging') statusCounts.charging++;
+      else if (isFlying(activity)) statusCounts.flying++;
+      else statusCounts.idle++;
 
       if (!lowestBatteryDrone || batt < lowestBatteryDrone.battery) {
         lowestBatteryDrone = { name: a.name, battery: Math.round(batt) };
@@ -444,18 +440,30 @@ export class SimulationToolRegistry {
     const pos = (target.path && target.path.length > 0)
       ? target.path[Math.min(currentTick, target.path.length - 1)]
       : target.start;
+    const activity = activityAt(target, currentTick, this.context.getChargeStations());
 
     return {
       id: target.id,
       name: target.name,
-      status: target.status,
+      status: activity.kind,
       currentPosition: pos,
-      battery: Math.round(target.battery),
+      battery: Math.round(this.batteryAt(target, currentTick)),
       maxBattery: target.maxBattery,
       payloadCapabilities: target.payload,
-      currentPalletId: target.currentPalletId || null,
-      scannedCount: (target.scanLog || []).length
+      currentPalletId: activity.palletId ?? null,
+      scannedCount: (target.scanLog || []).filter(entry => entry.tick <= currentTick).length
     };
+  }
+
+  /** Battery at `tick`, including hover drain and recharging (falls back to the stored value). */
+  private batteryAt(agent: Agent, tick: number): number {
+    return agent instanceof Drone
+      ? agent.getSnapshotAt(tick, this.context.getChargeStations()).battery
+      : agent.battery;
+  }
+
+  private isLost(activity: DroneActivity): boolean {
+    return activity.kind === 'crashed' || activity.kind === 'depleted' || activity.kind === 'blocked';
   }
 
   private getSafetyIncidents() {

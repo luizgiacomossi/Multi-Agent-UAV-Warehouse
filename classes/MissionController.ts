@@ -110,7 +110,8 @@ export class MissionController {
                         this.state = 'IDLE';
                         return true;
                     } else {
-                        this.state = 'COMPLETED';
+                        // Never finish airborne: fly back to the dock after the last mission
+                        this.state = 'RETURNING';
                         return false;
                     }
                 }
@@ -134,7 +135,8 @@ export class MissionController {
                         this.state = 'IDLE';
                         return true;
                     } else {
-                        this.state = 'COMPLETED';
+                        // Never finish airborne: fly back to the dock after the last mission
+                        this.state = 'RETURNING';
                         return false;
                     }
                 }
@@ -167,15 +169,17 @@ export class MissionController {
      * goal briefly (its next leg is planned from the arrival tick). Otherwise it may park there.
      */
     public continuesAfterCurrentLeg(): boolean {
-        const tourLength = this.currentCluster?.tourSequence.length ?? 0;
-        if (this.state === 'OUTBOUND') {
-            return tourLength > 1 || this.mustReturnToBase;
-        }
-        if (this.state === 'EXECUTING_TOUR') {
-            // This leg targets tourSequence[clusterTaskIndex + 1]; more stops follow if one remains after it
-            return this.clusterTaskIndex + 2 < tourLength || this.mustReturnToBase;
-        }
-        return false; // RETURNING ends at the dock, where the drone may idle
+        // A pallet stop is always followed by another leg: the next task or the flight home.
+        // Only the dock is a place where a drone may stay.
+        return this.state === 'OUTBOUND' || this.state === 'EXECUTING_TOUR';
+    }
+
+    /**
+     * Sends an idle drone that is away from its dock back home (e.g. no task is left for it).
+     * On arrival it becomes IDLE again, or COMPLETED if its missions are done.
+     */
+    public returnToDock() {
+        if (this.state === 'IDLE') this.state = 'RETURNING';
     }
 
     /**

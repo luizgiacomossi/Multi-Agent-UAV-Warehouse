@@ -5,6 +5,8 @@ import { runScenario } from '../bench/runScenario';
 import { MissionController } from '../classes/MissionController';
 import { TaskCluster } from '../classes/TaskCluster';
 import { Task } from '../types';
+import { Drone } from '../classes/Drone';
+import { describeDroneActivity } from '../classes/DroneActivity';
 
 let passed = 0;
 let failed = 0;
@@ -67,7 +69,14 @@ export async function runBenchmarkTests(): Promise<{ passed: number; failed: num
   const oneWay = new MissionController({ x: 0, y: 0, z: 0 });
   oneWay.configure(3, false);
   oneWay.assignNewMission({ x: 5, y: 2, z: 2 });
-  assert(!oneWay.continuesAfterCurrentLeg(), 'One way: drone may park at the pallet');
+  assert(oneWay.continuesAfterCurrentLeg(), 'One way: drone still leaves the pallet (next task or home)');
+  oneWay.completeLeg(); oneWay.completeLeg(); // 1st scan -> IDLE, re-dispatch below
+  oneWay.missionsCompleted = oneWay.maxMissions - 1;
+  oneWay.assignNewMission({ x: 6, y: 2, z: 2 });
+  oneWay.completeLeg();
+  assert(oneWay.state === 'RETURNING', 'One way: drone flies home after its last mission instead of hovering');
+  oneWay.completeLeg();
+  assert(oneWay.state === 'COMPLETED', 'One way: mission completes on arrival at the dock');
 
   const tour = new MissionController({ x: 0, y: 0, z: 0 });
   tour.configure(1, false);
@@ -77,12 +86,38 @@ export async function runBenchmarkTests(): Promise<{ passed: number; failed: num
     stops.push(tour.continuesAfterCurrentLeg());
     tour.completeLeg();
   }
-  assert(stops.length === 3 && stops[0] && stops[1] && !stops[2], 'Cluster tour: only the last stop may be a parking goal', JSON.stringify(stops));
+  assert(stops.length === 4 && stops.slice(0, 3).every(Boolean) && !stops[3],
+    'Cluster tour: every pallet stop is transit; only the final flight home ends at a parking goal', JSON.stringify(stops));
 
   // ─────────────────────────────────────────────────────────────
-  // 4. End-to-end benchmark reproducibility
+  // 4. Per-tick drone activity (scan manifest labels)
   // ─────────────────────────────────────────────────────────────
-  console.log('\n--- 4. Benchmark Runner ---');
+  console.log('\n--- 4. Drone Activity Labels ---');
+
+  // Dock (0,2,0) -> pallet stop (3,2,0) at t=3 -> hover -> home at t=7 -> charge tick
+  const dock = { x: 0, y: 2, z: 0 };
+  const drone = new Drone('ACT', 'Activity', '#fff', 100);
+  drone.path = [0, 1, 2, 3, 3, 2, 1, 0, 0].map(x => ({ x, y: 2, z: 0 }));
+  drone.assignedTasksLog = [{ startTick: 0, endTick: 3, palletId: 'PLT-ABC123', position: { x: 3, y: 2, z: 0 }, type: 'rfid', priority: 0.5 }];
+  drone.scanLog = [{ tick: 3, palletId: 'PLT-ABC123' }];
+  const at = (tick: number, recharging = false) =>
+    describeDroneActivity(drone, tick, dock, { isDeadBattery: false, isRecharging: recharging });
+
+  assert(at(1).kind === 'enRoute' && at(1).palletId === 'PLT-ABC123' && at(1).scanNumber === 1, 'Mid-flight to a pallet shows en route, not idle');
+  assert(at(3).kind === 'scanning' && at(3).scanType === 'rfid', 'Arrival tick shows scanning');
+  assert(at(5).kind === 'returning', 'Flying home after the task shows returning');
+  assert(at(4).kind === 'returning', 'A hover on the way home still counts as returning');
+  assert(at(8).kind === 'complete', 'Landed after the last tick shows complete');
+  assert(at(7, true).kind === 'charging', 'Waiting on the dock while recharging shows charging');
+
+  drone.destructionTime = 2;
+  assert(at(2).kind === 'crashed' && at(1).kind === 'enRoute', 'Crash is shown only from the collision tick');
+  drone.destructionTime = undefined;
+
+  // ─────────────────────────────────────────────────────────────
+  // 5. End-to-end benchmark reproducibility
+  // ─────────────────────────────────────────────────────────────
+  console.log('\n--- 5. Benchmark Runner ---');
 
   const plan = { ...PRESETS.quick, droneCounts: [3], repetitions: 1, algorithms: ['Cooperative', 'CBS'] };
   const [scenario] = expandScenarios(plan);

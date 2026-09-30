@@ -71,6 +71,8 @@ export class Drone implements Agent {
         // We don't deep clone mission controller state for React rendering, 
         // but we copy the basic props if needed for UI logic
         d.missionState = this.mission.state;
+        // Needed by calculateStateAt: waiting on the dock recharges the battery
+        d.mission.warehouseLocation = { ...this.mission.warehouseLocation };
         return d;
     }
 
