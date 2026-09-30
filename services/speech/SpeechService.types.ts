@@ -80,3 +80,33 @@ export interface ISpeechRecognizer {
    */
   onProgress?(listener: (event: SpeechProgressEvent) => void): () => void;
 }
+
+/**
+ * Text-to-Speech (TTS) configuration options.
+ */
+export interface TTSOptions {
+  rate?: number; // Speed rate (0.5 to 2.0, default 1.0)
+  pitch?: number; // Pitch (0 to 2, default 1.0)
+  volume?: number; // Volume (0 to 1, default 1.0)
+  voiceURI?: string;
+  onStart?: () => void;
+  onEnd?: () => void;
+  onError?: (error: any) => void;
+}
+
+/**
+ * Contract for speech synthesis / text-to-speech services.
+ * Follows Interface Segregation Principle (ISP).
+ */
+export interface ITextToSpeechService {
+  isSupported(): boolean;
+  speak(text: string, options?: TTSOptions): void;
+  cancel(): void;
+  pause(): void;
+  resume(): void;
+  isSpeaking(): boolean;
+  getVoices(): SpeechSynthesisVoice[];
+  setVoice(voiceURI: string): void;
+  getSelectedVoice(): SpeechSynthesisVoice | null;
+  onVoicesChanged?(listener: (voices: SpeechSynthesisVoice[]) => void): () => void;
+}

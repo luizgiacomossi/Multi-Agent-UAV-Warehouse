@@ -14,10 +14,16 @@ import {
   Settings,
   X,
   Wrench,
-  CheckCircle2
+  CheckCircle2,
+  Volume2,
+  VolumeX,
+  Play,
+  Square,
+  Sliders
 } from 'lucide-react';
 import { useSpeechRecognition, SpeechProviderType } from '../hooks/useSpeechRecognition';
 import { AssistantProcessResult } from '../services/slm/OperatorAssistant';
+import { WebTextToSpeechService } from '../services/speech/WebTextToSpeechService';
 
 export interface VoiceCommandBarProps {
   onSendCommand?: (command: string) => Promise<AssistantProcessResult | void> | void;
@@ -47,8 +53,43 @@ export const VoiceCommandBar: React.FC<VoiceCommandBarProps> = ({
   const [urlInput, setUrlInput] = useState(lmStudioUrl);
   const [isProcessingCommand, setIsProcessingCommand] = useState(false);
   const [assistantReply, setAssistantReply] = useState<AssistantProcessResult | null>(null);
+  const [ttsEnabled, setTtsEnabled] = useState(true);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [availableVoices, setAvailableVoices] = useState<SpeechSynthesisVoice[]>([]);
+  const [selectedVoiceURI, setSelectedVoiceURI] = useState<string>('');
+  const [speechRate, setSpeechRate] = useState<number>(0.98);
 
   const inputRef = useRef<HTMLInputElement>(null);
+  const ttsService = useRef(WebTextToSpeechService.getInstance()).current;
+
+  useEffect(() => {
+    setSpeechRate(ttsService.getRate());
+    const syncVoices = (voices: SpeechSynthesisVoice[]) => {
+      setAvailableVoices(voices);
+      const active = ttsService.getSelectedVoice();
+      if (active) {
+        setSelectedVoiceURI(active.voiceURI);
+      }
+    };
+    const unsubscribe = ttsService.onVoicesChanged(syncVoices);
+    syncVoices(ttsService.getVoices());
+    return unsubscribe;
+  }, [ttsService]);
+
+  const handleTestVoice = () => {
+    if (isSpeaking) {
+      ttsService.cancel();
+      setIsSpeaking(false);
+      return;
+    }
+    ttsService.speak('NexTArc Operator AI voice test. All flight and safety systems nominal.', {
+      rate: speechRate,
+      voiceURI: selectedVoiceURI,
+      onStart: () => setIsSpeaking(true),
+      onEnd: () => setIsSpeaking(false),
+      onError: () => setIsSpeaking(false)
+    });
+  };
 
   const {
     providerType,
@@ -77,9 +118,18 @@ export const VoiceCommandBar: React.FC<VoiceCommandBarProps> = ({
   }, [transcript]);
 
   const handleClear = () => {
+    ttsService.cancel();
+    setIsSpeaking(false);
     setInputText('');
     clearTranscript();
     inputRef.current?.focus();
+  };
+
+  const handleToggleListening = () => {
+    // Interrupt any ongoing AI speech when operator activates mic
+    ttsService.cancel();
+    setIsSpeaking(false);
+    toggleListening();
   };
 
   const handleProviderToggle = () => {
@@ -91,6 +141,10 @@ export const VoiceCommandBar: React.FC<VoiceCommandBarProps> = ({
     if (e) e.preventDefault();
     const commandToSend = (inputText + (interimTranscript ? ` ${interimTranscript}` : '')).trim();
     if (!commandToSend || isProcessingCommand) return;
+
+    // Interrupt prior speech playback
+    ttsService.cancel();
+    setIsSpeaking(false);
 
     // Save to command history
     setLastCommands((prev) => [commandToSend, ...prev.slice(0, 9)]);
@@ -104,6 +158,15 @@ export const VoiceCommandBar: React.FC<VoiceCommandBarProps> = ({
         const result = await onSendCommand(commandToSend);
         if (result && typeof result === 'object' && 'text' in result) {
           setAssistantReply(result);
+          if (ttsEnabled && result.text) {
+            ttsService.speak(result.text, {
+              rate: speechRate,
+              voiceURI: selectedVoiceURI,
+              onStart: () => setIsSpeaking(true),
+              onEnd: () => setIsSpeaking(false),
+              onError: () => setIsSpeaking(false)
+            });
+          }
         }
       }
     } catch (err: any) {
@@ -140,13 +203,43 @@ export const VoiceCommandBar: React.FC<VoiceCommandBarProps> = ({
                   </span>
                 )}
               </div>
-              <button
-                type="button"
-                onClick={() => setAssistantReply(null)}
-                className="text-slate-400 hover:text-slate-200"
-              >
-                <X size={14} />
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (isSpeaking) {
+                      ttsService.cancel();
+                      setIsSpeaking(false);
+                    } else if (assistantReply?.text) {
+                      ttsService.speak(assistantReply.text, {
+                        rate: speechRate,
+                        voiceURI: selectedVoiceURI,
+                        onStart: () => setIsSpeaking(true),
+                        onEnd: () => setIsSpeaking(false),
+                        onError: () => setIsSpeaking(false)
+                      });
+                    }
+                  }}
+                  className={`p-1 rounded hover:bg-slate-800 transition-colors ${
+                    isSpeaking ? 'text-cyan-400 animate-pulse' : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                  title={isSpeaking ? 'Stop speech' : 'Replay audio response'}
+                >
+                  <Volume2 size={14} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    ttsService.cancel();
+                    setIsSpeaking(false);
+                    setAssistantReply(null);
+                  }}
+                  className="text-slate-400 hover:text-slate-200"
+                  title="Dismiss reply"
+                >
+                  <X size={14} />
+                </button>
+              </div>
             </div>
 
             {/* Tools Executed Badges */}
@@ -244,6 +337,36 @@ export const VoiceCommandBar: React.FC<VoiceCommandBarProps> = ({
               <Settings size={11} className="text-slate-400 ml-0.5" />
             </button>
 
+            {/* Voice Output Toggle */}
+            <button
+              type="button"
+              onClick={() => {
+                if (isSpeaking) {
+                  ttsService.cancel();
+                  setIsSpeaking(false);
+                }
+                setTtsEnabled(!ttsEnabled);
+              }}
+              className={`flex items-center gap-1 px-2 py-0.5 rounded-md border transition-colors text-[11px] ${
+                ttsEnabled
+                  ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40 hover:bg-cyan-500/30'
+                  : 'bg-slate-800 text-slate-400 border-slate-700/60 hover:text-slate-300'
+              }`}
+              title={ttsEnabled ? 'Voice Output: Enabled (Click to mute)' : 'Voice Output: Muted (Click to enable)'}
+            >
+              {ttsEnabled ? (
+                <>
+                  <Volume2 size={12} className={isSpeaking ? 'text-cyan-400 animate-pulse' : 'text-cyan-400'} />
+                  <span>Voice ON</span>
+                </>
+              ) : (
+                <>
+                  <VolumeX size={12} className="text-slate-400" />
+                  <span>Voice OFF</span>
+                </>
+              )}
+            </button>
+
             {/* Language Badge */}
             <div
               className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-800 text-slate-300 border border-slate-700/60 text-[11px]"
@@ -266,27 +389,123 @@ export const VoiceCommandBar: React.FC<VoiceCommandBarProps> = ({
           </div>
         </div>
 
-        {/* LM Studio Endpoint Settings Drawer */}
+        {/* Settings Drawer (LM Studio + Natural Voice Config) */}
         {showSettings && (
-          <form
-            onSubmit={handleSaveSettings}
-            className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 flex items-center gap-2 text-xs"
-          >
-            <span className="text-slate-400 font-medium shrink-0">LM Studio URL:</span>
-            <input
-              type="text"
-              value={urlInput}
-              onChange={(e) => setUrlInput(e.target.value)}
-              placeholder="http://localhost:1234/v1"
-              className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-slate-200 font-mono text-[11px] focus:outline-none focus:border-cyan-500"
-            />
-            <button
-              type="submit"
-              className="px-2.5 py-1 bg-cyan-600 hover:bg-cyan-500 text-white font-medium rounded-lg text-[11px]"
-            >
-              Save
-            </button>
-          </form>
+          <div className="p-3 rounded-xl bg-slate-950/95 border border-slate-800 flex flex-col gap-3 text-xs animate-fadeIn">
+            {/* LM Studio Connection */}
+            <form onSubmit={handleSaveSettings} className="flex items-center gap-2">
+              <span className="text-slate-400 font-medium shrink-0">LM Studio URL:</span>
+              <input
+                type="text"
+                value={urlInput}
+                onChange={(e) => setUrlInput(e.target.value)}
+                placeholder="http://localhost:1234/v1"
+                className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-slate-200 font-mono text-[11px] focus:outline-none focus:border-cyan-500"
+              />
+              <button
+                type="submit"
+                className="px-2.5 py-1 bg-cyan-600 hover:bg-cyan-500 text-white font-medium rounded-lg text-[11px]"
+              >
+                Save
+              </button>
+            </form>
+
+            <div className="h-px bg-slate-800/80 w-full" />
+
+            {/* Voice & Speech Controls */}
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center justify-between text-slate-300 font-semibold text-[11px]">
+                <div className="flex items-center gap-1.5 text-cyan-400">
+                  <Sliders size={13} />
+                  <span>Voice Synthesis & Quality</span>
+                </div>
+                <span className="text-[10px] text-slate-500 font-normal">
+                  {availableVoices.length} English voices found
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {/* Voice Picker */}
+                <div className="flex flex-col gap-1">
+                  <label className="text-[10px] text-slate-400 font-medium">Selected Voice:</label>
+                  <select
+                    value={selectedVoiceURI}
+                    onChange={(e) => {
+                      const uri = e.target.value;
+                      setSelectedVoiceURI(uri);
+                      ttsService.setVoice(uri);
+                    }}
+                    className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-slate-200 text-[11px] focus:outline-none focus:border-cyan-500"
+                  >
+                    {availableVoices.map((v) => {
+                      const isEnhanced =
+                        v.name.includes('Enhanced') ||
+                        v.name.includes('Premium') ||
+                        v.name.includes('Natural') ||
+                        v.name.includes('Neural');
+                      const isCloud = !v.localService;
+                      const badge = isEnhanced ? ' ⭐ (Natural/Enhanced)' : isCloud ? ' 🌐 (Online Neural)' : '';
+                      return (
+                        <option key={v.voiceURI} value={v.voiceURI}>
+                          {v.name} ({v.lang}){badge}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+
+                {/* Speed Rate Slider & Test Button */}
+                <div className="flex flex-col gap-1">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] text-slate-400 font-medium">
+                      Speech Speed: <span className="text-cyan-400 font-mono">{speechRate.toFixed(2)}x</span>
+                    </label>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="range"
+                      min="0.75"
+                      max="1.25"
+                      step="0.05"
+                      value={speechRate}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value);
+                        setSpeechRate(val);
+                        ttsService.setRate(val);
+                      }}
+                      className="flex-1 accent-cyan-500 h-1 bg-slate-800 rounded cursor-pointer"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleTestVoice}
+                      className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-cyan-600/30 hover:bg-cyan-600/50 text-cyan-300 border border-cyan-500/40 text-[10px] font-medium transition-colors"
+                      title="Preview voice output"
+                    >
+                      {isSpeaking ? (
+                        <>
+                          <Square size={10} className="fill-current" />
+                          <span>Stop</span>
+                        </>
+                      ) : (
+                        <>
+                          <Play size={10} className="fill-current" />
+                          <span>Preview Voice</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Mac Human Voice Tip */}
+              <p className="text-[10px] text-slate-400 leading-tight">
+                💡 <strong className="text-slate-300">Mac tip:</strong> For ultra-realistic human voices, open{' '}
+                <span className="text-cyan-300 font-mono">System Settings → Accessibility → Spoken Content</span> and select/download{' '}
+                <strong className="text-slate-200">Siri</strong>, <strong className="text-slate-200">Ava (Premium)</strong>, or{' '}
+                <strong className="text-slate-200">Samantha (Enhanced)</strong>.
+              </p>
+            </div>
+          </div>
         )}
 
         {/* Input & Action Form */}
@@ -294,7 +513,7 @@ export const VoiceCommandBar: React.FC<VoiceCommandBarProps> = ({
           {/* Microphone Action Button */}
           <button
             type="button"
-            onClick={toggleListening}
+            onClick={handleToggleListening}
             disabled={!isSupported || isAudioProcessing || isProcessingCommand}
             className={`relative flex items-center justify-center w-11 h-11 rounded-xl font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 ${
               isListening
