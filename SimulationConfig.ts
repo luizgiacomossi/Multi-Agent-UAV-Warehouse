@@ -49,22 +49,20 @@ export const D_MAX = Math.sqrt(
  * $\beta_{fly}$ — Linear battery consumption rate while moving (% per step).
  *
  * Each voxel traversal in the A* planner costs this many percent of maximum
- * battery capacity.  A lower value ↔ longer endurance at the cost of less
- * realistic urgency.
+ * battery capacity. Moving incurs motor propulsion and translational power costs.
  *
  * Equation reference: Eq. 13  $E_{req} = \beta_{fly} \cdot \gamma \cdot d_{Eucl}$
  */
-export const BETA_FLY = 0.05;
+export const BETA_FLY = 0.10;
 
 /**
  * $\beta_{hover}$ — Battery drain per tick while the drone waits/hovers (% per tick).
  *
- * Hovering costs more per unit time than flying because the drone must maintain
- * altitude without horizontal progress.
+ * Hovering/waiting consumes less power than active translational flight.
  *
  * Equation reference: Eq. 13 hover term.
  */
-export const BETA_HOVER = 0.10;
+export const BETA_HOVER = 0.05;
 
 /**
  * $\gamma$ — Path-complexity factor applied to the straight-line Euclidean

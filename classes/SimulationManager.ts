@@ -2,7 +2,7 @@
 import { World } from './World';
 import { Swarm, Drone } from './Drone';
 import { Warehouse } from './Warehouse';
-import { SimulationIncident, Position3D, Pallet, ClusterVisualization, TaskPriorityMode } from '../types';
+import { SimulationIncident, Position3D, Pallet, ClusterVisualization, TaskPriorityMode, MissionCompletionMode } from '../types';
 import { ReservedZone } from './WorldGenerator';
 import { KDTree } from '../utils/KDTree';
 import { TaskCluster } from './TaskCluster';
@@ -11,11 +11,12 @@ import {
     NaivePlanner,
     CooperativePlanner,
     EnergySaverPlanner,
-    CollisionAnalyzer
+    CollisionAnalyzer,
+    SpaceTimeReservations
 } from './PathPlanner';
 import { CostModel } from './CostModel';
 import { Task } from '../types';
-import { MAX_TIMESTEPS, GRID_SIZE, DEFAULT_AGENT_COUNT } from '../SimulationConfig';
+import { MAX_TIMESTEPS, GRID_SIZE, DEFAULT_AGENT_COUNT, MATH_CONSTANTS } from '../SimulationConfig';
 
 type PalletReservation = {
     droneId: string;
@@ -238,13 +239,19 @@ export class SimulationManager {
         batteryEnabled: boolean = true,
         allocationMode: '1-to-1' | 'Cluster' = '1-to-1',
         clusterRadius: number = 5,
-        maxClusterSize: number = 3
+        maxClusterSize: number = 3,
+        missionCompletionMode: MissionCompletionMode = 'count'
     ): Promise<{ agents: Drone[], incidents: SimulationIncident[], maxTicks: number, clusters: ClusterVisualization[] }> {
+
+        const isAllPalletsMode = missionCompletionMode === 'all-pallets';
+        const effectiveMissionCount = isAllPalletsMode
+            ? Math.max(this.world.pallets.length, missionCount, 1)
+            : missionCount;
 
         const strategy = this.algorithms[algorithmName];
         if (!strategy) throw new Error(`Algorithm ${algorithmName} not found`);
 
-        const reservedSpaceTime = new Set<number>(); // Persist reservations across legs for consistency
+        const reservedSpaceTime = new SpaceTimeReservations(); // Persist reservations across legs with ownership
         const clusters: ClusterVisualization[] = [];
         const activeClustersByDrone = new Map<string, ClusterVisualization>();
 
@@ -252,7 +259,7 @@ export class SimulationManager {
         this.swarm.drones.forEach(drone => {
             // drone.goal was set in initializeScenario to the pallet position
             // sync MissionController with the correct pallet context
-            drone.setMissionConfig(drone.start, drone.goal, missionCount, isRoundTrip);
+            drone.setMissionConfig(drone.start, drone.goal, effectiveMissionCount, isRoundTrip);
             // Re-apply pallet metadata that initializeScenario set, since setMissionConfig resets mission
             if (drone.currentPalletId) {
                 drone.mission.currentPalletId = drone.currentPalletId;
@@ -260,12 +267,22 @@ export class SimulationManager {
             }
         });
         this.resetPalletTracking();
-        this.swarm.drones.forEach(drone => {
-            this.reservePallet(drone.currentPalletId, {
-                droneId: drone.id,
-                mode: 'single'
+        if (isAllPalletsMode) {
+            this.swarm.drones.forEach(drone => {
+                drone.mission.reset();
+                drone.mission.configure(effectiveMissionCount, isRoundTrip);
+                drone.goal = { ...drone.start };
+                drone.currentPalletId = undefined;
+                drone.currentScanType = undefined;
             });
-        });
+        } else {
+            this.swarm.drones.forEach(drone => {
+                this.reservePallet(drone.currentPalletId, {
+                    droneId: drone.id,
+                    mode: 'single'
+                });
+            });
+        }
 
         // 2. Iterative Simulation Loop
         // Instead of one giant plan, we plan leg-by-leg (Outbound -> Return -> Outbound...)
@@ -281,13 +298,13 @@ export class SimulationManager {
                 const pos = fl.path[t % fl.path.length];
                 const h1 = (pos.x) | (pos.y << 6) | (pos.z << 12) | (t << 18);
                 const h2 = (pos.x) | ((pos.y + 1) << 6) | (pos.z << 12) | (t << 18);
-                reservedSpaceTime.add(h1);
-                reservedSpaceTime.add(h2); // Extra height block
+                reservedSpaceTime.addVertex(h1, 'FORKLIFT');
+                reservedSpaceTime.addVertex(h2, 'FORKLIFT'); // Extra height block
             }
         });
 
         // Maximum theoretical legs = missionCount * clusterCapacity * 2 (Outbound/Inbound padding)
-        const maxLegTries = missionCount * 15;
+        const maxLegTries = Math.max(effectiveMissionCount, this.world.pallets.length, 1) * 15;
         for (let cycle = 0; cycle < maxLegTries; cycle++) {
 
             // 0. Register active assignment segments at the START of the physical leg
@@ -320,6 +337,11 @@ export class SimulationManager {
             const idleDrones: Drone[] = [];
             this.swarm.drones.forEach(drone => {
                 if (drone.status === 'STRANDED') {
+                    return;
+                }
+
+                if (drone.mission.state === 'IDLE') {
+                    idleDrones.push(drone);
                     return;
                 }
 
@@ -435,6 +457,23 @@ export class SimulationManager {
                 }
             }
 
+            if (isAllPalletsMode) {
+                const allPalletsChecked = this.world.pallets.length > 0 && this.completedPalletIds.size >= this.world.pallets.length;
+                const hasActiveLegs = this.swarm.drones.some(d =>
+                    d.status !== 'STRANDED' &&
+                    (d.mission.state === 'OUTBOUND' || d.mission.state === 'EXECUTING_TOUR' || d.mission.state === 'RETURNING')
+                );
+
+                if (allPalletsChecked && !hasActiveLegs) {
+                    this.swarm.drones.forEach(drone => {
+                        if (drone.status !== 'STRANDED') {
+                            drone.mission.state = 'COMPLETED';
+                        }
+                    });
+                    break;
+                }
+            }
+
             // Break early if everyone is finished/blocked
             const everyoneDone = this.swarm.drones.every(d => d.mission.state === 'COMPLETED' || d.status === 'STRANDED');
             if (everyoneDone) break;
@@ -545,7 +584,7 @@ export class SimulationManager {
 
             resultHungarian.forEach(alloc => {
                 const totalDist = CostModel.distanceEuclidean(alloc.drone.start, alloc.task.target) + CostModel.distanceEuclidean(alloc.task.target, p_base);
-                const consumedBat = (totalDist * 1.3 * 0.5) + (alloc.task.t_hover * 0.1); // using constants roughly
+                const consumedBat = (totalDist * MATH_CONSTANTS.GAMMA * MATH_CONSTANTS.BETA_FLY) + (alloc.task.t_hover * MATH_CONSTANTS.BETA_HOVER);
                 const finalBat = alloc.drone.battery - consumedBat;
 
                 if (finalBat < 20) strandedCount++;

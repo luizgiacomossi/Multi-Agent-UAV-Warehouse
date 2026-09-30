@@ -6,6 +6,7 @@ export interface Position3D {
 }
 
 export type MissionState = 'IDLE' | 'OUTBOUND' | 'EXECUTING_TOUR' | 'RETURNING' | 'COMPLETED';
+export type MissionCompletionMode = 'count' | 'all-pallets';
 
 export interface Agent {
   id: string;

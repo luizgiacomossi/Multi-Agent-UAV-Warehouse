@@ -273,13 +273,21 @@ const PathLine: React.FC<{ agent: Agent; tick: number; clusters: ClusterVisualiz
 
      const activeTask = (agent.assignedTasksLog || []).find(t => tick >= t.startTick && tick <= t.endTick);
 
-     if (!activeTask) {
-       return { path: [] as Position3D[], startTick: 0, endTick: 0 };
+     if (activeTask) {
+       const startTickLine = Math.max(0, activeTask.startTick);
+       const endTickLine = Math.min(maxTick, activeTask.endTick);
+       return buildVisibleSegment(startTickLine, endTickLine);
      }
 
-     const startTickLine = Math.max(0, activeTask.startTick);
-     const endTickLine = Math.min(maxTick, activeTask.endTick);
-     return buildVisibleSegment(startTickLine, endTickLine);
+     const nextTask = (agent.assignedTasksLog || [])
+       .filter(t => t.startTick > tick)
+       .sort((a, b) => a.startTick - b.startTick)[0];
+
+     if (tick >= maxTick) {
+       return { path: [] as Position3D[], startTick: tick, endTick: maxTick };
+     }
+
+     return buildVisibleSegment(tick, Math.min(maxTick, nextTask ? nextTask.startTick : maxTick));
   }, [agent, tick, clusters]);
 
   const visiblePath = visibleSegment.path;

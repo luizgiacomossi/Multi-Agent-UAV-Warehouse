@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { Play, Pause, RotateCcw, Box, Grid3X3, Settings, Building2, ShieldCheck, Skull, Shuffle, Cpu, Repeat, Battery, Zap, Infinity as InfinityIcon, ArrowUpToLine, Power } from 'lucide-react';
-import { GenerationTheme, TaskPriorityMode } from '../types';
+import { GenerationTheme, TaskPriorityMode, MissionCompletionMode } from '../types';
 
 interface ControlPanelProps {
   isPlaying: boolean;
@@ -29,6 +29,8 @@ interface ControlPanelProps {
 
   missionCount: number;
   setMissionCount: (n: number) => void;
+  missionCompletionMode: MissionCompletionMode;
+  setMissionCompletionMode: (mode: MissionCompletionMode) => void;
   
   batteryCapacity: number;
   setBatteryCapacity: (n: number) => void;
@@ -82,6 +84,8 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   setIsRoundTrip,
   missionCount,
   setMissionCount,
+  missionCompletionMode,
+  setMissionCompletionMode,
   batteryCapacity,
   setBatteryCapacity,
   batteryEnabled,
@@ -251,21 +255,50 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
               />
          </div>
 
-         {/* Missions Count Slider */}
-        <div className="space-y-1">
-             <div className="flex items-center justify-between text-xs text-slate-400">
-                <span>Missions Per Drone</span>
-                <span className="font-mono text-cyan-400">{missionCount} runs</span>
+        {/* Missions Count Slider */}
+        <div className="space-y-2">
+             <div className="flex items-center gap-1 text-xs text-slate-400">
+                <InfinityIcon size={12} /> Mission End Condition
              </div>
-             <input 
-                type="range" 
-                min="1" 
-                max="20" 
-                step="1"
-                value={missionCount} 
-                onChange={(e) => setMissionCount(Number(e.target.value))}
-                className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-cyan-500"
-             />
+             <div className="flex items-center justify-between bg-slate-900 p-1 rounded-lg border border-slate-700 gap-1">
+                {([
+                  { mode: 'count', label: 'Mission Count' },
+                  { mode: 'all-pallets', label: 'All Pallets' }
+                ] as const).map(({ mode, label }) => {
+                  const isSelected = mode === missionCompletionMode;
+                  return (
+                    <button
+                      key={mode}
+                      onClick={() => setMissionCompletionMode(mode)}
+                      className={`flex-1 py-1.5 text-[10px] rounded-md transition-all font-medium ${
+                        isSelected
+                          ? 'bg-cyan-600 text-white shadow-sm border border-cyan-500'
+                          : 'text-slate-500 hover:text-slate-300'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+             </div>
+
+             {missionCompletionMode === 'count' && (
+                <div className="space-y-1">
+                     <div className="flex items-center justify-between text-xs text-slate-400">
+                        <span>Missions Per Drone</span>
+                        <span className="font-mono text-cyan-400">{missionCount} runs</span>
+                     </div>
+                     <input 
+                        type="range" 
+                        min="1" 
+                        max="20" 
+                        step="1"
+                        value={missionCount} 
+                        onChange={(e) => setMissionCount(Number(e.target.value))}
+                        className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-cyan-500"
+                     />
+                </div>
+             )}
         </div>
 
         {/* Max Altitude Slider */}
