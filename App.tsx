@@ -14,6 +14,9 @@ import { ThemeModal } from './components/ThemeModal';
 import { ThemeService } from './services/theme/ThemeService';
 import { ThemeId } from './services/theme/ThemeTypes';
 
+/** Wait after the last grid-size change before regenerating, so dragging the slider regenerates once. */
+const GRID_REGENERATE_DELAY_MS = 300;
+
 const App: React.FC = () => {
   // -- UI Config State --
   const [gridSizeVal, setGridSizeVal] = useState(GRID_SIZE);
@@ -31,9 +34,10 @@ const App: React.FC = () => {
   const [clusterRadius, setClusterRadius] = useState(5);
   const [maxClusterSize, setMaxClusterSize] = useState(3);
   const [totalTasks, setTotalTasks] = useState(50);
+  const [useAllPallets, setUseAllPallets] = useState(true); // every pallet in the scenario is a task
   const [numForklifts, setNumForklifts] = useState(3);
   const [taskPriorityMode, setTaskPriorityMode] = useState<TaskPriorityMode>('mixed');
-  const [missionCompletionMode, setMissionCompletionMode] = useState<MissionCompletionMode>('count');
+  const [missionCompletionMode, setMissionCompletionMode] = useState<MissionCompletionMode>('all-pallets');
   const [currentTheme, setCurrentTheme] = useState<string>(GenerationTheme.WAREHOUSE);
   const [isThemeModalOpen, setIsThemeModalOpen] = useState(false);
 
@@ -58,12 +62,16 @@ const App: React.FC = () => {
 
   // -- Engine --
   const engineRef = useRef(new SimulationManager(GRID_SIZE, DEFAULT_AGENT_COUNT));
+  // Id of the latest planning request; results of older (superseded) requests are dropped
+  const planRequestRef = useRef(0);
 
   // Core Update Function
   const updateSimulation = async (algo: string, roundTrip: boolean, mCount: number, altitude: number, batEnabled: boolean, aMode: '1-to-1' | 'Cluster', cRadius: number, cMaxSize: number, completionMode: MissionCompletionMode) => {
     try {
       setError(null);
+      const request = ++planRequestRef.current;
       const result = await engineRef.current.runPathfinding(algo, roundTrip, mCount, altitude, batEnabled, aMode, cRadius, cMaxSize, completionMode);
+      if (request !== planRequestRef.current) return; // a newer plan (e.g. a regenerated world) replaced this one
 
       setAgents(result.agents);
       setIncidents(result.incidents);
@@ -141,7 +149,7 @@ const App: React.FC = () => {
           setDeployFromBase(true); // Sync UI
         }
 
-        engine.generateWorld(theme, gridSizeVal, enableCharging, effectiveDeployFromBase, agentCount, totalTasks, numForklifts, taskPriorityMode);
+        engine.generateWorld(theme, gridSizeVal, enableCharging, effectiveDeployFromBase, agentCount, useAllPallets ? Infinity : totalTasks, numForklifts, taskPriorityMode);
         const palletPositionSet = new Set(
           engine.world.pallets.map(p => `${p.position.x},${p.position.y},${p.position.z}`)
         );
@@ -187,6 +195,16 @@ const App: React.FC = () => {
       setIsGenerating(false);
     }, 50);
   };
+
+  // Regenerate the scenario when the grid size changes, once the slider settles. The ref calls
+  // the latest handleGenerate, so it sees state adjusted in the meantime (e.g. clamped altitude).
+  const handleGenerateRef = useRef(handleGenerate);
+  handleGenerateRef.current = handleGenerate;
+  useEffect(() => {
+    if (gridSizeVal === engineRef.current.world.size) return; // world already has this size
+    const timer = window.setTimeout(() => handleGenerateRef.current(currentTheme), GRID_REGENERATE_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [gridSizeVal]);
 
   // Playback Loop
   useEffect(() => {
@@ -390,6 +408,9 @@ const App: React.FC = () => {
         setMaxClusterSize={setMaxClusterSize}
         totalTasks={totalTasks}
         setTotalTasks={setTotalTasks}
+        useAllPallets={useAllPallets}
+        setUseAllPallets={setUseAllPallets}
+        palletCount={pallets.length}
         numForklifts={numForklifts}
         setNumForklifts={setNumForklifts}
         taskPriorityMode={taskPriorityMode}
