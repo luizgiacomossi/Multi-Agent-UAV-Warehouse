@@ -166,6 +166,24 @@ export async function runChargingTests(): Promise<{ passed: number; failed: numb
   assert(sessionsOf(drained.result) > sessionsOf(result), 'Double drain means more charging sessions',
     `${sessionsOf(drained.result)} vs ${sessionsOf(result)}`);
 
+  // Regression: on 22³ drones left without a task flew home although stations were much closer,
+  // because the charger check counted pallets outside the round's candidate pool as workable.
+  const midSize = await withSeed(1, async () => {
+    const manager = new SimulationManager(22, 2);
+    manager.generateWorld('Warehouse', 22, 2, true, 2, Infinity, 3, 'mixed');
+    manager.initializeAgents(2, 100, true, 22);
+    const original = { log: console.log, warn: console.warn };
+    console.log = console.warn = () => {};
+    try {
+      const r = await manager.runPathfinding('Cooperative', false, 1, 22, true, '1-to-1', 5, 3, 'all-pallets', 2, 3);
+      return buildChargingSchedule(r.agents, manager.world.chargeStations, true);
+    } finally {
+      Object.assign(console, original);
+    }
+  });
+  assert(midSize.some(e => e.charger === 'station'), 'Drones low on battery far from the base charge at a nearer station (22³, drain ×3)',
+    midSize.map(e => e.site).join(', '));
+
   // ─────────────────────────────────────────────────────────────
   // 6. Battery drain multiplier
   // ─────────────────────────────────────────────────────────────

@@ -336,14 +336,15 @@ export class SimulationManager {
 
     /**
      * Where an idle drone left without a task should charge, or null if charging would not help.
-     * It applies when no open pallet with its payload is affordable from where it is (the energy
-     * check of the allocation). Candidates are its dock (one per drone, always free) and the
+     * It applies when none of the pallets offered in this allocation round is affordable from where
+     * it is (the energy check of the allocation). Pallets outside the round's candidate pool do not
+     * count: the drone could not have been given them, and it must not fly home instead. Candidates are its dock (one per drone, always free) and the
      * stations no other drone holds (drones never queue in the air), rated by ready time: travel
      * plus charging to full. A charger is preferred if some open pallet is affordable from it on a
      * full battery, which also lets a fully charged drone stage at a station closer to pallets it
      * cannot reach from where it is. Chargers the drone cannot reach on its battery are skipped.
      */
-    private chooseCharger(drone: Drone, pBase: Position3D, chargers: Position3D[]): { site: Position3D; isStation: boolean } | null {
+    private chooseCharger(drone: Drone, pBase: Position3D, chargers: Position3D[], offered: Task[]): { site: Position3D; isStation: boolean } | null {
         const tasks: Task[] = this.getAvailablePallets()
             .filter(plt => drone.payload.includes(plt.payload_type))
             .map(plt => ({
@@ -353,7 +354,9 @@ export class SimulationManager {
         const from = drone.path[drone.path.length - 1];
         const affordableFrom = (pos: Position3D, battery: number) => tasks.some(task =>
             CostModel.isAffordable(battery, CostModel.requiredEnergyFrom(pos, task, pBase, chargers, drone.drainMultiplier)));
-        if (tasks.length === 0 || affordableFrom(from, drone.battery)) return null;
+        const workableHere = offered.some(task => drone.payload.includes(task.req_payload) &&
+            CostModel.isAffordable(drone.battery, CostModel.requiredEnergyFrom(from, task, pBase, chargers, drone.drainMultiplier)));
+        if (tasks.length === 0 || workableHere) return null;
 
         const candidates = [
             { site: drone.mission.warehouseLocation, isStation: false },
@@ -560,6 +563,8 @@ export class SimulationManager {
 
             // B. Update Mission States and Batch Assign using Munkres
             const idleDrones: Drone[] = [];
+            // Pallets offered to the idle drones in this allocation round (the candidate pool)
+            let offeredTasks: Task[] = [];
             this.swarm.drones.forEach(drone => {
                 if (drone.status === 'STRANDED') {
                     return;
@@ -670,6 +675,7 @@ export class SimulationManager {
                         const compatiblePallets = unscanned.filter(plt => availablePayloads.has(plt.payload_type));
                         const pool = compatiblePallets.length > 0 ? compatiblePallets : unscanned;
                         const pendingClusters = this.buildLocalizedClusters(pool, clusterRadius, maxClusterSize, idleDrones.length);
+                        offeredTasks = pendingClusters.flatMap(c => c.tasks);
 
                         // Fire the Munkres Cost Engine for spatial matching
                         if (pendingClusters.length > 0) {
@@ -729,6 +735,7 @@ export class SimulationManager {
                             t_hover: 5,
                             status: 'PENDING'
                         }));
+                        offeredTasks = pendingTasks;
 
                         if (pendingTasks.length > 0) {
                             const assignments = CostModel.executeOptimalAllocation(idleDrones, pendingTasks, pBase, dMax, feasibilityChargers);
@@ -787,7 +794,7 @@ export class SimulationManager {
             idleDrones
                 .filter(d => d.mission.state === 'IDLE')
                 .forEach(d => {
-                    const charger = batteryEnabled ? this.chooseCharger(d, pBase, feasibilityChargers) : null;
+                    const charger = batteryEnabled ? this.chooseCharger(d, pBase, feasibilityChargers, offeredTasks) : null;
                     if (charger?.isStation) {
                         d.mission.assignRecharge(charger.site);
                         d.goal = { ...charger.site };
