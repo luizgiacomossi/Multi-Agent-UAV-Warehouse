@@ -185,6 +185,26 @@ export async function runChargingTests(): Promise<{ passed: number; failed: numb
   assert(midSize.some(e => e.charger === 'station'), 'Drones low on battery far from the base charge at a nearer station (22³, drain ×3)',
     midSize.map(e => e.site).join(', '));
 
+  // Regression: the 1-to-1 pool is the first open pallets in list order. A drone staged at a
+  // charger far from them could do none, and was sent from charger to charger until the time
+  // limit (L-24 benchmark scenario, battery 30, drain ×3). Now it is offered its nearest pallets.
+  const pingPong = await withSeed(2550695936, async () => {
+    const manager = new SimulationManager(24, 2);
+    manager.generateWorld('Warehouse', 24, 1, true, 2, 200, 6, 'mixed');
+    manager.initializeAgents(2, 30, true, 24);
+    const original = { log: console.log, warn: console.warn };
+    console.log = console.warn = () => {};
+    try {
+      return await manager.runPathfinding('Cooperative', false, 3, 24, true, '1-to-1', 5, 3, 'all-pallets', 2, 3);
+    } finally {
+      Object.assign(console, original);
+    }
+  });
+  assert(pingPong.maxTicks < 3000, 'A drone far from the first pallets in the list is not sent from charger to charger',
+    `${pingPong.maxTicks} ticks`);
+  assert(pingPong.agents.every(a => samePos(a.path[a.path.length - 1], (a as Drone).mission.warehouseLocation)),
+    'It lands once nothing reachable is left');
+
   // ─────────────────────────────────────────────────────────────
   // 6. Battery drain multiplier
   // ─────────────────────────────────────────────────────────────

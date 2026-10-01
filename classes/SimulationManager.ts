@@ -17,6 +17,7 @@ import {
 } from './PathPlanner';
 import { CostModel } from './CostModel';
 import { ChargingPolicy, isAtDock } from './ChargingPolicy';
+import { manhattanDistance } from '../utils/Position';
 import { CBSPlanner } from './CBSPlanner';
 import { Task } from '../types';
 import { MAX_TIMESTEPS, GRID_SIZE, DEFAULT_AGENT_COUNT, MATH_CONSTANTS, INSTANT_CHARGE_RATE, DEFAULT_DRAIN_MULTIPLIER } from '../SimulationConfig';
@@ -39,6 +40,9 @@ export class SimulationManager {
     private abandonCounts = new Map<string, number>();
     private unreachablePalletIds = new Set<string>();
     private charging = new ChargingPolicy(() => this.world.chargeStations);
+
+    /** Nearest feasible pallets added to the 1-to-1 pool for a drone that can do none of the pool's. */
+    private static readonly EXTRA_CANDIDATES_PER_DRONE = 4;
 
     /** A pallet abandoned this many times is treated as unreachable and no longer offered. */
     private static readonly MAX_PALLET_ABANDONS = 2;
@@ -300,12 +304,44 @@ export class SimulationManager {
         return Math.min(...pendingClocks) + SimulationManager.EVENT_SYNC_WINDOW_TICKS;
     }
 
+    /** A pallet as a task, identified by the pallet (no random id, so no draw from the seeded source). */
+    private static palletTask(plt: Pallet): Task {
+        return {
+            id: plt.id, target: plt.position, req_payload: plt.payload_type, palletId: plt.id,
+            pi_k: plt.weight / 100, t_hover: 5, status: 'PENDING'
+        };
+    }
+
     /** Every open pallet as a task (drones' payloads are not checked here). */
     private openPalletTasks(): Task[] {
-        return this.getAvailablePallets().map(plt => ({
-            id: plt.id, target: plt.position, req_payload: plt.payload_type, palletId: plt.id,
-            pi_k: plt.weight / 100, t_hover: 5, status: 'PENDING' as const
-        }));
+        return this.getAvailablePallets().map(SimulationManager.palletTask);
+    }
+
+    /**
+     * Pallets to add to the 1-to-1 candidate pool. The pool is the first open pallets in list
+     * order, so a drone far from them (e.g. staged at a charger across the warehouse) may be able
+     * to do none of them; it would then be sent from charger to charger for pallets it is never
+     * offered. Each such drone gets its nearest open pallets it can do (allocation feasibility from
+     * where it is) added. Drones that can do some pooled pallet add nothing, so the pool is
+     * unchanged whenever it already gives every drone work.
+     */
+    private reachablePalletsOutsidePool(drones: Drone[], open: Pallet[], pool: Pallet[], pBase: Position3D, chargers: Position3D[]): Pallet[] {
+        const inPool = new Set(pool.map(plt => plt.id));
+        const extra: Pallet[] = [];
+        for (const drone of drones) {
+            const feasible = (plt: Pallet) => {
+                const task = SimulationManager.palletTask(plt);
+                return CostModel.is_feasible(drone, task, CostModel.calculate_e_req(drone, task, pBase, chargers));
+            };
+            if (pool.some(feasible)) continue;
+            const from = CostModel.getDroneCurrentPosition(drone);
+            open
+                .filter(plt => !inPool.has(plt.id) && !extra.includes(plt) && feasible(plt))
+                .sort((a, b) => manhattanDistance(from, a.position) - manhattanDistance(from, b.position))
+                .slice(0, SimulationManager.EXTRA_CANDIDATES_PER_DRONE)
+                .forEach(plt => extra.push(plt));
+        }
+        return extra;
     }
 
     /** Scans planned after a drone was lost (crash or dead battery) never happened. */
@@ -625,8 +661,9 @@ export class SimulationManager {
                         // Candidate pool: provide a wider window so Munkres is never starved by incompatible tasks
                         const candidateLimit = Math.max(idleDrones.length * 4, 20);
                         const pool = (compatiblePallets.length > 0 ? compatiblePallets : unscanned).slice(0, candidateLimit);
+                        const extra = this.reachablePalletsOutsidePool(idleDrones, unscanned, pool, pBase, feasibilityChargers);
 
-                        const pendingTasks: Task[] = pool.map(plt => ({
+                        const pendingTasks: Task[] = [...pool, ...extra].map(plt => ({
                             id: 'T-' + random().toString(36).substr(2, 9),
                             target: { ...plt.position },
                             req_payload: plt.payload_type,
