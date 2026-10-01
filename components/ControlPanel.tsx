@@ -2,7 +2,7 @@
 import React from 'react';
 import { Play, Pause, RotateCcw, Box, Grid3X3, Settings, Building2, ShieldCheck, Skull, Shuffle, Cpu, Repeat, Battery, Zap, Infinity as InfinityIcon, ArrowUpToLine, Power, Palette } from 'lucide-react';
 import { GenerationTheme, TaskPriorityMode, MissionCompletionMode } from '../types';
-import { MAX_TASKS, MAX_CHARGING_SITES, DEFAULT_CHARGE_RATE, INSTANT_CHARGE_RATE, BETA_FLY, BETA_HOVER } from '../SimulationConfig';
+import { MAX_TASKS, MAX_CHARGING_SITES, DEFAULT_CHARGE_RATE, INSTANT_CHARGE_RATE, BETA_FLY, BETA_HOVER, PLAYBACK_SPEEDS } from '../SimulationConfig';
 
 interface ControlPanelProps {
   isPlaying: boolean;
@@ -45,6 +45,8 @@ interface ControlPanelProps {
   chargeRate: number;
   setChargeRate: (n: number) => void;
   /** Scales battery consumption per move and per hover tick (1 = nominal). */
+  playbackSpeed: number;
+  setPlaybackSpeed: (speed: number) => void;
   drainMultiplier: number;
   setDrainMultiplier: (n: number) => void;
 
@@ -110,6 +112,8 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   setChargeRate,
   drainMultiplier,
   setDrainMultiplier,
+  playbackSpeed,
+  setPlaybackSpeed,
   maxAltitude,
   setMaxAltitude,
   allocationMode,
@@ -197,6 +201,26 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
         >
           <RotateCcw size={18} />
         </button>
+      </div>
+
+      {/* Playback Speed */}
+      <div className="space-y-1">
+        <div className="flex items-center justify-between text-xs text-slate-400">
+          <span title="How fast the planned mission is played back (the plan itself does not change)">Playback speed</span>
+          <span className="font-mono text-cyan-400">{playbackSpeed}×</span>
+        </div>
+        <input
+          type="range"
+          min="0"
+          max={PLAYBACK_SPEEDS.length - 1}
+          step="1"
+          value={Math.max(0, PLAYBACK_SPEEDS.indexOf(playbackSpeed))}
+          onChange={(e) => setPlaybackSpeed(PLAYBACK_SPEEDS[Number(e.target.value)])}
+          className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-cyan-500"
+        />
+        <div className="flex justify-between text-[9px] text-slate-500 font-mono">
+          {PLAYBACK_SPEEDS.map(speed => <span key={speed}>{speed}×</span>)}
+        </div>
       </div>
 
       {/* Progress Bar */}
