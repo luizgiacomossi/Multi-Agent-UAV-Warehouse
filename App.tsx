@@ -9,7 +9,7 @@ import { OperatorAssistant } from './services/slm/OperatorAssistant';
 import { Agent, Position3D, GenerationTheme, SimulationIncident, Forklift, Pallet, ClusterVisualization, TaskPriorityMode, MissionCompletionMode } from './types';
 import { SimulationManager } from './classes/SimulationManager';
 import { Warehouse } from './classes/Warehouse';
-import { GRID_SIZE, DEFAULT_AGENT_COUNT, DEFAULT_CHARGE_RATE, DEFAULT_DRAIN_MULTIPLIER } from './SimulationConfig';
+import { GRID_SIZE, DEFAULT_AGENT_COUNT, DEFAULT_CHARGE_RATE, SIMULATOR_DRAIN_MULTIPLIER } from './SimulationConfig';
 import { ThemeModal } from './components/ThemeModal';
 import { ThemeService } from './services/theme/ThemeService';
 import { ThemeId } from './services/theme/ThemeTypes';
@@ -21,13 +21,13 @@ const App: React.FC = () => {
   // -- UI Config State --
   const [gridSizeVal, setGridSizeVal] = useState(GRID_SIZE);
   const [deployFromBase, setDeployFromBase] = useState(true);
-  const [isRoundTrip, setIsRoundTrip] = useState(true);
+  const [isRoundTrip, setIsRoundTrip] = useState(false); // drones only go to a charger when they need to
   const [missionCount, setMissionCount] = useState<number>(3);
   const [batteryCapacity, setBatteryCapacity] = useState(100);
   const [batteryEnabled, setBatteryEnabled] = useState(true);
   const [chargingSites, setChargingSites] = useState(1); // base only; extra sites are one-drone stations
   const [chargeRate, setChargeRate] = useState(DEFAULT_CHARGE_RATE); // % per tick, Infinity = instant
-  const [drainMultiplier, setDrainMultiplier] = useState(DEFAULT_DRAIN_MULTIPLIER); // scales battery use
+  const [drainMultiplier, setDrainMultiplier] = useState(SIMULATOR_DRAIN_MULTIPLIER); // scales battery use
   const [selectedAlgorithm, setSelectedAlgorithm] = useState<string>('Cooperative');
   const [maxAltitude, setMaxAltitude] = useState(24);
 

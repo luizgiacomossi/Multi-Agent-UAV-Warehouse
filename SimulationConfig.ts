@@ -161,6 +161,12 @@ export const DEFAULT_CHARGE_RATE = 2;
 export const DEFAULT_DRAIN_MULTIPLIER = 1;
 
 /**
+ * Drain multiplier the simulator UI starts with. Higher than nominal so drones need to recharge
+ * mid-mission and charging stations come into play; the model and benchmark default stay at 1.
+ */
+export const SIMULATOR_DRAIN_MULTIPLIER = 3;
+
+/**
  * Charging sites, counting the base: 1 means base only; each extra site is a charging station.
  * The base charges any number of drones at once (one dock per drone); a station holds one drone.
  */

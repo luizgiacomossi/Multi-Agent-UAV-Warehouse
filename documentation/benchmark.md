@@ -60,14 +60,14 @@ Results (5 runs per configuration, Cooperative and CBS pooled; mean makespan in 
 
 | Scale | Drones | Base only | Base + 1 | Base + 2 | Base + 4 |
 |---|---|---|---|---|---|
-| M-16 | 2 | 599 | 540 (-9% ± 4) | 535 (-10% ± 5) | 513 (-14% ± 4) |
-| M-16 | 4 | 294 | 283 (-4% ± 4) | 267 (-9% ± 3) | 250 (-15% ± 6) |
-| M-16 | 8 | 161 | 145 (-8% ± 10) | 138 (-12% ± 10) | 134 (-16% ± 7) |
-| L-24 | 2 | 2153 | 1916 (-11% ± 2) | 1891 (-12% ± 3) | 1762 (-18% ± 2) |
-| L-24 | 4 | 1151 | 961 (-16% ± 5) | 946 (-18% ± 1) | 869 (-24% ± 3) |
-| L-24 | 8 | 551 | 478 (-13% ± 4) | 466 (-15% ± 1) | 429 (-22% ± 2) |
+| M-16 | 2 | 599 | 541 (-9% ± 5) | 518 (-13% ± 3) | 483 (-19% ± 5) |
+| M-16 | 4 | 294 | 283 (-4% ± 4) | 270 (-8% ± 3) | 244 (-17% ± 6) |
+| M-16 | 8 | 161 | 145 (-8% ± 10) | 138 (-12% ± 10) | 134 (-15% ± 7) |
+| L-24 | 2 | 2153 | 1774 (-18% ± 2) | 1713 (-20% ± 2) | 1596 (-26% ± 2) |
+| L-24 | 4 | 1151 | 913 (-21% ± 2) | 888 (-23% ± 3) | 795 (-31% ± 1) |
+| L-24 | 8 | 551 | 479 (-13% ± 3) | 454 (-18% ± 2) | 417 (-24% ± 2) |
 
-Stations shorten full-coverage missions by 14–24% with four stations, more in the large warehouse, where the base is farther from most pallets.
+Stations shorten full-coverage missions by 15–31% with four stations, more in the large warehouse, where the base is farther from most pallets.
 
 **Generator limits.** The warehouse generator places forklifts only in aisles where `x % 4 === 0`. That caps them at 1 (12³), 2 (16³) and 3 (24³), regardless of the requested count. The benchmark records the counts actually generated.
 
