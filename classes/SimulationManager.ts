@@ -179,17 +179,40 @@ export class SimulationManager {
         return Math.abs(a.x - b.x) + Math.abs(a.y - b.y) + Math.abs(a.z - b.z);
     }
 
+    /**
+     * Deterministic cluster seed: the highest-priority pallet, so urgent pallets anchor full clusters
+     * instead of being left over as singletons. Ties go to the pallet with the most compatible
+     * neighbours (fills clusters, fewer trips), then to pool order.
+     */
+    private pickClusterSeed(pool: Pallet[], neighboursOf: (pallet: Pallet) => Pallet[]): Pallet {
+        const topWeight = Math.max(...pool.map(p => p.weight));
+        const candidates = pool.filter(p => p.weight === topWeight);
+        if (candidates.length === 1) return candidates[0];
+
+        let seed = candidates[0];
+        let seedDensity = neighboursOf(seed).length;
+        for (const candidate of candidates.slice(1)) {
+            const density = neighboursOf(candidate).length;
+            if (density > seedDensity) {
+                seed = candidate;
+                seedDensity = density;
+            }
+        }
+        return seed;
+    }
+
     private buildLocalizedClusters(pallets: Pallet[], clusterRadius: number, maxClusterSize: number, maxClusters: number): TaskCluster[] {
         const pool = [...pallets];
         const clusters: TaskCluster[] = [];
 
         while (pool.length > 0 && clusters.length < maxClusters) {
-            const seed = pool[Math.floor(random() * pool.length)];
             const kdTree = new KDTree<Pallet>(pool, p => p.position);
+            const neighboursOf = (pallet: Pallet) => kdTree
+                .rangeQuery(pallet.position, clusterRadius)
+                .filter(p => p.payload_type === pallet.payload_type);
+            const seed = this.pickClusterSeed(pool, neighboursOf);
 
-            const neighbors = kdTree
-                .rangeQuery(seed.position, clusterRadius)
-                .filter(p => p.payload_type === seed.payload_type)
+            const neighbors = neighboursOf(seed)
                 .sort((a, b) => this.distanceManhattan(a.position, seed.position) - this.distanceManhattan(b.position, seed.position))
                 .slice(0, Math.max(1, maxClusterSize));
 

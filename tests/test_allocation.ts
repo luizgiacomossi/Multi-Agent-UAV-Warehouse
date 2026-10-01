@@ -164,6 +164,16 @@ export function runAllocationTests(): { passed: number; failed: number } {
   const expectedTourCost = (actualTourDist * MATH_CONSTANTS.BETA_FLY * MATH_CONSTANTS.GAMMA) + (cluster.tourSequence.length * 5 * MATH_CONSTANTS.BETA_HOVER);
   assert(Math.abs(cluster.tourCost - expectedTourCost) < 1e-4, 'TaskCluster tourCost incorporates gamma scaling', `Expected ${expectedTourCost.toFixed(4)}, got ${cluster.tourCost.toFixed(4)}`);
 
+  // Tour is ordered from the assigned drone's position (exact for small clusters)
+  const line: Task[] = [3, 5, 7].map(x => ({ id: `L${x}`, target: { x, y: 1, z: 0 }, req_payload: 'camera', pi_k: 0.5, t_hover: 5, status: 'PENDING' as const }));
+  const lineCluster = new TaskCluster(line);
+  lineCluster.orderTourFrom({ x: 0, y: 1, z: 0 });
+  assert(lineCluster.tourSequence.map(t => t.id).join() === 'L3,L5,L7', 'Tour from the left starts at the nearest end', lineCluster.tourSequence.map(t => t.id).join());
+  lineCluster.orderTourFrom({ x: 10, y: 1, z: 0 });
+  assert(lineCluster.tourSequence.map(t => t.id).join() === 'L7,L5,L3', 'Tour from the right is reversed', lineCluster.tourSequence.map(t => t.id).join());
+  const fromLeft = lineCluster.planTour({ x: 0, y: 1, z: 0 }, { x: 0, y: 1, z: 0 });
+  assert(fromLeft.sequence.length === 3 && Math.abs(fromLeft.cost - lineCluster.tourCost) < 1e-9, 'planTour is pure and the internal cost does not depend on direction');
+
   // Cluster Assignment
   const clusterAssignments = CostModel.executeClusterAllocation([droneA], [cluster], pBase, dMax);
   assert(clusterAssignments.length === 1, 'Drone successfully allocated to feasible cluster');

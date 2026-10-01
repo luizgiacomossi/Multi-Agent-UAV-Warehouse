@@ -86,16 +86,18 @@ This is implemented by `calculate_C_ik(...)`.
 
 Cluster allocation uses the same Hungarian structure but replaces a single task with a `TaskCluster`.
 
+Clusters are formed greedily, one per idle drone. Each cluster is seeded with the highest-priority remaining pallet (ties go to the pallet with the most compatible pallets within the cluster radius, then to pool order), so urgent pallets anchor full clusters instead of being left over as singletons. The seed's nearest compatible neighbours within the radius complete the cluster, up to the maximum cluster size. Seeding is deterministic.
+
 For a cluster \(\kappa\), the code computes:
 
 - a centroid,
-- a greedy intra-cluster tour sequence,
+- an intra-cluster tour sequence, ordered per drone (`TaskCluster.planTour`): the order minimising the Manhattan route \(p_i(t) \to g_1 \to \dots \to g_{|\kappa|} \to p_{base}\), found by enumerating all orders for clusters of up to 6 pallets and by nearest neighbour from \(p_i(t)\) beyond that,
 - a scalar `tourCost` incorporating both structural hover and translational flight scaled by \(\beta_{fly} \cdot \gamma\):
   \[
   c_{\kappa}^{tour} = \sum_{j=1}^{|\kappa|-1} \beta_{fly} \gamma \lVert g_j - g_{j+1} \rVert_1 + \sum_{j=1}^{|\kappa|} \beta_{hover} t_j^{hover}.
   \]
 
-The required-energy estimate evaluates flight from the drone's current position to the start of the tour, internal tour execution, and return from the final task to base:
+The required-energy estimate evaluates flight from the drone's current position to the start of the tour that drone would fly, internal tour execution, and return from the final task to base. Once Munkres assigns the cluster, the tour is fixed to that same order (`orderTourFrom`), so the drone flies exactly the order the feasibility check accepted:
 
 \[
 e_{req}^{cluster}(i,\kappa)
