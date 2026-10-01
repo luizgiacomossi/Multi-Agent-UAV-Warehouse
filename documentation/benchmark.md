@@ -63,11 +63,13 @@ Results (5 runs per configuration, Cooperative and CBS pooled; mean makespan in 
 | M-16 | 2 | 554 | 528 (-5% ± 2) | 512 (-8% ± 2) | 469 (-15% ± 5) |
 | M-16 | 4 | 289 | 292 (+1% ± 2) | 258 (-10% ± 4) | 244 (-15% ± 6) |
 | M-16 | 8 | 161 | 145 (-8% ± 10) | 138 (-12% ± 10) | 134 (-15% ± 7) |
-| L-24 | 2 | 2004 | 1620 (-19% ± 5) | 1560 (-22% ± 3) | 1518 (-24% ± 2) |
-| L-24 | 4 | 1046 | 871 (-17% ± 3) | 825 (-21% ± 3) | 755 (-28% ± 2) |
-| L-24 | 8 | 530 | 450 (-15% ± 5) | 446 (-15% ± 5) | 431 (-18% ± 7) |
+| L-24 | 2 | 2004 | 1620 (-19% ± 5) | 1560 (-22% ± 3) | 1484 (-26% ± 3) |
+| L-24 | 4 | 1046 | 874 (-16% ± 3) | 825 (-21% ± 3) | 767 (-26% ± 3) |
+| L-24 | 8 | 530 | 452 (-14% ± 5) | 446 (-15% ± 5) | 426 (-19% ± 7) |
 
-Stations shorten full-coverage missions by 15–28% with four stations, more in the large warehouse, where the base is farther from most pallets. With four drones in the medium warehouse, a single station makes no measurable difference.
+Stations shorten full-coverage missions by 15–26% with four stations, more in the large warehouse, where the base is farther from most pallets. With four drones in the medium warehouse, a single station makes no measurable difference.
+
+With `--drain 3` the same 240 runs plan in about 40 s in total (at most 0.5 s per run), with no incidents. Mean coverage is 70%, limited by reach: with a capacity of 30, the triple drain and the absolute 20-unit safety margin, many pallets cannot be reached from any charger (in the scenario we traced, none of the pallets left over could).
 
 **Generator limits.** The warehouse generator places forklifts only in aisles where `x % 4 === 0`. That caps them at 1 (12³), 2 (16³) and 3 (24³), regardless of the requested count. The benchmark records the counts actually generated.
 
