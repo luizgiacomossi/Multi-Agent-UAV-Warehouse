@@ -60,6 +60,13 @@ Each pallet holds one kind of bus spare part (`Pallet.contents`, defined in [`cl
 
 The part and quantity come from a hash of the pallet's cell, not from the simulation's random source, so contents do not change any seeded scenario or benchmark result, and the same warehouse always holds the same parts. The planner ignores contents. The UI reveals them at the scan tick: the Completed Scans table shows each scanned pallet's part and quantity, with running totals per part above it.
 
+**Inventory mission (voice).** The operator assistant ([`services/slm/SimulationToolRegistry.ts`](../services/slm/SimulationToolRegistry.ts)) has two inventory tools:
+
+- `start_inventory_mission` ("update the inventory"): switches the mission end condition to *All Pallets* while keeping the current warehouse, plans a mission that scans every pallet, and starts playback. When playback reaches the end of that plan, the assistant shows and speaks the result, e.g. "Inventory complete: all 77 pallets scanned. Found 1,719 brake pads, 3,354 oil filters and 221 tyres." Pallets the fleet could not reach are named in the summary. No announcement is made if another plan replaced the mission.
+- `get_inventory` ("how is the inventory?"): the units of each part found on the pallets scanned up to the current tick.
+
+Both also work without LM Studio, through the rule-based fallback (commands containing "inventory"). The summary is built by `buildInventoryReport` and `describeInventory` ([`classes/InventoryReport.ts`](../classes/InventoryReport.ts)).
+
 ### 3.2 City
 
 The city generator creates a structured obstacle field with roads, block interiors, and varying building heights derived from geometric rules and pseudo-random local variation.

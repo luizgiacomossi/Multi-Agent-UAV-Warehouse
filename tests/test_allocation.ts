@@ -4,6 +4,8 @@ import { Drone } from '../classes/Drone';
 import { Agent, Task, Position3D, Pallet } from '../types';
 import { MATH_CONSTANTS } from '../SimulationConfig';
 import { BUS_PARTS, palletContentsAt, totalsByPart } from '../classes/PalletContents';
+import { buildInventoryReport, describeInventory } from '../classes/InventoryReport';
+import { SimulationToolRegistry, SimulationContext } from '../services/slm/SimulationToolRegistry';
 
 let passed = 0;
 let failed = 0;
@@ -18,7 +20,7 @@ function assert(condition: boolean, testName: string, detail?: string) {
   }
 }
 
-export function runAllocationTests(): { passed: number; failed: number } {
+export async function runAllocationTests(): Promise<{ passed: number; failed: number }> {
   console.log('\n========================================');
   console.log('🧪 RUNNING TASK ALLOCATION TEST SUITE');
   console.log('========================================');
@@ -194,10 +196,36 @@ export function runAllocationTests(): { passed: number; failed: number } {
   const totals = totalsByPart([{ part: 'TYR', quantity: 4 }, { part: 'TYR', quantity: 6 }, { part: 'BRK', quantity: 50 }]);
   assert(totals.TYR === 10 && totals.BRK === 50 && totals.FLT === 0, 'Totals add up per part', JSON.stringify(totals));
 
+  // Inventory report: only scanned pallets count
+  const stock: Pallet[] = [
+    { id: 'P1', position: { x: 0, y: 0, z: 0 }, weight: 1, payload_type: 'camera', contents: { part: 'BRK', quantity: 40 } },
+    { id: 'P2', position: { x: 1, y: 0, z: 0 }, weight: 1, payload_type: 'rfid', contents: { part: 'TYR', quantity: 8 } },
+    { id: 'P3', position: { x: 2, y: 0, z: 0 }, weight: 1, payload_type: 'rfid', contents: { part: 'TYR', quantity: 6 } },
+  ];
+  const partial = buildInventoryReport(stock, new Set(['P1', 'P2']));
+  assert(partial.scannedPallets === 2 && partial.unitsByPart.BRK === 40 && partial.unitsByPart.TYR === 8, 'Inventory counts scanned pallets only', JSON.stringify(partial));
+  assert(describeInventory(partial) === 'Inventory finished with 2 of 3 pallets scanned; 1 could not be reached. Found 40 brake pads, 0 oil filters and 8 tyres.', 'Unfinished inventory names the pallets not reached', describeInventory(partial));
+  assert(describeInventory(buildInventoryReport(stock, new Set(['P1', 'P2', 'P3']))).startsWith('Inventory complete: all 3 pallets scanned.'), 'Complete inventory');
+
+  // Voice tools: start the inventory mission and read the stock
+  let inventoryStarted = 0;
+  const context: SimulationContext = {
+    getAgents: () => [], getPallets: () => stock, getCurrentTick: () => 0, getChargeStations: () => [],
+    getIncidents: () => [], getScannedPalletIds: () => new Set(['P3']), getActivePalletIds: () => new Set(),
+    onStartInventory: () => { inventoryStarted++; },
+  };
+  const registry = new SimulationToolRegistry(context);
+  const toolNames = registry.getToolDefinitions().map(t => t.function.name);
+  assert(toolNames.includes('start_inventory_mission') && toolNames.includes('get_inventory'), 'Inventory tools are offered to the assistant');
+  const started = await registry.executeTool('start_inventory_mission');
+  assert(started.success && inventoryStarted === 1, 'start_inventory_mission starts the mission once', JSON.stringify(started));
+  const inventory = await registry.executeTool('get_inventory');
+  assert(inventory.scannedPallets === 1 && inventory.unitsFound['Tyres'] === 6, 'get_inventory reports scanned stock', JSON.stringify(inventory));
+
   return { passed, failed };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const result = runAllocationTests();
+  const result = await runAllocationTests();
   process.exit(result.failed > 0 ? 1 : 0);
 }

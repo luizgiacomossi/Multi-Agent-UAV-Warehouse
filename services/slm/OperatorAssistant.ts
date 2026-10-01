@@ -67,6 +67,7 @@ CURRENT SIMULATION STATE:
 • Warehouse Pallets: ${palletCount} items
 • Current Step: Tick ${tick}/${maxTicks} (${this.context.isPlaying ? 'PLAYING' : 'PAUSED'})
 • Supported Algorithms: [${algos}]
+• Pallets hold bus parts (brake pads, oil filters, tyres); a pallet's contents are known only after a drone scans it. "Update the inventory" means start_inventory_mission; "how is the inventory" means get_inventory.
 
 When the operator specifies a drone (e.g. "Agent 1" or "D0"), map to its exact ID. Always call tools to get live data or trigger actions. Always respond in English.`;
   }
@@ -163,6 +164,18 @@ When the operator specifies a drone (e.g. "Agent 1" or "D0"), map to its exact I
   private async handleLocalFallback(query: string): Promise<AssistantProcessResult> {
     const q = query.toLowerCase();
     const toolsExecuted: { name: string; args: any; result: any }[] = [];
+
+    // 0. Inventory: start a full inventory mission, or report the stock found so far
+    if (q.includes('inventory')) {
+      if (['update', 'refresh', 'start', 'run', 'full', 'take', 'do '].some(w => q.includes(w))) {
+        const res = await this.registry.executeTool('start_inventory_mission', {});
+        toolsExecuted.push({ name: 'start_inventory_mission', args: {}, result: res });
+        return { text: `📦 ${res.message || res.error}`, toolsExecuted, usedLocalFallback: true };
+      }
+      const res = await this.registry.executeTool('get_inventory', {});
+      toolsExecuted.push({ name: 'get_inventory', args: {}, result: res });
+      return { text: `📦 ${res.summary}`, toolsExecuted, usedLocalFallback: true };
+    }
 
     // 1. Task Statistics
     if (q.includes('task') && (q.includes('statistic') || q.includes('progress') || q.includes('how many') || q.includes('count') || q.includes('status'))) {

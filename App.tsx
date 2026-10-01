@@ -9,6 +9,7 @@ import { OperatorAssistant } from './services/slm/OperatorAssistant';
 import { Agent, Position3D, GenerationTheme, SimulationIncident, Forklift, Pallet, ClusterVisualization, TaskPriorityMode, MissionCompletionMode } from './types';
 import { SimulationManager } from './classes/SimulationManager';
 import { Warehouse } from './classes/Warehouse';
+import { buildInventoryReport, describeInventory } from './classes/InventoryReport';
 import { GRID_SIZE, DEFAULT_AGENT_COUNT, DEFAULT_CHARGE_RATE, SIMULATOR_DRAIN_MULTIPLIER, PLAYBACK_TICK_MS } from './SimulationConfig';
 import { ThemeModal } from './components/ThemeModal';
 import { ThemeService } from './services/theme/ThemeService';
@@ -67,6 +68,11 @@ const App: React.FC = () => {
   const engineRef = useRef(new SimulationManager(GRID_SIZE, DEFAULT_AGENT_COUNT));
   // Id of the latest planning request; results of older (superseded) requests are dropped
   const planRequestRef = useRef(0);
+  // Set while the inventory mission switches the completion mode, so the warehouse is not regenerated
+  const keepWorldOnModeChangeRef = useRef(false);
+  // Plan request of the running inventory mission (null = none); its result is announced at the end
+  const inventoryPlanRef = useRef<number | null>(null);
+  const [announcement, setAnnouncement] = useState<{ id: number; text: string } | null>(null);
 
   // Core Update Function
   const updateSimulation = async (algo: string, roundTrip: boolean, mCount: number, altitude: number, batEnabled: boolean, aMode: '1-to-1' | 'Cluster', cRadius: number, cMaxSize: number, completionMode: MissionCompletionMode, rate: number, drain: number) => {
@@ -103,6 +109,7 @@ const App: React.FC = () => {
 
   // Strategy/Config Update Effect — replans paths when algorithm/flight params change
   useEffect(() => {
+    if (keepWorldOnModeChangeRef.current) return; // the inventory mission plans this itself
     if (!isGenerating && agents.length > 0) {
       setIsPlaying(false);
       updateSimulation(selectedAlgorithm, isRoundTrip, missionCount, maxAltitude, batteryEnabled, allocationMode, clusterRadius, maxClusterSize, missionCompletionMode, chargeRate, drainMultiplier);
@@ -126,6 +133,11 @@ const App: React.FC = () => {
   }, [agentCount, batteryCapacity]);
 
   useEffect(() => {
+    if (keepWorldOnModeChangeRef.current) {
+      // The inventory mission switched to "All Pallets" on purpose: keep the current warehouse
+      keepWorldOnModeChangeRef.current = false;
+      return;
+    }
     if (!isGenerating && agents.length > 0) {
       handleGenerate(currentTheme);
     }
@@ -180,23 +192,36 @@ const App: React.FC = () => {
     }, 50);
   };
 
-  const handleNewMissions = async () => {
+  const handleNewMissions = async (completionMode: MissionCompletionMode = missionCompletionMode, onPlanned?: () => void) => {
     setIsPlaying(false);
     setTick(0);
     setIsGenerating(true);
 
     setTimeout(async () => {
       const engine = engineRef.current;
-      const effectiveDeployFromBase = missionCompletionMode === 'all-pallets' || missionCount > 1 ? true : deployFromBase;
+      const effectiveDeployFromBase = completionMode === 'all-pallets' || missionCount > 1 ? true : deployFromBase;
       // Re-init agents (keeps world, updates warehouse if needed)
       engine.initializeAgents(agentCount, batteryCapacity, effectiveDeployFromBase, maxAltitude);
 
       // Sync Warehouse state
       setWarehouse(engine.world.warehouse);
 
-      await updateSimulation(selectedAlgorithm, isRoundTrip, missionCount, maxAltitude, batteryEnabled, allocationMode, clusterRadius, maxClusterSize, missionCompletionMode, chargeRate, drainMultiplier);
+      await updateSimulation(selectedAlgorithm, isRoundTrip, missionCount, maxAltitude, batteryEnabled, allocationMode, clusterRadius, maxClusterSize, completionMode, chargeRate, drainMultiplier);
       setIsGenerating(false);
+      onPlanned?.();
     }, 50);
+  };
+
+  // Inventory update: scan every pallet of the current warehouse, play the mission and announce the parts found
+  const handleStartInventory = () => {
+    if (missionCompletionMode !== 'all-pallets') {
+      keepWorldOnModeChangeRef.current = true;
+      setMissionCompletionMode('all-pallets');
+    }
+    handleNewMissions('all-pallets', () => {
+      inventoryPlanRef.current = planRequestRef.current;
+      setIsPlaying(true);
+    });
   };
 
   // Regenerate the scenario when the grid size or charging sites change, once the slider settles. The ref calls
@@ -243,6 +268,16 @@ const App: React.FC = () => {
     return ids;
   }, [agents, tick]);
 
+  // Announce the inventory once its mission has played to the end (and was not replaced by another plan)
+  useEffect(() => {
+    if (inventoryPlanRef.current === null || maxTicks === 0 || tick < maxTicks) return;
+    if (inventoryPlanRef.current === planRequestRef.current) {
+      const report = buildInventoryReport(pallets, scannedPalletIds);
+      setAnnouncement({ id: Date.now(), text: `📦 ${describeInventory(report)}` });
+    }
+    inventoryPlanRef.current = null;
+  }, [tick, maxTicks, pallets, scannedPalletIds]);
+
   const activePalletIds = useMemo(() => {
     const ids = new Set<string>();
     agents.forEach(a => {
@@ -286,7 +321,8 @@ const App: React.FC = () => {
           setTick(0);
         },
         onSetTick: (t: number) => setTick(t),
-        onNewMissions: handleNewMissions,
+        onNewMissions: () => handleNewMissions(),
+        onStartInventory: handleStartInventory,
         onChangeAlgorithm: (algo: string) => setSelectedAlgorithm(algo),
         getAvailableAlgorithms: () => engineRef.current.getAvailableAlgorithms(),
         onControlCamera: handleControlCamera,
@@ -312,7 +348,8 @@ const App: React.FC = () => {
         setTick(0);
       },
       onSetTick: (t: number) => setTick(t),
-      onNewMissions: handleNewMissions,
+      onNewMissions: () => handleNewMissions(),
+      onStartInventory: handleStartInventory,
       onChangeAlgorithm: (algo: string) => setSelectedAlgorithm(algo),
       getAvailableAlgorithms: () => engineRef.current.getAvailableAlgorithms(),
       onControlCamera: handleControlCamera,
@@ -379,7 +416,7 @@ const App: React.FC = () => {
         onTogglePlay={handleTogglePlay}
         onReset={() => { setIsPlaying(false); setTick(0); }}
         onGenerate={handleGenerate}
-        onNewMissions={handleNewMissions}
+        onNewMissions={() => handleNewMissions()}
         isGenerating={isGenerating}
         agentCount={agentCount}
         setAgentCount={setAgentCount}
@@ -451,6 +488,7 @@ const App: React.FC = () => {
         lmStudioUrl={lmStudioUrl}
         onUpdateLMStudioUrl={handleUpdateLMStudioUrl}
         isLMStudioConnected={isLMStudioConnected}
+        announcement={announcement}
       />
 
       <ThemeModal isOpen={isThemeModalOpen} onClose={() => setIsThemeModalOpen(false)} />

@@ -9,7 +9,7 @@ console.log('╔═════════════════════�
 console.log('║       MULTI-DRONE PATH PLANNING & ALLOCATION TEST SUITE    ║');
 console.log('╚════════════════════════════════════════════════════════════╝');
 
-const allocationResults = runAllocationTests();
+const allocationResults = await runAllocationTests();
 const planningResults = runPathPlanningTests();
 const benchmarkResults = await runBenchmarkTests();
 const chargingResults = await runChargingTests();
