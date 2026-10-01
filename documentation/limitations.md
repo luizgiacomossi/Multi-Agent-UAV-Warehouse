@@ -16,6 +16,8 @@ screened to match the payload types supported by the active idle drones.
 
 While this prevents starvation caused by sensor mismatches and keeps runtime performance snappy, it is a windowed matching rather than a global Hungarian match over the entirety of hundreds of remaining pallets simultaneously.
 
+The window is the first open pallets in list order, not the nearest. A drone that can do none of them gets its nearest feasible pallets added (see Section 6 of [`task_allocation.md`](task_allocation.md)), but a drone that can do at least one pooled pallet is still matched within the window, even if pallets much closer to it are outside. A pool built from the pallets nearest the idle drones would likely shorten missions, but changes every earlier benchmark result.
+
 Future work:
 - evaluate the optimality gap between windowed candidate allocation and full-warehouse matching,
 - investigate hierarchical spatial bisection for multi-bay warehouses.

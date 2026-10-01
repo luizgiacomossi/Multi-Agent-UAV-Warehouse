@@ -24,7 +24,7 @@ The loop is ordered by time. Each drone's clock is the last tick of its planned 
 2. the planner appends one leg to each drone with a leg to fly whose clock is within the horizon. Planning them together lets CBS resolve their conflicts jointly;
 3. each of those drones updates its mission-controller state through `completeLeg()`;
 4. idle drones whose clock is within the horizon are allocated. An idle drone further ahead in time waits, because a busy drone may still become free earlier. Docked idle drones recharge first;
-5. idle drones that got no task and are away from their dock never wait airborne. A drone whose battery cannot cover any open pallet gets a recharge job (the base or a free station, see [`task_allocation.md`](task_allocation.md)); any other drone flies home. A drone arriving at a station charges to full there;
+5. idle drones that got no task and are away from their dock never wait airborne. A drone whose battery cannot cover any pallet offered in this round gets a recharge job (the base or a station that is free in time, see [`task_allocation.md`](task_allocation.md)); any other drone flies home. A drone arriving at a station charges to full there. Charging decisions and station bookings are in `ChargingPolicy`;
 6. the loop repeats until all drones are completed or stranded, nothing can progress, or the safety bound is reached.
 
 Planning all drones every cycle, regardless of their clocks, let clocks drift apart by hundreds of ticks. A drone that was free early could then not pick up tasks another drone took much later, and full-coverage missions ended with one drone idle for up to 17% of the mission. With time ordering the gap is under about 5%.
@@ -36,6 +36,8 @@ This is a pragmatic decomposition that keeps the implementation inspectable.
 The reservation table persists across legs. Forklifts are inserted for the full global time horizon, while drone reservations accumulate as paths are appended.
 
 This means a late-assigned drone still plans around paths generated much earlier in the global simulation.
+
+The converse also holds: drone clocks differ, so a drone that is behind in time plans around legs other drones have already committed for its future. Anything shared, such as a charging station, has to be checked against the reservations from that drone's clock on, not against what other drones are doing in the current planning cycle.
 
 ## 4. Playback
 
