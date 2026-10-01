@@ -50,6 +50,16 @@ The warehouse generator creates:
 
 Pallets are both logical targets and blocked cells. Because of that, the planner cannot route into a pallet voxel directly; it later resolves the target to a nearby free voxel with bounded BFS.
 
+Each pallet holds one kind of bus spare part (`Pallet.contents`, defined in [`classes/PalletContents.ts`](../classes/PalletContents.ts)):
+
+| Code | Part | Units per pallet |
+|---|---|---|
+| `BRK` | Brake pads | 40–120 |
+| `FLT` | Oil filters | 60–200 |
+| `TYR` | Tyres | 4–12 |
+
+The part and quantity come from a hash of the pallet's cell, not from the simulation's random source, so contents do not change any seeded scenario or benchmark result, and the same warehouse always holds the same parts. The planner ignores contents. The UI reveals them at the scan tick: the Completed Scans table shows each scanned pallet's part and quantity, with running totals per part above it.
+
 ### 3.2 City
 
 The city generator creates a structured obstacle field with roads, block interiors, and varying building heights derived from geometric rules and pseudo-random local variation.

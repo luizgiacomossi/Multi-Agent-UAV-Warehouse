@@ -2,6 +2,7 @@ import { World } from './World';
 import { GenerationTheme, Position3D, TaskPriorityMode } from '../types';
 import { WAREHOUSE, DEFAULT_MAX_ALTITUDE, MAX_TASKS } from '../SimulationConfig';
 import { random } from '../utils/Random';
+import { palletContentsAt } from './PalletContents';
 
 export interface ReservedZone {
   minX: number; maxX: number;
@@ -52,7 +53,8 @@ export class WorldGenerator {
                      id: `PLT-${this.generateUUID()}`,
                      position: { x, y, z },
                      weight: this.getPalletWeight(priorityMode),
-                     payload_type: random() > 0.5 ? 'camera' : 'rfid'
+                     payload_type: random() > 0.5 ? 'camera' : 'rfid',
+                     contents: palletContentsAt({ x, y, z })
                  });
              }
              attempts++;
@@ -107,7 +109,8 @@ export class WorldGenerator {
                           id: `PLT-${this.generateUUID()}`,
                           position: { x, y, z },
                           weight: this.getPalletWeight(priorityMode),
-                          payload_type: random() > 0.5 ? 'camera' : 'rfid'
+                          payload_type: random() > 0.5 ? 'camera' : 'rfid',
+                          contents: palletContentsAt({ x, y, z })
                       });
                   }
               }

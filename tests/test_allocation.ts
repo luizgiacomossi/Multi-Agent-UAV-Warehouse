@@ -3,6 +3,7 @@ import { TaskCluster } from '../classes/TaskCluster';
 import { Drone } from '../classes/Drone';
 import { Agent, Task, Position3D, Pallet } from '../types';
 import { MATH_CONSTANTS } from '../SimulationConfig';
+import { BUS_PARTS, palletContentsAt, totalsByPart } from '../classes/PalletContents';
 
 let passed = 0;
 let failed = 0;
@@ -178,6 +179,20 @@ export function runAllocationTests(): { passed: number; failed: number } {
   const clusterAssignments = CostModel.executeClusterAllocation([droneA], [cluster], pBase, dMax);
   assert(clusterAssignments.length === 1, 'Drone successfully allocated to feasible cluster');
   assert(clusterAssignments[0].cluster.id === cluster.id, 'Allocated cluster ID matches');
+
+  // ─────────────────────────────────────────────────────────────
+  // Pallet contents (bus parts)
+  // ─────────────────────────────────────────────────────────────
+  console.log('\n--- Pallet Contents ---');
+  const cells: Position3D[] = [];
+  for (let x = 0; x < 12; x++) for (let y = 0; y < 8; y++) for (let z = 0; z < 12; z++) cells.push({ x, y, z });
+  const contents = cells.map(palletContentsAt);
+  assert(JSON.stringify(palletContentsAt({ x: 5, y: 2, z: 8 })) === JSON.stringify(palletContentsAt({ x: 5, y: 2, z: 8 })), 'Contents depend only on the cell');
+  assert(contents.every(c => c.quantity >= BUS_PARTS[c.part].minQuantity && c.quantity <= BUS_PARTS[c.part].maxQuantity), 'Quantities stay within each part\'s range');
+  const palletsPerPart = Object.keys(BUS_PARTS).map(part => contents.filter(c => c.part === part).length);
+  assert(palletsPerPart.every(n => n > cells.length / 5), 'Every part is common', palletsPerPart.join(','));
+  const totals = totalsByPart([{ part: 'TYR', quantity: 4 }, { part: 'TYR', quantity: 6 }, { part: 'BRK', quantity: 50 }]);
+  assert(totals.TYR === 10 && totals.BRK === 50 && totals.FLT === 0, 'Totals add up per part', JSON.stringify(totals));
 
   return { passed, failed };
 }
