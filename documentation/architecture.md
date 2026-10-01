@@ -77,6 +77,18 @@ Each drone stores:
 - dense cost-matrix construction,
 - Hungarian assignment.
 
+### 2.6 Mission, Clusters and Charging
+
+| File | Responsibility |
+|---|---|
+| [`classes/MissionController.ts`](../classes/MissionController.ts) | per-drone mission state machine (`IDLE`, `OUTBOUND`, `EXECUTING_TOUR`, `RETURNING`, `RECHARGING`, `COMPLETED`) |
+| [`classes/TaskCluster.ts`](../classes/TaskCluster.ts) | a cluster of pallets and its visiting order (`planTour`, `orderTourFrom`) |
+| [`classes/CBSPlanner.ts`](../classes/CBSPlanner.ts) | Conflict-Based Search over the drones planned in one cycle |
+| [`classes/BatteryModel.ts`](../classes/BatteryModel.ts) | battery arithmetic: charge or drain per tick, ticks to a full charge, flight energy estimate |
+| [`classes/ChargingPolicy.ts`](../classes/ChargingPolicy.ts) | where and when drones charge: charger choice, station bookings, charging in place |
+| [`classes/ChargingSchedule.ts`](../classes/ChargingSchedule.ts) | the fleet's charging sessions, for the telemetry panel |
+| [`classes/DroneActivity.ts`](../classes/DroneActivity.ts) | per-tick drone status shown in the UI |
+
 ## 3. Data Flow
 
 ```mermaid
@@ -86,6 +98,8 @@ graph TD
     SM --> S["Swarm / Drones"]
     SM --> CM["CostModel"]
     SM --> PP["Path Planners"]
+    SM --> CP["ChargingPolicy"]
+    CP --> CM
     W --> WG["WorldGenerator"]
     SM --> CA["CollisionAnalyzer"]
     UI --> VW["VoxelWorld"]

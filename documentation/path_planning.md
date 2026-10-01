@@ -124,7 +124,7 @@ Each child re-plans only the constrained drone. The first conflict-free node is 
 
 **Hold time.** `MissionController.continuesAfterCurrentLeg()` tells whether the drone departs again right after the leg. Since drones never finish airborne, that is true for every pallet stop.
 - In that case its next leg (the next task, or the flight home) is planned from the arrival tick, so it holds its goal for only 1 tick.
-- Only a flight to the dock is a parking goal, held for the whole look-ahead window (`world.size * 4` ticks).
+- Only a flight to the dock or to a charging station is a parking goal, held for the whole look-ahead window (`world.size * 4` ticks). A station is therefore offered only when no other drone has reserved it from the drone's current tick on (see Section 5 of [`task_allocation.md`](task_allocation.md)); otherwise no arrival could be held there and the search failed exhaustively, again and again.
 
 `ConflictDetector` applies the same hold time. Assuming every drone parks forever over-constrained round trips: it pushed required arrivals past the search depth, causing exhaustive failed searches of about 2.5 s each on 24³ grids.
 
