@@ -9,7 +9,7 @@ import { OperatorAssistant } from './services/slm/OperatorAssistant';
 import { Agent, Position3D, GenerationTheme, SimulationIncident, Forklift, Pallet, ClusterVisualization, TaskPriorityMode, MissionCompletionMode } from './types';
 import { SimulationManager } from './classes/SimulationManager';
 import { Warehouse } from './classes/Warehouse';
-import { GRID_SIZE, DEFAULT_AGENT_COUNT, DEFAULT_CHARGE_RATE, SIMULATOR_DRAIN_MULTIPLIER } from './SimulationConfig';
+import { GRID_SIZE, DEFAULT_AGENT_COUNT, DEFAULT_CHARGE_RATE, SIMULATOR_DRAIN_MULTIPLIER, PLAYBACK_TICK_MS } from './SimulationConfig';
 import { ThemeModal } from './components/ThemeModal';
 import { ThemeService } from './services/theme/ThemeService';
 import { ThemeId } from './services/theme/ThemeTypes';
@@ -56,6 +56,7 @@ const App: React.FC = () => {
 
   // -- Flow Control --
   const [tick, setTick] = useState(0);
+  const [playbackSpeed, setPlaybackSpeed] = useState(1); // multiple of PLAYBACK_TICK_MS per tick
   const [isPlaying, setIsPlaying] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [agentCount, setAgentCount] = useState(DEFAULT_AGENT_COUNT);
@@ -221,10 +222,10 @@ const App: React.FC = () => {
           }
           return t + 1;
         });
-      }, 150);
+      }, PLAYBACK_TICK_MS / playbackSpeed);
     }
     return () => clearInterval(interval);
-  }, [isPlaying, maxTicks]);
+  }, [isPlaying, maxTicks, playbackSpeed]);
 
   const handleTogglePlay = () => {
     if (tick >= maxTicks) setTick(0);
@@ -368,6 +369,7 @@ const App: React.FC = () => {
         scannedPalletIds={scannedPalletIds}
         activePalletIds={activePalletIds}
         cameraFocus={cameraFocus}
+        tickMs={PLAYBACK_TICK_MS / playbackSpeed}
       />
 
       <ControlPanel
@@ -405,6 +407,8 @@ const App: React.FC = () => {
         setChargeRate={setChargeRate}
         drainMultiplier={drainMultiplier}
         setDrainMultiplier={setDrainMultiplier}
+        playbackSpeed={playbackSpeed}
+        setPlaybackSpeed={setPlaybackSpeed}
         maxAltitude={maxAltitude}
         setMaxAltitude={setMaxAltitude}
         allocationMode={allocationMode}

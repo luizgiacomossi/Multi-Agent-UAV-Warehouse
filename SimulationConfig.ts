@@ -140,6 +140,12 @@ export const PATHFINDER_TIMEOUT_MS = 10_000;
 /** Maximum path length (in ticks) before the planner gives up on a leg. */
 export const MAX_TIMESTEPS = 10_000;
 
+/** Playback at 1×: wall-clock milliseconds per simulation tick. */
+export const PLAYBACK_TICK_MS = 150;
+
+/** Playback speeds offered in the UI (multiples of 1× = PLAYBACK_TICK_MS per tick). */
+export const PLAYBACK_SPEEDS = [0.25, 0.5, 1, 2, 4, 8];
+
 /** Number of forward simulation cycles in Infinite mode (Out + Return = 2 legs each). */
 export const INFINITE_MISSION_CYCLES = 3;
 
