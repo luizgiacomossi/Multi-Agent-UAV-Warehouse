@@ -16,6 +16,12 @@
 /** Default voxel-grid side length (cubed → world is N×N×N). */
 export const GRID_SIZE = 12;
 
+/**
+ * Upper bound on generated tasks (the "Total Initial Tasks" slider maximum). Themes without
+ * fixed pallet slots (everything but Warehouse) use it when every pallet is requested.
+ */
+export const MAX_TASKS = 200;
+
 // ─── Swarm / Agent Defaults ────────────────────────────────────────────────────
 
 /** Default number of drones spawned in the simulation. */

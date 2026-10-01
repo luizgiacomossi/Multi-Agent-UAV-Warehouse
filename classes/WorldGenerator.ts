@@ -1,6 +1,6 @@
 import { World } from './World';
 import { GenerationTheme, Position3D, TaskPriorityMode } from '../types';
-import { WAREHOUSE, DEFAULT_MAX_ALTITUDE } from '../SimulationConfig';
+import { WAREHOUSE, DEFAULT_MAX_ALTITUDE, MAX_TASKS } from '../SimulationConfig';
 import { random } from '../utils/Random';
 
 export interface ReservedZone {
@@ -36,11 +36,13 @@ export class WorldGenerator {
     }
 
     // Ensure all non-Warehouse themes strictly spawn the exact totalTasks requested
+    // (totalTasks = Infinity means "every pallet": capped at MAX_TASKS, as these themes have no pallet slots)
     if (theme !== 'Warehouse') {
         world.pallets = [];
+        const target = Math.min(totalTasks, MAX_TASKS);
         let attempts = 0;
         // Find safe spawn points across the generated obstacles
-        while (world.pallets.length < totalTasks && attempts < totalTasks * 20) {
+        while (world.pallets.length < target && attempts < target * 20) {
              const x = Math.floor(random() * world.size);
              const z = Math.floor(random() * world.size);
              const y = Math.floor(random() * Math.min(world.size - 1, 15));

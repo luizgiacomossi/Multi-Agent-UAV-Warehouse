@@ -2,6 +2,7 @@
 import React from 'react';
 import { Play, Pause, RotateCcw, Box, Grid3X3, Settings, Building2, ShieldCheck, Skull, Shuffle, Cpu, Repeat, Battery, Zap, Infinity as InfinityIcon, ArrowUpToLine, Power, Palette } from 'lucide-react';
 import { GenerationTheme, TaskPriorityMode, MissionCompletionMode } from '../types';
+import { MAX_TASKS } from '../SimulationConfig';
 
 interface ControlPanelProps {
   isPlaying: boolean;
@@ -52,6 +53,11 @@ interface ControlPanelProps {
 
   totalTasks: number;
   setTotalTasks: (n: number) => void;
+  /** When set, every pallet in the scenario is a task and the slider is ignored. */
+  useAllPallets: boolean;
+  setUseAllPallets: (b: boolean) => void;
+  /** Pallets in the current scenario. */
+  palletCount: number;
   numForklifts: number;
   setNumForklifts: (n: number) => void;
   taskPriorityMode: TaskPriorityMode;
@@ -103,6 +109,9 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   setMaxClusterSize,
   totalTasks,
   setTotalTasks,
+  useAllPallets,
+  setUseAllPallets,
+  palletCount,
   numForklifts,
   setNumForklifts,
   taskPriorityMode,
@@ -233,16 +242,33 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
          <div className="space-y-1">
               <div className="flex items-center justify-between text-xs text-slate-400">
                  <span>Total Initial Tasks (M)</span>
-                 <span className="font-mono text-cyan-400">{totalTasks} items</span>
+                 <div className="flex items-center gap-2">
+                    <button
+                       onClick={() => setUseAllPallets(!useAllPallets)}
+                       aria-pressed={useAllPallets}
+                       title="Make every pallet in the scenario a task"
+                       className={`px-2 py-0.5 text-[10px] rounded-md border transition-all font-medium ${
+                         useAllPallets
+                           ? 'bg-emerald-600 text-white border-emerald-500 shadow-sm'
+                           : 'bg-slate-900 text-slate-500 border-slate-700 hover:text-slate-300'
+                       }`}
+                    >
+                       All pallets
+                    </button>
+                    <span className="font-mono text-cyan-400">
+                       {useAllPallets ? (palletCount > 0 ? `${palletCount} items` : 'all') : `${totalTasks} items`}
+                    </span>
+                 </div>
               </div>
               <input 
                  type="range" 
                  min="10" 
-                 max="200" 
+                 max={MAX_TASKS} 
                  step="5"
                  value={totalTasks} 
+                 disabled={useAllPallets}
                  onChange={(e) => setTotalTasks(Number(e.target.value))}
-                 className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-cyan-500"
+                 className={`w-full h-2 bg-slate-700 rounded-lg appearance-none accent-cyan-500 ${useAllPallets ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}
               />
          </div>
 
