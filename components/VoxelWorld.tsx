@@ -40,18 +40,42 @@ interface ChargingStationProps {
   positions: Position3D[];
 }
 
+const CHARGE_COLOR = '#10b981';
+
+/** Lightning bolt outline (in the floor plane), for the charging pads. */
+const BOLT_SHAPE = (() => {
+  const shape = new THREE.Shape();
+  shape.moveTo(0.06, 0.22);
+  shape.lineTo(-0.11, -0.02);
+  shape.lineTo(-0.01, -0.02);
+  shape.lineTo(-0.06, -0.22);
+  shape.lineTo(0.11, 0.04);
+  shape.lineTo(0.01, 0.04);
+  shape.closePath();
+  return shape;
+})();
+
+/** Charging pad: dark plate, glowing ring and a lightning bolt painted on top. */
 const ChargingStation: React.FC<ChargingStationProps> = ({ positions }) => {
   return (
     <group>
       {positions.map((pos, i) => (
-        <group key={i} position={[pos.x, pos.y - 0.45, pos.z]}>
-          <mesh>
-            <cylinderGeometry args={[0.4, 0.4, 0.1, 16]} />
-            <meshStandardMaterial color="#10b981" emissive="#10b981" emissiveIntensity={0.5} />
+        <group key={i} position={[pos.x, pos.y + FLOOR_Y, pos.z]}>
+          <mesh position={[0, 0.03, 0]}>
+            <cylinderGeometry args={[0.45, 0.47, 0.06, 32]} />
+            <meshStandardMaterial color="#0f172a" roughness={0.6} metalness={0.3} />
           </mesh>
-          <pointLight distance={2} intensity={1} color="#10b981" />
-          <Billboard position={[0, 0.5, 0]}>
-            <Text fontSize={0.2} color="#10b981" anchorX="center" anchorY="middle">{`CHARGE S${i + 1}`}</Text>
+          <mesh position={[0, 0.062, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+            <ringGeometry args={[0.34, 0.42, 40]} />
+            <meshStandardMaterial color={CHARGE_COLOR} emissive={CHARGE_COLOR} emissiveIntensity={0.8} />
+          </mesh>
+          <mesh position={[0, 0.063, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+            <shapeGeometry args={[BOLT_SHAPE]} />
+            <meshStandardMaterial color={CHARGE_COLOR} emissive={CHARGE_COLOR} emissiveIntensity={0.8} side={THREE.DoubleSide} />
+          </mesh>
+          <pointLight position={[0, 0.3, 0]} distance={2} intensity={1} color={CHARGE_COLOR} />
+          <Billboard position={[0, 0.95, 0]}>
+            <Text fontSize={0.2} color={CHARGE_COLOR} anchorX="center" anchorY="middle">{`CHARGE S${i + 1}`}</Text>
           </Billboard>
         </group>
       ))}
@@ -1074,39 +1098,241 @@ const ClusterOverlay: React.FC<{ cluster: ClusterVisualization }> = ({ cluster }
   );
 };
 
-const GridBase: React.FC<{ size: Position3D }> = ({ size }) => (
-  <gridHelper args={[size.x, size.x, 0x444444, 0x222222]} position={[(size.x - 1) / 2, -0.51, (size.z - 1) / 2]} />
+// -- Ground: floor, racks, aisle markings, forklift lanes and the drone dock --
+
+const FLOOR_COLOR = '#232a35';
+const RACK_PAD_COLOR = '#161c26';
+const RACK_UPRIGHT_COLOR = '#2563eb';
+const RACK_BEAM_COLOR = '#ea580c';
+const AISLE_LINE_COLOR = '#eab308';
+const DOCK_COLOR = '#334155';
+const PAD_COLOR = '#f59e0b';
+/** Small lifts above the floor surface for painted layers, so they never z-fight. */
+const LAYER = { grid: 0.003, rackPad: 0.004, aisleLine: 0.005, lane: 0.006 };
+
+/** Diagonal amber/black hazard stripes; `repeat` sets how many stripe tiles span the surface. */
+function hazardTexture(repeatX: number, repeatY: number): THREE.CanvasTexture {
+  const size = 64;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+  ctx.fillStyle = '#111827';
+  ctx.fillRect(0, 0, size, size);
+  ctx.fillStyle = '#f59e0b';
+  for (let k = -size; k < size * 2; k += size / 2) {
+    ctx.beginPath();
+    ctx.moveTo(k, 0);
+    ctx.lineTo(k + size / 4, 0);
+    ctx.lineTo(k + size / 4 - size, size);
+    ctx.lineTo(k - size, size);
+    ctx.closePath();
+    ctx.fill();
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(repeatX, repeatY);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+/** Flat strip on the floor from (x0, z0) to (x1, z1) (axis-aligned), `y` above the floor. */
+const FloorStrip: React.FC<{
+  x0: number; z0: number; x1: number; z1: number; y: number;
+  color?: string; opacity?: number; map?: THREE.Texture;
+}> = ({ x0, z0, x1, z1, y, color = '#ffffff', opacity = 1, map }) => (
+  <mesh position={[(x0 + x1) / 2, FLOOR_Y + y, (z0 + z1) / 2]} rotation={[-Math.PI / 2, 0, 0]}>
+    <planeGeometry args={[Math.abs(x1 - x0), Math.abs(z1 - z0)]} />
+    <meshBasicMaterial color={color} map={map} transparent={opacity < 1} opacity={opacity} depthWrite={false} />
+  </mesh>
 );
+
+/** Outline of a rectangle on the floor, drawn as four strips of the given width. */
+const FloorOutline: React.FC<{ minX: number; minZ: number; maxX: number; maxZ: number; width: number; y: number; color: string }> =
+  ({ minX, minZ, maxX, maxZ, width, y, color }) => (
+    <group>
+      <FloorStrip x0={minX} z0={minZ} x1={maxX} z1={minZ + width} y={y} color={color} />
+      <FloorStrip x0={minX} z0={maxZ - width} x1={maxX} z1={maxZ} y={y} color={color} />
+      <FloorStrip x0={minX} z0={minZ + width} x1={minX + width} z1={maxZ - width} y={y} color={color} />
+      <FloorStrip x0={maxX - width} z0={minZ + width} x1={maxX} z1={maxZ - width} y={y} color={color} />
+    </group>
+  );
+
+/** Concrete slab under the whole world, with faint grid lines on the cell edges. */
+const FloorSlab: React.FC<{ size: Position3D }> = ({ size }) => {
+  const centerX = (size.x - 1) / 2;
+  const centerZ = (size.z - 1) / 2;
+  const thickness = 0.4;
+  return (
+    <group>
+      <mesh position={[centerX, FLOOR_Y - thickness / 2, centerZ]} receiveShadow>
+        <boxGeometry args={[size.x + 1, thickness, size.z + 1]} />
+        <meshStandardMaterial color={FLOOR_COLOR} roughness={0.95} metalness={0.05} />
+      </mesh>
+      <gridHelper args={[size.x, size.x, 0x3b4554, 0x2e3644]} position={[centerX, FLOOR_Y + LAYER.grid, centerZ]} />
+    </group>
+  );
+};
+
+/** A rack block: the floor cells of one connected group of stacks, and its tallest stack. */
+interface RackBlock { minX: number; maxX: number; minZ: number; maxZ: number; height: number }
+
+/** Groups the floor-level rack cells into connected rack blocks (4-neighbour). */
+function findRackBlocks(obstacles: Position3D[]): RackBlock[] {
+  const columnHeight = new Map<string, number>();
+  for (const o of obstacles) {
+    const key = `${o.x},${o.z}`;
+    columnHeight.set(key, Math.max(columnHeight.get(key) ?? 0, o.y + 1));
+  }
+  const floorCells = new Set(obstacles.filter(o => o.y === 0).map(o => `${o.x},${o.z}`));
+  const seen = new Set<string>();
+  const blocks: RackBlock[] = [];
+  for (const start of floorCells) {
+    if (seen.has(start)) continue;
+    const block: RackBlock = { minX: Infinity, maxX: -Infinity, minZ: Infinity, maxZ: -Infinity, height: 0 };
+    const queue = [start];
+    seen.add(start);
+    while (queue.length) {
+      const key = queue.pop()!;
+      const [x, z] = key.split(',').map(Number);
+      block.minX = Math.min(block.minX, x); block.maxX = Math.max(block.maxX, x);
+      block.minZ = Math.min(block.minZ, z); block.maxZ = Math.max(block.maxZ, z);
+      block.height = Math.max(block.height, columnHeight.get(key) ?? 1);
+      for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const next = `${x + dx},${z + dz}`;
+        if (floorCells.has(next) && !seen.has(next)) { seen.add(next); queue.push(next); }
+      }
+    }
+    blocks.push(block);
+  }
+  return blocks;
+}
+
+/**
+ * Pallet racks: a dark pad under each block, blue uprights at its corners, orange beams under
+ * each level along the long sides, and a yellow line painted on the aisle floor around it.
+ */
+const RackStructures: React.FC<{ cells: Position3D[] }> = ({ cells }) => {
+  const blocks = useMemo(() => findRackBlocks(cells), [cells]);
+  return (
+    <group>
+      {blocks.map((b, i) => {
+        const x0 = b.minX - 0.5, x1 = b.maxX + 0.5, z0 = b.minZ - 0.5, z1 = b.maxZ + 0.5;
+        const top = FLOOR_Y + b.height;
+        const alongX = x1 - x0 >= z1 - z0;
+        const beamSides = alongX ? [z0, z1] : [x0, x1];
+        const beamLength = alongX ? x1 - x0 : z1 - z0;
+        return (
+          <group key={i}>
+            <FloorStrip x0={x0 - 0.05} z0={z0 - 0.05} x1={x1 + 0.05} z1={z1 + 0.05} y={LAYER.rackPad} color={RACK_PAD_COLOR} />
+            <FloorOutline minX={x0 - 0.22} minZ={z0 - 0.22} maxX={x1 + 0.22} maxZ={z1 + 0.22} width={0.06} y={LAYER.aisleLine} color={AISLE_LINE_COLOR} />
+            {[[x0, z0], [x1, z0], [x0, z1], [x1, z1]].map(([x, z], k) => (
+              <mesh key={k} position={[x, (FLOOR_Y + top) / 2, z]}>
+                <boxGeometry args={[0.06, b.height, 0.06]} />
+                <meshStandardMaterial color={RACK_UPRIGHT_COLOR} metalness={0.4} roughness={0.5} />
+              </mesh>
+            ))}
+            {Array.from({ length: b.height }, (_, level) => level).flatMap(level =>
+              beamSides.map(side => (
+                <mesh
+                  key={`${level}-${side}`}
+                  position={alongX ? [(x0 + x1) / 2, FLOOR_Y + level + 0.02, side] : [side, FLOOR_Y + level + 0.02, (z0 + z1) / 2]}
+                >
+                  <boxGeometry args={alongX ? [beamLength, 0.05, 0.04] : [0.04, 0.05, beamLength]} />
+                  <meshStandardMaterial color={RACK_BEAM_COLOR} metalness={0.3} roughness={0.6} />
+                </mesh>
+              ))
+            )}
+          </group>
+        );
+      })}
+    </group>
+  );
+};
+
+/** Hazard-striped lane on the floor along each forklift route. */
+const ForkliftLanes: React.FC<{ forklifts: Forklift[] }> = ({ forklifts }) => {
+  const lanes = useMemo(() => forklifts.filter(fl => fl.path.length > 0).map(fl => {
+    const xs = fl.path.map(p => p.x), zs = fl.path.map(p => p.z);
+    const minX = Math.min(...xs), maxX = Math.max(...xs), minZ = Math.min(...zs), maxZ = Math.max(...zs);
+    const alongZ = maxZ - minZ >= maxX - minX;
+    const half = 0.35;
+    const lane = alongZ
+      ? { x0: minX - half, x1: maxX + half, z0: minZ - 0.5, z1: maxZ + 0.5 }
+      : { x0: minX - 0.5, x1: maxX + 0.5, z0: minZ - half, z1: maxZ + half };
+    const length = alongZ ? lane.z1 - lane.z0 : lane.x1 - lane.x0;
+    // Stripe tiles about 0.7 cells long; the plane's v axis runs along z after the floor rotation
+    const map = alongZ ? hazardTexture(1, length / 0.7) : hazardTexture(length / 0.7, 1);
+    return { id: fl.id, ...lane, map };
+  }), [forklifts]);
+  useEffect(() => () => lanes.forEach(l => l.map.dispose()), [lanes]);
+  return (
+    <group>
+      {lanes.map(l => (
+        <FloorStrip key={l.id} x0={l.x0} z0={l.z0} x1={l.x1} z1={l.z1} y={LAYER.lane} map={l.map} opacity={0.35} />
+      ))}
+    </group>
+  );
+};
 
 interface WarehouseBaseProps {
   warehouse: Warehouse;
 }
 
+/** Drone dock: a raised plate with a hazard-striped border and a landing pad for each drone slot. */
 const WarehouseBase: React.FC<WarehouseBaseProps> = ({ warehouse }) => {
-  const { baseSize, position } = warehouse;
+  const { baseSize, position, capacity } = warehouse;
   const centerX = position.x + (baseSize - 1) / 2;
   const centerZ = position.z + (baseSize - 1) / 2;
+  const side = baseSize + 1;
+  const plateHeight = 0.05;
+  const border = 0.18;
 
-  const crates = useMemo(() => Array.from({ length: Math.floor(warehouse.capacity * 0.7) }).map(() => ({
-    x: (Math.random() - 0.5) * baseSize,
-    z: (Math.random() - 0.5) * baseSize,
-    rot: Math.random() * Math.PI,
-    color: Math.random() > 0.5 ? '#cd853f' : '#8b4513'
-  })), [baseSize, warehouse.capacity]);
+  // Landing pad slots, laid out like Warehouse.getSpawnLocation
+  const pads = useMemo(() => Array.from({ length: capacity }, (_, i) => ({
+    x: Math.floor(i / baseSize) - (baseSize - 1) / 2,
+    z: (i % baseSize) - (baseSize - 1) / 2,
+  })), [capacity, baseSize]);
+  const stripes = useMemo(() => ({
+    long: hazardTexture(side / 0.5, 1),
+    short: hazardTexture(1, side / 0.5),
+  }), [side]);
+  useEffect(() => () => { stripes.long.dispose(); stripes.short.dispose(); }, [stripes]);
 
+  const top = plateHeight + 0.002;
+  const h = side / 2;
   return (
-    <group position={[centerX, -0.45, centerZ]}>
-      <mesh rotation={[-Math.PI / 2, 0, 0]}>
-        <planeGeometry args={[baseSize + 1, baseSize + 1]} />
-        <meshStandardMaterial color="#f59e0b" roughness={0.8} />
+    <group position={[centerX, FLOOR_Y, centerZ]}>
+      <mesh position={[0, plateHeight / 2, 0]}>
+        <boxGeometry args={[side, plateHeight, side]} />
+        <meshStandardMaterial color={DOCK_COLOR} roughness={0.8} />
       </mesh>
-      {crates.map((crate, i) => (
-        <mesh key={i} position={[crate.x, 0.3, crate.z]} rotation={[0, crate.rot, 0]}>
-          <boxGeometry args={[0.5, 0.5, 0.5]} />
-          <meshStandardMaterial color={crate.color} />
-        </mesh>
+
+      {/* Hazard-striped border */}
+      {[-1, 1].map(s => (
+        <group key={s}>
+          <mesh position={[0, top, s * (h - border / 2)]} rotation={[-Math.PI / 2, 0, 0]}>
+            <planeGeometry args={[side, border]} />
+            <meshBasicMaterial map={stripes.long} />
+          </mesh>
+          <mesh position={[s * (h - border / 2), top, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+            <planeGeometry args={[border, side - 2 * border]} />
+            <meshBasicMaterial map={stripes.short} />
+          </mesh>
+        </group>
       ))}
-      <Text position={[0, 0.1, -(baseSize / 2 + 0.5)]} rotation={[-Math.PI / 2, 0, Math.PI]} fontSize={0.4} color="#f59e0b" anchorX="center" anchorY="middle">DISTRIBUTION CENTER</Text>
+
+      {/* Landing pads: a ring and an H on each drone slot */}
+      {pads.map((pad, i) => (
+        <group key={i} position={[pad.x, top, pad.z]} rotation={[-Math.PI / 2, 0, 0]}>
+          <mesh>
+            <ringGeometry args={[0.3, 0.36, 32]} />
+            <meshBasicMaterial color={PAD_COLOR} />
+          </mesh>
+          <Text fontSize={0.34} color={PAD_COLOR} anchorX="center" anchorY="middle" position={[0, 0, 0.001]}>H</Text>
+        </group>
+      ))}
+
+      <Text position={[0, top, -(h + 0.35)]} rotation={[-Math.PI / 2, 0, Math.PI]} fontSize={0.4} color={PAD_COLOR} anchorX="center" anchorY="middle">DISTRIBUTION CENTER</Text>
     </group>
   );
 }
@@ -1262,6 +1488,8 @@ const VoxelWorld: React.FC<VoxelWorldProps> = ({
   }, [center, camPos, gridSize]);
 
   const palletPositions = useMemo(() => new Map(pallets.map(p => [p.id, p.position])), [pallets]);
+  // Rack cells: the structural obstacles plus the cells holding pallets (which are not in `obstacles`)
+  const rackCells = useMemo(() => [...obstacles, ...pallets.map(p => p.position)], [obstacles, pallets]);
 
   // Only show collisions in the visualizer, not battery deaths
   const visibleCollisions = useMemo(() =>
@@ -1309,7 +1537,9 @@ const VoxelWorld: React.FC<VoxelWorldProps> = ({
           gridSize={gridSize}
         />
 
-        <GridBase size={gridSize} />
+        <FloorSlab size={gridSize} />
+        {pallets.length > 0 && <RackStructures cells={rackCells} />}
+        <ForkliftLanes forklifts={forklifts} />
 
         <ObstacleField obstacles={obstacles} />
 
@@ -1402,7 +1632,7 @@ const VoxelWorld: React.FC<VoxelWorldProps> = ({
           <CollisionMarker key={col.id} position={col.position} />
         ))}
 
-        <ContactShadows opacity={0.5} scale={gridSize.x * 2} blur={2} far={4} />
+        <ContactShadows position={[center.x, FLOOR_Y + 0.01, center.z]} opacity={0.5} scale={gridSize.x + 1} blur={2} far={4} />
       </Canvas>
     </div>
   );
