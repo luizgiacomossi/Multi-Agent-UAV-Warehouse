@@ -72,7 +72,7 @@ In `CollisionAnalyzer.detect(...)`, base exclusion is strictly scoped to resting
 
 ## 5. Dynamic Obstacles (Forklifts)
 
-Forklifts patrol along warehouse aisles with periodic trajectories. Each forklift occupies:
+Forklifts patrol along warehouse aisles with periodic trajectories. `WorldGenerator` gives each forklift one aisle along \(z\) and drives it over the whole length of the warehouse, so it passes every rack row; only an aisle beside the dock starts after the dock. The path holds exactly one round trip, and the planner, the collision check and the 3D view all replay it with `t % length`, so it loops without a jump. Each forklift occupies:
 
 - a ground-level body at \(y = 0\),
 - an overhead safety cage at \(y = 1\).
