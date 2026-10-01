@@ -458,6 +458,249 @@ const AgentDrone: React.FC<AgentDroneProps> = ({ agent, tick, chargeStations = [
   );
 };
 
+// -- Forklift model --
+
+const FORKLIFT_DARK = '#1f2937';
+const FORKLIFT_STEEL = '#9ca3af';
+const BEACON_COLOR = '#f59e0b';
+const SAFETY_SPOT_COLOR = '#3b82f6';
+const KEEP_OUT_COLOR = '#ef4444';
+const FRONT_WHEEL_RADIUS = 0.13;
+const REAR_WHEEL_RADIUS = 0.09;
+/** Fork heights above the floor: carrying (low) and at the rack (lifted, at each turnaround). */
+const FORK_CARRY_HEIGHT = 0.06;
+const FORK_LIFT_HEIGHT = 0.75;
+/** Fork response at 1× playback (scaled with playback speed so a lift fits in a tick or two). */
+const FORK_RESPONSE = 6;
+const MAX_REAR_STEER = 0.7;
+/** Body pitch per unit of forward acceleration (nose up when speeding up, down when braking). */
+const PITCH_PER_ACCEL = 0.02;
+const MAX_PITCH = 0.06;
+const SPEED_RESPONSE = 5;
+/** Space a forklift occupies for the drone planner: its cell at floor level and the cell above. */
+const KEEP_OUT_HEIGHT = 2;
+const KEEP_OUT_EDGES = new THREE.EdgesGeometry(new THREE.BoxGeometry(1, KEEP_OUT_HEIGHT, 1));
+
+/**
+ * Turnaround ticks of a forklift path (where the horizontal direction changes). The forklift
+ * carries a load on every other leg: it lifts the forks at each turnaround to drop or pick it up.
+ */
+function forkliftLegs(path: Position3D[]): { loaded: boolean[]; atTurnaround: boolean[] } {
+  const turnarounds: number[] = [];
+  for (let i = 1; i < path.length - 1; i++) {
+    const inX = path[i].x - path[i - 1].x, inZ = path[i].z - path[i - 1].z;
+    const outX = path[i + 1].x - path[i].x, outZ = path[i + 1].z - path[i].z;
+    if ((inX || inZ) && (outX || outZ) && (inX !== outX || inZ !== outZ)) turnarounds.push(i);
+  }
+  const loaded: boolean[] = [];
+  const atTurnaround: boolean[] = [];
+  let leg = 0;
+  for (let i = 0; i < path.length; i++) {
+    while (leg < turnarounds.length && turnarounds[leg] <= i) leg++;
+    loaded.push(leg % 2 === 0);
+    atTurnaround.push(turnarounds.some(r => Math.abs(r - i) <= 1));
+  }
+  return { loaded, atTurnaround };
+}
+
+/** A wheel rolling about its axle (x); `steerRef` turns it about y. */
+const ForkliftWheel: React.FC<{
+  position: [number, number, number];
+  radius: number;
+  width: number;
+  spinRef: (el: THREE.Group | null) => void;
+  steerRef?: (el: THREE.Group | null) => void;
+}> = ({ position, radius, width, spinRef, steerRef }) => (
+  <group position={position} ref={steerRef}>
+    <group ref={spinRef}>
+      <mesh rotation={[0, 0, Math.PI / 2]}>
+        <cylinderGeometry args={[radius, radius, width, 16]} />
+        <meshStandardMaterial color="#111827" roughness={0.9} />
+      </mesh>
+      {/* Hub with a spoke, so the rolling can be seen */}
+      <mesh rotation={[0, 0, Math.PI / 2]}>
+        <cylinderGeometry args={[radius * 0.5, radius * 0.5, width + 0.01, 12]} />
+        <meshStandardMaterial color={FORKLIFT_STEEL} metalness={0.6} roughness={0.4} />
+      </mesh>
+      <mesh>
+        <boxGeometry args={[width + 0.02, radius * 1.6, 0.02]} />
+        <meshStandardMaterial color="#374151" />
+      </mesh>
+    </group>
+  </group>
+);
+
+/** Counterbalance forklift (local +z is the front, with the forks; y = 0 is the floor). */
+const ForkliftModel: React.FC<{
+  color: string;
+  wheelSpinRefs: React.MutableRefObject<(THREE.Group | null)[]>;
+  rearSteerRefs: React.MutableRefObject<(THREE.Group | null)[]>;
+  carriageRef: React.Ref<THREE.Group>;
+  loadRef: React.Ref<THREE.Group>;
+  beaconRef: React.Ref<THREE.MeshStandardMaterial>;
+  beaconLightRef: React.Ref<THREE.PointLight>;
+}> = ({ color, wheelSpinRefs, rearSteerRefs, carriageRef, loadRef, beaconRef, beaconLightRef }) => (
+  <group>
+    {/* Wheels: large front drive wheels, small rear steering wheels */}
+    {[-1, 1].map((side, i) => (
+      <ForkliftWheel key={`f${side}`} position={[side * 0.27, FRONT_WHEEL_RADIUS, 0.16]} radius={FRONT_WHEEL_RADIUS} width={0.09}
+        spinRef={el => { wheelSpinRefs.current[i] = el; }} />
+    ))}
+    {[-1, 1].map((side, i) => (
+      <ForkliftWheel key={`r${side}`} position={[side * 0.22, REAR_WHEEL_RADIUS, -0.27]} radius={REAR_WHEEL_RADIUS} width={0.07}
+        spinRef={el => { wheelSpinRefs.current[2 + i] = el; }} steerRef={el => { rearSteerRefs.current[i] = el; }} />
+    ))}
+
+    {/* Chassis, hood and counterweight */}
+    <mesh position={[0, 0.2, -0.04]}>
+      <boxGeometry args={[0.46, 0.18, 0.6]} />
+      <meshStandardMaterial color={color} roughness={0.45} metalness={0.2} />
+    </mesh>
+    <mesh position={[0, 0.34, -0.15]}>
+      <boxGeometry args={[0.42, 0.12, 0.3]} />
+      <meshStandardMaterial color={color} roughness={0.45} metalness={0.2} />
+    </mesh>
+    <mesh position={[0, 0.27, -0.36]} rotation={[0, 0, Math.PI / 2]}>
+      <cylinderGeometry args={[0.13, 0.13, 0.48, 16, 1, false, 0, Math.PI]} />
+      <meshStandardMaterial color={FORKLIFT_DARK} roughness={0.6} side={THREE.DoubleSide} />
+    </mesh>
+    <mesh position={[0, 0.27, -0.33]}>
+      <boxGeometry args={[0.48, 0.26, 0.06]} />
+      <meshStandardMaterial color={FORKLIFT_DARK} roughness={0.6} />
+    </mesh>
+
+    {/* Rear lights */}
+    {[-1, 1].map(side => (
+      <mesh key={side} position={[side * 0.17, 0.33, -0.5]}>
+        <boxGeometry args={[0.06, 0.03, 0.01]} />
+        <meshBasicMaterial color="#ef4444" />
+      </mesh>
+    ))}
+
+    {/* Seat, steering wheel and driver */}
+    <mesh position={[0, 0.43, -0.12]}>
+      <boxGeometry args={[0.22, 0.05, 0.18]} />
+      <meshStandardMaterial color="#111827" />
+    </mesh>
+    <mesh position={[0, 0.54, -0.22]}>
+      <boxGeometry args={[0.22, 0.18, 0.04]} />
+      <meshStandardMaterial color="#111827" />
+    </mesh>
+    <mesh position={[0, 0.48, 0.06]} rotation={[-0.5, 0, 0]}>
+      <cylinderGeometry args={[0.012, 0.012, 0.2, 6]} />
+      <meshStandardMaterial color={FORKLIFT_DARK} />
+    </mesh>
+    <mesh position={[0, 0.58, 0.02]} rotation={[-Math.PI / 3, 0, 0]}>
+      <torusGeometry args={[0.06, 0.012, 6, 16]} />
+      <meshStandardMaterial color={FORKLIFT_DARK} />
+    </mesh>
+    <mesh position={[0, 0.57, -0.11]}>
+      <cylinderGeometry args={[0.065, 0.075, 0.2, 10]} />
+      <meshStandardMaterial color="#f97316" roughness={0.7} />
+    </mesh>
+    <mesh position={[0, 0.73, -0.1]}>
+      <sphereGeometry args={[0.055, 12, 10]} />
+      <meshStandardMaterial color="#e0ac69" roughness={0.8} />
+    </mesh>
+    <mesh position={[0, 0.76, -0.1]}>
+      <sphereGeometry args={[0.062, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2]} />
+      <meshStandardMaterial color="#facc15" roughness={0.5} />
+    </mesh>
+
+    {/* Overhead guard: four posts and a slatted roof */}
+    {[[-0.2, 0.12], [0.2, 0.12], [-0.2, -0.3], [0.2, -0.3]].map(([x, z], i) => (
+      <mesh key={i} position={[x, 0.63, z]}>
+        <boxGeometry args={[0.03, 0.56, 0.03]} />
+        <meshStandardMaterial color={FORKLIFT_DARK} />
+      </mesh>
+    ))}
+    <mesh position={[0, 0.92, -0.09]}>
+      <boxGeometry args={[0.46, 0.03, 0.48]} />
+      <meshStandardMaterial color={FORKLIFT_DARK} transparent opacity={0.85} />
+    </mesh>
+    {[-0.24, -0.09, 0.06].map(z => (
+      <mesh key={z} position={[0, 0.94, z]}>
+        <boxGeometry args={[0.44, 0.015, 0.03]} />
+        <meshStandardMaterial color="#374151" />
+      </mesh>
+    ))}
+
+    {/* Headlights on the front posts */}
+    {[-1, 1].map(side => (
+      <mesh key={side} position={[side * 0.2, 0.82, 0.14]}>
+        <boxGeometry args={[0.05, 0.04, 0.02]} />
+        <meshBasicMaterial color="#fef9c3" />
+      </mesh>
+    ))}
+
+    {/* Flashing amber beacon */}
+    <mesh position={[0, 0.98, -0.25]}>
+      <cylinderGeometry args={[0.035, 0.04, 0.06, 12]} />
+      <meshStandardMaterial ref={beaconRef} color={BEACON_COLOR} emissive={BEACON_COLOR} emissiveIntensity={1} />
+    </mesh>
+    <pointLight ref={beaconLightRef} position={[0, 1.05, -0.25]} color={BEACON_COLOR} intensity={0.6} distance={2.5} />
+
+    {/* Mast: two rails, cross bars and the lift cylinder */}
+    {[-1, 1].map(side => (
+      <mesh key={side} position={[side * 0.17, 0.56, 0.27]}>
+        <boxGeometry args={[0.04, 1.04, 0.05]} />
+        <meshStandardMaterial color="#374151" metalness={0.5} roughness={0.4} />
+      </mesh>
+    ))}
+    {[0.12, 1.06].map(y => (
+      <mesh key={y} position={[0, y, 0.27]}>
+        <boxGeometry args={[0.38, 0.04, 0.04]} />
+        <meshStandardMaterial color="#374151" metalness={0.5} roughness={0.4} />
+      </mesh>
+    ))}
+    <mesh position={[0, 0.5, 0.25]}>
+      <cylinderGeometry args={[0.025, 0.025, 0.8, 8]} />
+      <meshStandardMaterial color={FORKLIFT_STEEL} metalness={0.8} roughness={0.2} />
+    </mesh>
+
+    {/* Carriage with two fork tines and the load; its height is animated */}
+    <group ref={carriageRef} position={[0, FORK_CARRY_HEIGHT, 0.31]}>
+      <mesh position={[0, 0.12, 0]}>
+        <boxGeometry args={[0.4, 0.2, 0.03]} />
+        <meshStandardMaterial color={FORKLIFT_DARK} metalness={0.4} />
+      </mesh>
+      {[-0.11, 0.11].map(x => (
+        <group key={x}>
+          <mesh position={[x, 0.1, 0.015]}>
+            <boxGeometry args={[0.06, 0.2, 0.02]} />
+            <meshStandardMaterial color={FORKLIFT_STEEL} metalness={0.8} roughness={0.25} />
+          </mesh>
+          <mesh position={[x, 0.0125, 0.22]}>
+            <boxGeometry args={[0.06, 0.025, 0.42]} />
+            <meshStandardMaterial color={FORKLIFT_STEEL} metalness={0.8} roughness={0.25} />
+          </mesh>
+        </group>
+      ))}
+      {/* Load: a wooden pallet with stacked boxes */}
+      <group ref={loadRef} position={[0, 0.025, 0.23]}>
+        <mesh position={[0, 0.03, 0]}>
+          <boxGeometry args={[0.42, 0.06, 0.4]} />
+          <meshStandardMaterial color="#a16207" roughness={0.9} />
+        </mesh>
+        <mesh position={[0, 0.17, 0]}>
+          <boxGeometry args={[0.38, 0.22, 0.36]} />
+          <meshStandardMaterial color="#b7895a" roughness={0.8} />
+        </mesh>
+        <mesh position={[0.04, 0.34, -0.02]}>
+          <boxGeometry args={[0.26, 0.12, 0.26]} />
+          <meshStandardMaterial color="#8b5a2b" roughness={0.8} />
+        </mesh>
+      </group>
+    </group>
+
+    {/* Blue safety spot projected on the floor ahead */}
+    <mesh position={[0, 0.006, 1.15]} rotation={[-Math.PI / 2, 0, 0]}>
+      <circleGeometry args={[0.16, 24]} />
+      <meshBasicMaterial color={SAFETY_SPOT_COLOR} transparent opacity={0.7} depthWrite={false} />
+    </mesh>
+  </group>
+);
+
 interface ForkliftMeshProps {
   forklift: Forklift;
   tick: number;
@@ -472,79 +715,111 @@ const ForkliftMesh: React.FC<ForkliftMeshProps> = ({ forklift, tick, tickMs }) =
 
   // Heading: direction of travel (forks in front), kept while stopped
   const heading = useMemo(() => headingAt(forklift.path, pathIndex), [forklift.path, pathIndex]);
+  // Load on this leg, and whether the forks are lifted (at the rack, around a turnaround)
+  const legs = useMemo(() => forkliftLegs(forklift.path), [forklift.path]);
+  const loaded = legs.loaded[pathIndex] ?? true;
+  const forksUp = legs.atTurnaround[pathIndex] ?? false;
 
-  // Smooth motion (visual only): glide to this tick's cell and turn toward the heading
+  // Smooth motion (visual only): glide to this tick's cell, turn toward the heading, roll the
+  // wheels, steer the rear wheels, pitch on speed changes and move the forks
   const groupRef = useRef<THREE.Group>(null);
   const headingRef = useRef<THREE.Group>(null);
+  const bodyRef = useRef<THREE.Group>(null);
+  const carriageRef = useRef<THREE.Group>(null);
+  const loadRef = useRef<THREE.Group>(null);
+  const beaconRef = useRef<THREE.MeshStandardMaterial>(null);
+  const beaconLightRef = useRef<THREE.PointLight>(null);
+  const wheelSpinRefs = useRef<(THREE.Group | null)[]>([]);
+  const rearSteerRefs = useRef<(THREE.Group | null)[]>([]);
+  const motion = useRef({ speed: 0, accel: 0 });
   const target = useMemo(() => new THREE.Vector3(), []);
   const step = useMemo(() => new THREE.Vector3(), []);
 
   useLayoutEffect(() => {
-    groupRef.current?.position.set(position.x, position.y + 0.5, position.z);
+    groupRef.current?.position.set(position.x, FLOOR_Y, position.z);
     if (headingRef.current) headingRef.current.rotation.y = heading;
     // only on mount: afterwards useFrame moves the forklift
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useFrame((_, delta) => {
+  useFrame(({ clock }, delta) => {
     const group = groupRef.current;
-    if (!group) return;
+    const headingGroup = headingRef.current;
+    if (!group || !headingGroup) return;
     const dt = Math.min(delta, 0.1);
-    glideTowards(group.position, target.set(position.x, position.y + 0.5, position.z), glideSpeedFor(tickMs), dt, step);
-    if (headingRef.current) {
-      const yaw = headingRef.current.rotation.y;
-      headingRef.current.rotation.y = yaw + angleDelta(yaw, heading) * (1 - Math.exp(-TURN_RESPONSE * dt));
+    glideTowards(group.position, target.set(position.x, FLOOR_Y, position.z), glideSpeedFor(tickMs), dt, step);
+
+    // Turn toward the heading; the rear wheels steer against the turn
+    const yaw = headingGroup.rotation.y;
+    const turn = angleDelta(yaw, heading);
+    headingGroup.rotation.y = yaw + turn * (1 - Math.exp(-TURN_RESPONSE * dt));
+    const steer = THREE.MathUtils.clamp(-turn * 1.5, -MAX_REAR_STEER, MAX_REAR_STEER);
+    rearSteerRefs.current.forEach(wheel => { if (wheel) wheel.rotation.y = steer; });
+
+    // Wheels roll with the distance driven (backwards while reversing out of a turnaround)
+    const forward = step.x * Math.sin(yaw) + step.z * Math.cos(yaw);
+    wheelSpinRefs.current.forEach((wheel, i) => {
+      if (wheel) wheel.rotation.x += forward / (i < 2 ? FRONT_WHEEL_RADIUS : REAR_WHEEL_RADIUS);
+    });
+
+    // Pitch: nose up when speeding up, down when braking (filtered, so the per-cell pauses don't jitter)
+    const m = motion.current;
+    const speed = m.speed + ((dt > 0 ? forward / dt : 0) - m.speed) * (1 - Math.exp(-SPEED_RESPONSE * dt));
+    m.accel += ((dt > 0 ? (speed - m.speed) / dt : 0) - m.accel) * (1 - Math.exp(-SPEED_RESPONSE * dt));
+    m.speed = speed;
+    if (bodyRef.current) {
+      bodyRef.current.rotation.x = THREE.MathUtils.clamp(-m.accel * PITCH_PER_ACCEL, -MAX_PITCH, MAX_PITCH);
+      bodyRef.current.rotation.z = loaded && Math.abs(speed) > 0.1 ? 0.01 * Math.sin(clock.elapsedTime * 5) : 0;
     }
+
+    // Forks: lifted at the rack around each turnaround, low while carrying
+    if (carriageRef.current) {
+      const y = carriageRef.current.position.y;
+      const goal = forksUp ? FORK_LIFT_HEIGHT : FORK_CARRY_HEIGHT;
+      carriageRef.current.position.y = y + (goal - y) * (1 - Math.exp(-FORK_RESPONSE * (PLAYBACK_TICK_MS / tickMs) * dt));
+    }
+    if (loadRef.current) {
+      loadRef.current.visible = loaded;
+      loadRef.current.rotation.z = loaded && Math.abs(speed) > 0.1 ? 0.025 * Math.sin(clock.elapsedTime * 5 + 1) : 0;
+    }
+
+    // Beacon flashes twice a second
+    const flash = Math.sin(clock.elapsedTime * 4 * Math.PI) > 0 ? 1 : 0;
+    if (beaconRef.current) beaconRef.current.emissiveIntensity = 0.2 + 1.6 * flash;
+    if (beaconLightRef.current) beaconLightRef.current.intensity = 0.1 + 0.8 * flash;
   });
 
   return (
     <group ref={groupRef}>
+      {/* Keep-out zone: the cell and the one above it, which drones may not enter while the forklift is there */}
+      <mesh position={[0, 0.004, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[1, 1]} />
+        <meshBasicMaterial color={KEEP_OUT_COLOR} transparent opacity={0.12} depthWrite={false} />
+      </mesh>
+      <lineSegments geometry={KEEP_OUT_EDGES} position={[0, KEEP_OUT_HEIGHT / 2, 0]}>
+        <lineBasicMaterial color={KEEP_OUT_COLOR} transparent opacity={0.3} />
+      </lineSegments>
+
       <group ref={headingRef}>
-        {/* Main Body */}
-        <mesh position={[0, -0.2, 0]}>
-          <boxGeometry args={[0.7, 0.6, 0.9]} />
-          <meshStandardMaterial color={forklift.color} roughness={0.4} metalness={0.2} />
-        </mesh>
-
-        {/* Safety Cage (Roof) */}
-        <mesh position={[0, 0.3, 0]}>
-          <boxGeometry args={[0.6, 0.1, 0.6]} />
-          <meshStandardMaterial color="#333" />
-        </mesh>
-        {[
-          [-0.25, -0.25], [0.25, -0.25], [-0.25, 0.25], [0.25, 0.25]
-        ].map(([x, z], i) => (
-          <mesh key={i} position={[x, 0.1, z]}>
-            <cylinderGeometry args={[0.02, 0.02, 0.4]} />
-            <meshStandardMaterial color="#333" />
-          </mesh>
-        ))}
-
-        {/* Forks */}
-        <mesh position={[0, -0.4, 0.6]}>
-          <boxGeometry args={[0.5, 0.05, 0.4]} />
-          <meshStandardMaterial color="#silver" metalness={0.8} roughness={0.2} />
-        </mesh>
-        <mesh position={[0, -0.1, 0.45]}>
-          <boxGeometry args={[0.5, 0.6, 0.05]} />
-          <meshStandardMaterial color="#333" />
-        </mesh>
-
-        {/* Payload on Forks */}
-        <mesh position={[0, -0.15, 0.6]}>
-          <boxGeometry args={[0.4, 0.4, 0.3]} />
-          <meshStandardMaterial color="#8b4513" />
-        </mesh>
-
-        {/* Warning Light */}
-        <mesh position={[0, 0.4, 0]}>
-          <cylinderGeometry args={[0.08, 0.08, 0.1]} />
-          <meshStandardMaterial color="#ef4444" emissive="#ef4444" emissiveIntensity={1} />
-        </mesh>
-        <pointLight position={[0, 0.5, 0]} color="#ef4444" intensity={0.5} distance={2} />
+        {/* Pitch and roll pivot at wheel-axle height */}
+        <group position={[0, FRONT_WHEEL_RADIUS, 0]}>
+          <group ref={bodyRef}>
+            <group position={[0, -FRONT_WHEEL_RADIUS, 0]}>
+              <ForkliftModel
+                color={forklift.color}
+                wheelSpinRefs={wheelSpinRefs}
+                rearSteerRefs={rearSteerRefs}
+                carriageRef={carriageRef}
+                loadRef={loadRef}
+                beaconRef={beaconRef}
+                beaconLightRef={beaconLightRef}
+              />
+            </group>
+          </group>
+        </group>
       </group>
 
-      <Billboard position={[0, 0.8, 0]}>
+      <Billboard position={[0, 1.35, 0]}>
         <Text fontSize={0.2} color="white" anchorX="center" anchorY="middle">
           {forklift.name}
         </Text>
@@ -866,6 +1141,8 @@ const SENSOR_TAG_SIDES = [0, Math.PI / 2, Math.PI, -Math.PI / 2];
 
 /** Screen height taken by the voice bar at the bottom (bar plus its margin). */
 const VOICE_BAR_HEIGHT_PX = 140;
+/** Starting pan of the map upwards on screen, as a fraction of the grid's horizontal diagonal. */
+const START_PAN_UP = 0.2;
 
 const CameraController: React.FC<{
   cameraFocus?: CameraFocusCommand | null;
@@ -975,6 +1252,14 @@ const VoxelWorld: React.FC<VoxelWorldProps> = ({
     pos.y = gridSize.y * 1.2;
     return pos;
   }, [gridSize, center, warehouse?.position.x, warehouse?.position.z, warehouse?.baseSize]);
+  // Start panned so the map sits a bit higher on screen: target and camera both slide along the
+  // screen's down direction, like a right-drag upwards (the viewing angle is unchanged)
+  const { viewTarget, viewPos } = useMemo(() => {
+    const viewDir = new THREE.Vector3().subVectors(center, camPos).normalize();
+    const screenUp = new THREE.Vector3(0, 1, 0).addScaledVector(viewDir, -viewDir.y).normalize();
+    const pan = screenUp.multiplyScalar(-START_PAN_UP * Math.hypot(gridSize.x, gridSize.z));
+    return { viewTarget: center.clone().add(pan), viewPos: camPos.clone().add(pan) };
+  }, [center, camPos, gridSize]);
 
   const palletPositions = useMemo(() => new Map(pallets.map(p => [p.id, p.position])), [pallets]);
 
@@ -1008,7 +1293,7 @@ const VoxelWorld: React.FC<VoxelWorldProps> = ({
           <span className="inline-block h-2 w-2 rounded-sm" style={{ background: '#22c55e' }} /><span>scanned</span>
         </div>
       )}
-      <Canvas camera={{ position: camPos, fov: 45 }} shadows>
+      <Canvas camera={{ position: viewPos, fov: 45 }} shadows>
         <color attach="background" args={['#0f172a']} />
         <Stars radius={100} depth={50} count={5000} factor={4} saturation={0} fade speed={1} />
         <ambientLight intensity={0.4} />
@@ -1019,8 +1304,8 @@ const VoxelWorld: React.FC<VoxelWorldProps> = ({
           cameraFocus={cameraFocus}
           agents={agents}
           tick={tick}
-          center={center}
-          camPos={camPos}
+          center={viewTarget}
+          camPos={viewPos}
           gridSize={gridSize}
         />
 
