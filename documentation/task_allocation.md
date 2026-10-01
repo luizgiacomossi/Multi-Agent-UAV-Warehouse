@@ -119,7 +119,26 @@ c_{dist}^{cluster}(i,\kappa)=
 
 The average priority of the cluster's tasks is used in \(C_{ik}\).
 
-## 5. Candidate Task Pool and Payload Filtering
+## 5. Recharge Jobs and Charging Stations
+
+**Feasibility with stations.** In the energy check of Sections 2–4, the return term is the distance to the nearest charger, the base or a charging station, instead of the base (`CostModel.distanceToNearestCharger`):
+
+\[
+e_{req}(i,k) = \beta_{fly}\gamma\left(\lVert p_i - g_k \rVert_2 + \min_{c \in \{p_{base}\} \cup S} \lVert g_k - c \rVert_2\right) + \beta_{hover} t_k^{hover}.
+\]
+
+Stations \(S\) are only counted when "Return" is off. With "Return" on, every task ends at the base anyway.
+
+**Recharge job.** After allocation, an idle drone away from its dock that got no task is checked by `needsRecharge`: if some open pallet needs its payload but none passes the energy check, the drone is given a recharge job. The charging site is the one at which it is fully charged soonest (`chooseChargingStation`): travel time plus `ticksToFullCharge` of the battery left on arrival. Sites the drone cannot reach on its battery are skipped.
+
+- **Base:** one dock per drone, so it is always available; the drone flies home and charges on the dock.
+- **Station:** holds one drone. A station is booked from dispatch until its drone leaves (`stationBookings`), and booked stations are not offered to other drones. Drones never queue: a drone that would have to wait for a station uses another site, so it never hovers in the air waiting.
+
+On arrival, the drone charges to full by waiting on the station (`chargeInPlace`). Each charging tick is reserved for it in the space-time reservations, so no other drone plans through the station meanwhile. The drone is then idle and is allocated as usual. A recharge is not a mission: it does not count towards the drone's mission count. If a station stays unreachable after `MAX_LEG_RETRIES` plans, the drone charges on its dock instead (`cancelRecharge`).
+
+Charging is always to full. Partial charging would save charging time but add trips to chargers, and with one-drone stations a known slot length keeps the booking simple.
+
+## 6. Candidate Task Pool and Payload Filtering
 
 In [`classes/SimulationManager.ts`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/classes/SimulationManager.ts), the allocation loop queries unscanned pallets and constructs candidate tasks for Munkres:
 

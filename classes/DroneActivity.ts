@@ -9,6 +9,7 @@ export type DroneActivityKind =
   | 'scanning'    // at a pallet, scanning it this tick
   | 'enRoute'     // flying to its assigned pallet
   | 'returning'   // flying back to its dock
+  | 'toCharger'   // flying to a charging station to recharge
   | 'holding'     // airborne, waiting in place (e.g. for traffic to clear)
   | 'inTransit'   // airborne between tasks
   | 'charging'    // on its dock or a station, recharging
@@ -42,7 +43,8 @@ export function describeDroneActivity(
   agent: Agent,
   tick: number,
   dock: Position3D,
-  snapshot: ActivitySnapshot
+  snapshot: ActivitySnapshot,
+  chargeStations: Position3D[] = []
 ): DroneActivity {
   const finishTick = agent.path.length - 1;
 
@@ -69,19 +71,28 @@ export function describeDroneActivity(
   if (snapshot.isRecharging) return { kind: 'charging' }; // at a charge station
   if (tick >= finishTick) return { kind: 'complete' };
 
-  return { kind: isHeadingHome(agent, tick, dock) ? 'returning' : isStationary(agent, tick) ? 'holding' : 'inTransit' };
+  const destination = nextStop(agent, tick, dock, chargeStations);
+  if (destination === 'dock') return { kind: 'returning' };
+  if (destination === 'station') return { kind: 'toCharger' };
+  return { kind: isStationary(agent, tick) ? 'holding' : 'inTransit' };
 }
 
-/** True if the drone reaches its dock before its next task starts. */
-function isHeadingHome(agent: Agent, tick: number, dock: Position3D): boolean {
+/**
+ * Where the drone stops next before its next task starts: its dock, or a charging station it waits
+ * on (flying over a station cell does not count).
+ */
+function nextStop(agent: Agent, tick: number, dock: Position3D, chargeStations: Position3D[]): 'dock' | 'station' | null {
   const nextTaskStart = Math.min(
     ...(agent.assignedTasksLog ?? []).map(task => task.startTick).filter(start => start > tick),
     Infinity
   );
   for (let t = tick + 1; t < agent.path.length && t <= nextTaskStart; t++) {
-    if (samePos(agent.path[t], dock)) return true;
+    const here = agent.path[t];
+    if (samePos(here, dock)) return 'dock';
+    const next = agent.path[t + 1];
+    if (next && samePos(here, next) && chargeStations.some(s => samePos(here, s))) return 'station';
   }
-  return false;
+  return null;
 }
 
 function isStationary(agent: Agent, tick: number): boolean {
@@ -97,12 +108,12 @@ function isStationary(agent: Agent, tick: number): boolean {
 export function activityAt(agent: Agent, tick: number, chargeStations: Position3D[], batteryEnabled = true): DroneActivity {
   if (agent instanceof Drone) {
     const snapshot = agent.getSnapshotAt(tick, chargeStations, batteryEnabled);
-    return describeDroneActivity(agent, tick, agent.mission.warehouseLocation, snapshot);
+    return describeDroneActivity(agent, tick, agent.mission.warehouseLocation, snapshot, chargeStations);
   }
   return describeDroneActivity(agent, tick, agent.start, { isDeadBattery: false, isRecharging: false });
 }
 
 /** Whether the drone is airborne and working (for fleet summaries). */
 export function isFlying(activity: DroneActivity): boolean {
-  return ['scanning', 'enRoute', 'returning', 'holding', 'inTransit'].includes(activity.kind);
+  return ['scanning', 'enRoute', 'returning', 'toCharger', 'holding', 'inTransit'].includes(activity.kind);
 }

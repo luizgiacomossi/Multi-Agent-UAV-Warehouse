@@ -29,13 +29,22 @@ export class CostModel {
   }
 
   /**
+   * Distance from `from` to the nearest place the drone can recharge: the base, or a charging
+   * station when the drone is not required to return to the base.
+   */
+  static distanceToNearestCharger(from: Position3D, p_base: Position3D, chargingStations: Position3D[] = []): number {
+    return Math.min(this.distanceEuclidean(from, p_base), ...chargingStations.map(s => this.distanceEuclidean(from, s)));
+  }
+
+  /**
    * Equation 13: Required Energy
    * e_req = \beta_{fly} \gamma (||p_i - p_k|| + ||p_k - p_{base}||) + \beta_{hover} t_{task}
    */
-  static calculate_e_req(drone: Agent, task: Task, p_base: Position3D): number {
+  static calculate_e_req(drone: Agent, task: Task, p_base: Position3D, chargingStations: Position3D[] = []): number {
     const currentPos = this.getDroneCurrentPosition(drone);
     const dist_to_task = this.distanceEuclidean(currentPos, task.target);
-    const dist_to_base = this.distanceEuclidean(task.target, p_base);
+    // Afterwards the drone must still reach a charger (the base, or the nearest station)
+    const dist_to_base = this.distanceToNearestCharger(task.target, p_base, chargingStations);
     
     // Convert mathematical constants
     const beta_fly = MATH_CONSTANTS.BETA_FLY;
@@ -67,7 +76,7 @@ export class CostModel {
   /**
    * Equation 13 (Cluster variant): Calculates Required Energy for an mTSP Tour
    */
-  static calculate_e_req_cluster(drone: Agent, cluster: TaskCluster, p_base: Position3D): number {
+  static calculate_e_req_cluster(drone: Agent, cluster: TaskCluster, p_base: Position3D, chargingStations: Position3D[] = []): number {
     const currentPos = this.getDroneCurrentPosition(drone);
     // The tour this drone would fly: ordered from its own position, closed at the base
     const tour = cluster.planTour(currentPos, p_base);
@@ -76,7 +85,7 @@ export class CostModel {
     
     // Fly distance to the start of the tour, and return distance from the end of the tour
     const dist_outbound = this.distanceEuclidean(currentPos, firstTask.target);
-    const dist_return = this.distanceEuclidean(lastTask.target, p_base);
+    const dist_return = this.distanceToNearestCharger(lastTask.target, p_base, chargingStations);
     
     // The tour cost already contains the internal kinetic flight and structural hovering
     return MATH_CONSTANTS.BETA_FLY * MATH_CONSTANTS.GAMMA * (dist_outbound + dist_return) + tour.cost;
@@ -134,7 +143,7 @@ export class CostModel {
    * Rows = Drones
    * Cols = Tasks
    */
-  static buildCostMatrix(drones: Agent[], tasks: Task[], p_base: Position3D, D_max: number): number[][] {
+  static buildCostMatrix(drones: Agent[], tasks: Task[], p_base: Position3D, D_max: number, chargingStations: Position3D[] = []): number[][] {
     const OMEGA = 1e9; // 'Infinity' for infeasible assignments
     
     const matrix: number[][] = [];
@@ -142,7 +151,7 @@ export class CostModel {
     for (const drone of drones) {
       const row: number[] = [];
       for (const task of tasks) {
-        const e_req = this.calculate_e_req(drone, task, p_base);
+        const e_req = this.calculate_e_req(drone, task, p_base, chargingStations);
         
         if (!this.is_feasible(drone, task, e_req)) {
           row.push(OMEGA); // Hard mathematical penalty
@@ -162,12 +171,12 @@ export class CostModel {
   /**
    * Execute Linear Assignment using Munkres (Hungarian)
    */
-  static executeOptimalAllocation(drones: Agent[], tasks: Task[], p_base: Position3D, D_max: number): { drone: Agent, task: Task, cost: number }[] {
+  static executeOptimalAllocation(drones: Agent[], tasks: Task[], p_base: Position3D, D_max: number, chargingStations: Position3D[] = []): { drone: Agent, task: Task, cost: number }[] {
       // 1. Build N x M matrix
       // Crucial detail: Munkres JS requires N <= M (more columns than rows to assign all rows)
       // If there are more drones than tasks, we need to balance it or pad it. Usually tasks >= drones in MAPF.
       
-      const matrix = this.buildCostMatrix(drones, tasks, p_base, D_max);
+      const matrix = this.buildCostMatrix(drones, tasks, p_base, D_max, chargingStations);
 
       if (matrix.length === 0 || matrix[0].length === 0) return [];
 
@@ -196,14 +205,14 @@ export class CostModel {
   /**
    * Executed Linear Assignment for K-D Clusters using Munkres (Hungarian)
    */
-  static buildClusterCostMatrix(drones: Agent[], clusters: TaskCluster[], p_base: Position3D, D_max: number): number[][] {
+  static buildClusterCostMatrix(drones: Agent[], clusters: TaskCluster[], p_base: Position3D, D_max: number, chargingStations: Position3D[] = []): number[][] {
     const OMEGA = 1e9;
     const matrix: number[][] = [];
     
     for (const drone of drones) {
       const row: number[] = [];
       for (const cluster of clusters) {
-        const e_req = this.calculate_e_req_cluster(drone, cluster, p_base);
+        const e_req = this.calculate_e_req_cluster(drone, cluster, p_base, chargingStations);
         
         if (!this.is_cluster_feasible(drone, cluster, e_req)) {
           row.push(OMEGA);
@@ -226,8 +235,8 @@ export class CostModel {
     return matrix;
   }
 
-  static executeClusterAllocation(drones: Agent[], clusters: TaskCluster[], p_base: Position3D, D_max: number): { drone: Agent, cluster: TaskCluster, cost: number }[] {
-      const matrix = this.buildClusterCostMatrix(drones, clusters, p_base, D_max);
+  static executeClusterAllocation(drones: Agent[], clusters: TaskCluster[], p_base: Position3D, D_max: number, chargingStations: Position3D[] = []): { drone: Agent, cluster: TaskCluster, cost: number }[] {
+      const matrix = this.buildClusterCostMatrix(drones, clusters, p_base, D_max, chargingStations);
       if (matrix.length === 0 || matrix[0].length === 0) return [];
       
       const indices = Munkres(matrix);

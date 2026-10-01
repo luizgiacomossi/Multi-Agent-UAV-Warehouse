@@ -38,6 +38,7 @@ The semantics are:
 - `OUTBOUND`: moving toward a single task or the first task of a cluster,
 - `EXECUTING_TOUR`: traversing the remaining tasks of a cluster,
 - `RETURNING`: moving back to the drone's own dock slot,
+- `RECHARGING`: moving to a charging station to recharge (a recharge job, see Section 5 of [`task_allocation.md`](task_allocation.md)),
 - `IDLE`: ready for a new allocation round,
 - `COMPLETED`: no further missions to assign, landed on the dock.
 
@@ -48,9 +49,9 @@ A drone never finishes, or waits for work, airborne:
 - an idle drone that gets no task while away from its dock is sent home (`returnToDock()`);
 - in full-coverage missions, idle drones land once every pallet is done.
 
-Every pallet stop is therefore followed by another leg, and only the dock is a parking goal (`continuesAfterCurrentLeg()`). CBS uses this to set how long a drone holds its goal.
+Every pallet stop is therefore followed by another leg. Only the dock and a charging station (where the drone stays to charge) are parking goals (`continuesAfterCurrentLeg()`). CBS uses this to set how long a drone holds its goal.
 
-The status shown for each drone in the UI and in the voice assistant is derived per tick by `describeDroneActivity` ([`classes/DroneActivity.ts`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/classes/DroneActivity.ts)), from the planned path, task log and scan log. The possible states are: en route, scanning, returning, holding, in transit, charging, docked, complete, crashed, depleted and blocked. `Agent.status` is only the final planning outcome.
+The status shown for each drone in the UI and in the voice assistant is derived per tick by `describeDroneActivity` ([`classes/DroneActivity.ts`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/classes/DroneActivity.ts)), from the planned path, task log and scan log. The possible states are: en route, scanning, returning, to charger, holding, in transit, charging, docked, complete, crashed, depleted and blocked. "Charging" is shown only while the battery is actually filling up. `Agent.status` is only the final planning outcome.
 
 ## 3. Path Appending and Scan Registration
 
@@ -67,7 +68,7 @@ The battery bookkeeping is reconstructed by iterating through the planned path i
 
 For each time step:
 
-1. If the drone is waiting at base or at a charge station, the battery is reset to `maxBattery`. Idle drones parked on their dock take one such waiting tick before each allocation round (`SimulationManager.rechargeDockedDrones`), so they are dispatched fully charged.
+1. If the drone is waiting on its dock or on a charging station, it charges: the battery gains \(r \cdot B_{max}/100\) per tick, capped at `maxBattery`, where \(r\) is the charge rate in % of capacity per tick (`Drone.chargeRatePercent`). With instant charging (\(r = \infty\), the original model) one waiting tick restores a full battery. Idle drones parked on their dock charge to full before each allocation round (`SimulationManager.rechargeDockedDrones`), which takes \(\lceil (B_{max}-B)/(r B_{max}/100) \rceil\) ticks (`Drone.ticksToFullCharge`).
 2. Otherwise a move consumes `BETA_FLY`.
 3. A wait consumes `BETA_HOVER`.
 
@@ -83,7 +84,9 @@ and if \(p(t-1)=p(t)\), then
 B(t)=B(t-1)-\beta_{hover},
 \]
 
-except at recharging states where \(B(t)=B_{max}\).
+except at charging states, where \(B(t)=\min(B_{max}, B(t-1) + r B_{max}/100)\).
+
+The charge rate is set in the UI ("Instant" or "% per tick", default 2%/tick, i.e. a full charge in 50 ticks) and passed to `runPathfinding`. Instant charging keeps earlier results reproducible: with instant charging and the base only, the benchmark reproduces the earlier results exactly.
 
 ## 5. Battery Death And Falling Visualization
 

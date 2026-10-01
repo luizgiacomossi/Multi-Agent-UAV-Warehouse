@@ -18,13 +18,15 @@ export const SUMMARY_METRICS = [
   'strandedDrones',
   'energyConsumed',
   'distance',
+  'stationVisits',
+  'stationTicks',
   'cbsNodesExpanded',
   'cbsFallbacks',
 ] as const satisfies readonly (keyof RunRecord)[];
 
 type SummaryMetric = typeof SUMMARY_METRICS[number];
 
-const GROUP_KEYS = ['scale', 'gridSize', 'pallets', 'forklifts', 'drones', 'allocationMode', 'completionMode', 'algorithm'] as const;
+const GROUP_KEYS = ['scale', 'gridSize', 'pallets', 'forklifts', 'drones', 'allocationMode', 'completionMode', 'chargingSites', 'chargeRate', 'algorithm'] as const;
 
 /** Aggregated statistics of one algorithm on one scenario configuration (across repetitions). */
 export interface GroupSummary {
@@ -60,6 +62,8 @@ export function summarizeRecords(records: RunRecord[]): GroupSummary[] {
         drones: first.drones,
         allocationMode: first.allocationMode,
         completionMode: first.completionMode,
+        chargingSites: first.chargingSites,
+        chargeRate: first.chargeRate,
         algorithm: first.algorithm,
       },
       runs: runs.length,
@@ -82,7 +86,7 @@ function toCsv(header: string[], rows: (string | number | boolean | undefined)[]
 
 const RUN_COLUMNS: (keyof RunRecord)[] = [
   'scale', 'gridSize', 'pallets', 'forklifts', 'drones', 'allocationMode', 'completionMode',
-  'repetition', 'seed', 'algorithm', 'ok', 'error', ...SUMMARY_METRICS,
+  'chargingSites', 'chargeRate', 'repetition', 'seed', 'algorithm', 'ok', 'error', ...SUMMARY_METRICS,
 ];
 const STAT_FIELDS: (keyof Summary)[] = ['mean', 'std', 'ci95', 'median', 'min', 'max'];
 
@@ -115,7 +119,7 @@ export function printSummary(summaries: GroupSummary[]): void {
   const byConfig = new Map<string, GroupSummary[]>();
   for (const s of summaries) {
     const g = s.group;
-    const key = `${g.scale} (${g.gridSize}³, ~${g.pallets} pallets, ${g.forklifts} forklifts) · ${g.drones} drones · ${g.allocationMode} · ${g.completionMode}`;
+    const key = `${g.scale} (${g.gridSize}³, ~${g.pallets} pallets, ${g.forklifts} forklifts) · ${g.drones} drones · ${g.allocationMode} · ${g.completionMode} · ${g.chargingSites === 1 ? 'base only' : `base + ${g.chargingSites - 1} station(s)`} · charge ${Number.isFinite(g.chargeRate) ? `${g.chargeRate}%/tick` : 'instant'}`;
     if (!byConfig.has(key)) byConfig.set(key, []);
     byConfig.get(key)!.push(s);
   }

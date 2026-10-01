@@ -8,6 +8,7 @@ The benchmark in [`bench/`](../bench) compares the planning strategies (`Naive`,
 npm run bench                                   # "quick" preset (seconds)
 npm run bench -- --preset standard              # scales x swarm sizes x allocation modes (~20 s)
 npm run bench -- --preset full                  # standard + full-coverage missions (~3 min)
+npm run bench -- --preset charging              # base only vs. charging stations (see Section 2.1)
 npm run bench -- --algos Cooperative,CBS --grids 16,24 --drones 4,8 --alloc Cluster --runs 20 --seed 7
 npm run bench -- --help
 ```
@@ -23,6 +24,10 @@ npm run bench -- --help
 | `--alloc` | `1-to-1`, `Cluster` |
 | `--completion` | `count` (fixed missions per drone), `all-pallets` (full coverage) |
 | `--missions` | missions per drone in `count` mode |
+| `--sites` | charging sites including the base (1 = base only; each extra site is a one-drone station) |
+| `--charge-rate` | charging speed in % of capacity per tick, or `instant` |
+| `--battery` | battery capacity per drone |
+| `--no-return` | do not return to the base between tasks (needed for drones to use stations) |
 | `--out` | output directory (default `bench-results/<preset>-<timestamp>/`) |
 
 Runtimes above were measured on an Apple M4 Pro with the default 10 repetitions.
@@ -42,8 +47,26 @@ A plan is the cartesian product of its dimensions, repeated `runs` times. The pr
 | `quick` | S-12 | 2, 4 | 1-to-1 | count | 5 |
 | `standard` | S, M, L | 2, 4, 8 | 1-to-1, Cluster | count | 10 |
 | `full` | S, M, L | 2, 4, 8 | 1-to-1, Cluster | count, all-pallets | 10 |
+| `charging` | M, L | 2, 4, 8 | 1-to-1 | all-pallets | 5 |
 
-Fixed parameters are: 3 missions per drone, round trips, 100% battery with constraints enabled, mixed task priorities, deployment from the warehouse dock, a flight ceiling equal to the grid size, and a cluster radius of 5 with at most 3 pallets per cluster.
+Fixed parameters are: 3 missions per drone, round trips, 100% battery with constraints enabled, instant charging at the base only (so results stay comparable with earlier runs), mixed task priorities, deployment from the warehouse dock, a flight ceiling equal to the grid size, and a cluster radius of 5 with at most 3 pallets per cluster.
+
+### 2.1 Charging Preset
+
+The `charging` preset measures what charging stations add. It uses full-coverage missions, "Return" off (drones only go to a charger when they need to), a charge rate of 2% per tick, a battery capacity of 30 (with 100, four drones cover a 24³ warehouse on one charge, so nobody ever recharges), and 1, 2, 3 or 5 charging sites (the base plus 0–4 stations). Station placement uses no randomness, so a scenario keeps its seed, and its warehouse, for every site count: the comparison across site counts is paired.
+
+Results (5 runs per configuration, Cooperative and CBS pooled; mean makespan in ticks, and in brackets the paired change against base only with its 95% interval). All 240 runs had 100% coverage and no collisions, battery deaths or stranded drones:
+
+| Scale | Drones | Base only | Base + 1 | Base + 2 | Base + 4 |
+|---|---|---|---|---|---|
+| M-16 | 2 | 599 | 540 (-9% ± 4) | 535 (-10% ± 5) | 513 (-14% ± 4) |
+| M-16 | 4 | 294 | 283 (-4% ± 4) | 267 (-9% ± 3) | 250 (-15% ± 6) |
+| M-16 | 8 | 161 | 145 (-8% ± 10) | 138 (-12% ± 10) | 134 (-16% ± 7) |
+| L-24 | 2 | 2153 | 1916 (-11% ± 2) | 1871 (-13% ± 4) | 1765 (-18% ± 2) |
+| L-24 | 4 | 1151 | 961 (-16% ± 5) | 946 (-18% ± 1) | 869 (-24% ± 3) |
+| L-24 | 8 | 551 | 483 (-12% ± 3) | 466 (-15% ± 2) | 428 (-22% ± 2) |
+
+Stations shorten full-coverage missions by 9–24% with four stations, more in the large warehouse, where the base is farther from most pallets.
 
 **Generator limits.** The warehouse generator places forklifts only in aisles where `x % 4 === 0`. That caps them at 1 (12³), 2 (16³) and 3 (24³), regardless of the requested count. The benchmark records the counts actually generated.
 
@@ -57,7 +80,7 @@ All randomness in the simulation core goes through [`utils/Random.ts`](../utils/
 
 ## 4. Metrics
 
-Each row of `runs.csv` is one strategy on one scenario.
+Each row of `runs.csv` is one strategy on one scenario. Besides the scenario coordinates it records `chargingSites` and `chargeRate` (`Infinity` = instant).
 
 | Field | Definition |
 |---|---|
@@ -74,6 +97,8 @@ Each row of `runs.csv` is one strategy on one scenario.
 | `strandedDrones` | drones left without a path, neither crashed nor out of battery |
 | `energyConsumed` | battery used by flight (`β_fly` per move) and hover (`β_hover` per wait), summed over drones; recharging is not subtracted |
 | `distance` | grid cells travelled, summed over drones |
+| `stationVisits` | charging sessions at charging stations |
+| `stationTicks` | ticks drones spent waiting on charging stations |
 | `cbsNodesExpanded`, `cbsFallbacks` | CBS only: constraint-tree nodes expanded, and legs handed to the fallback planner |
 
 Collisions are detected after planning. A drone destroyed in a collision stops at that point, so `Naive` can show a *shorter* makespan and *lower* energy than the collision-free planners. Read those columns together with `collisions`, `lostDrones` and `palletCoverage`.

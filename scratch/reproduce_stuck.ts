@@ -6,7 +6,7 @@ async function testScenario() {
   
   // Set random seed if possible or run multiple times
   for (let run = 1; run <= 10; run++) {
-    manager.generateWorld('Warehouse', 16, false, true, 2, 35, 3, 'mixed');
+    manager.generateWorld('Warehouse', 16, 0, true, 2, 35, 3, 'mixed');
     manager.initializeAgents(2, 100, true, 12);
     
     console.log(`\n--- Run ${run} ---`);

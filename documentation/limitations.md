@@ -22,10 +22,17 @@ Future work:
 
 ## 3. Dynamic Battery Horizon and Recharging Integration
 
-The path planners now bound search using true residual battery calculated at dispatch time (`drone.calculateStateAt(...)`).
+The path planners bound search using true residual battery calculated at dispatch time (`drone.calculateStateAt(...)`). Drones recharge at the base or at one-drone charging stations through recharge jobs (see `task_allocation.md`, Section 5), with some limits:
+
+- a recharge is triggered only when an idle drone's battery cannot cover any open pallet; there is no proactive recharging or look-ahead;
+- the safety margin \(\delta_{safe}\) is an absolute 20 battery units. With small capacities (e.g. 30) drones recharge at about two thirds of a full battery;
+- drones never queue for a busy station. A queue (waiting on the ground nearby) could use stations better when many drones share few stations;
+- after its last mission a drone flies to its dock. With "Return" off, the energy check counted on the nearest charger, so this final flight relies on the safety margin;
+- charging stations only matter with "Return" off; with "Return" on every task ends at the base.
 
 Future work:
-- integrate automated en-route detour to charging pads directly inside A* search when remaining battery is insufficient for a return journey,
+- integrate en-route detours to chargers directly inside the A* search,
+- schedule station slots jointly with task allocation (and allow queueing),
 - optionally plan in a fully coupled hybrid state space \((x,y,z,t,B)\).
 
 ## 4. Prioritized Planning vs Coupled MAPF

@@ -13,6 +13,9 @@ export interface RunRecord extends Partial<MissionMetrics> {
   drones: number;
   allocationMode: string;
   completionMode: string;
+  chargingSites: number;
+  /** % of capacity per tick; Infinity = instant. */
+  chargeRate: number;
   repetition: number;
   seed: number;
   algorithm: string;
@@ -39,7 +42,7 @@ async function buildScenario(spec: ScenarioSpec, plan: BenchmarkPlan): Promise<S
   return withSeed(spec.seed, () => {
     const { gridSize, pallets, forklifts } = spec.scale;
     const manager = new SimulationManager(gridSize, spec.drones);
-    manager.generateWorld('Warehouse', gridSize, false, true, spec.drones, pallets, forklifts, 'mixed');
+    manager.generateWorld('Warehouse', gridSize, spec.chargingSites - 1, true, spec.drones, pallets, forklifts, 'mixed');
     manager.initializeAgents(spec.drones, plan.batteryCapacity, true, gridSize);
     return manager;
   });
@@ -66,6 +69,8 @@ export async function runScenario(spec: ScenarioSpec, plan: BenchmarkPlan): Prom
       drones: spec.drones,
       allocationMode: spec.allocationMode,
       completionMode: spec.completionMode,
+      chargingSites: spec.chargingSites,
+      chargeRate: plan.chargeRate,
       repetition: spec.repetition,
       seed: spec.seed,
       algorithm,
@@ -84,13 +89,14 @@ export async function runScenario(spec: ScenarioSpec, plan: BenchmarkPlan): Prom
         spec.allocationMode,
         plan.clusterRadius,
         plan.maxClusterSize,
-        spec.completionMode
+        spec.completionMode,
+        plan.chargeRate
       )));
       records.push({
         ...base,
         ok: true,
         planningMs: performance.now() - started,
-        ...computeMissionMetrics(result.agents, result.incidents, result.maxTicks, manager.world.pallets.length),
+        ...computeMissionMetrics(result.agents, result.incidents, result.maxTicks, manager.world.pallets.length, manager.world.chargeStations),
         ...(cbs ? { cbsNodesExpanded: cbs.getStats().nodesExpanded, cbsFallbacks: cbs.getStats().fallbacks } : {}),
       });
     } catch (e: any) {

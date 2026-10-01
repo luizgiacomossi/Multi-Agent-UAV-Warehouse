@@ -1,4 +1,5 @@
 import { MissionCompletionMode } from '../types';
+import { INSTANT_CHARGE_RATE } from '../SimulationConfig';
 
 export type AllocationMode = '1-to-1' | 'Cluster';
 
@@ -18,12 +19,16 @@ export interface BenchmarkPlan {
   droneCounts: number[];
   allocationModes: AllocationMode[];
   completionModes: MissionCompletionMode[];
+  /** Charging sites counting the base (1 = base only; each extra site is a one-drone station). */
+  chargingSites: number[];
   repetitions: number;
   baseSeed: number;
   missionsPerDrone: number;
   batteryCapacity: number;
   batteryEnabled: boolean;
   roundTrip: boolean;
+  /** Charging speed in % of capacity per tick; INSTANT_CHARGE_RATE restores a full battery in one tick. */
+  chargeRate: number;
   clusterRadius: number;
   maxClusterSize: number;
 }
@@ -34,6 +39,7 @@ export interface ScenarioSpec {
   drones: number;
   allocationMode: AllocationMode;
   completionMode: MissionCompletionMode;
+  chargingSites: number;
   repetition: number;
   seed: number;
 }
@@ -52,12 +58,14 @@ const BASE_PLAN: Omit<BenchmarkPlan, 'name'> = {
   droneCounts: [2, 4],
   allocationModes: ['1-to-1'],
   completionModes: ['count'],
+  chargingSites: [1],
   repetitions: 5,
   baseSeed: 1,
   missionsPerDrone: 3,
   batteryCapacity: 100,
   batteryEnabled: true,
   roundTrip: true,
+  chargeRate: INSTANT_CHARGE_RATE,
   clusterRadius: 5,
   maxClusterSize: 3,
 };
@@ -84,6 +92,24 @@ export const PRESETS: Record<string, BenchmarkPlan> = {
     completionModes: ['count', 'all-pallets'],
     repetitions: 10,
   },
+  /**
+   * Charging infrastructure: full-coverage missions without returning to the base between tasks,
+   * finite charge rate, base only vs. base plus one-drone charging stations.
+   */
+  charging: {
+    ...BASE_PLAN,
+    name: 'charging',
+    algorithms: ['Cooperative', 'CBS'],
+    scales: [SCALES.medium, SCALES.large],
+    droneCounts: [2, 4, 8],
+    completionModes: ['all-pallets'],
+    chargingSites: [1, 2, 3, 5],
+    roundTrip: false,
+    chargeRate: 2,
+    // Small enough that drones must recharge mid-mission (with 100%, 4 drones cover 24³ on one charge)
+    batteryCapacity: 30,
+    repetitions: 5,
+  },
 };
 
 /**
@@ -96,9 +122,13 @@ export function expandScenarios(plan: BenchmarkPlan): ScenarioSpec[] {
     for (const drones of plan.droneCounts) {
       for (const allocationMode of plan.allocationModes) {
         for (const completionMode of plan.completionModes) {
-          for (let repetition = 0; repetition < plan.repetitions; repetition++) {
-            const seed = scenarioSeed(plan.baseSeed, scale.gridSize, drones, allocationMode, completionMode, repetition);
-            scenarios.push({ scale, drones, allocationMode, completionMode, repetition, seed });
+          for (const chargingSites of plan.chargingSites) {
+            for (let repetition = 0; repetition < plan.repetitions; repetition++) {
+              // The site count is left out of the seed: station placement is deterministic, so every
+              // site count gets the same warehouse and the comparison is paired.
+              const seed = scenarioSeed(plan.baseSeed, scale.gridSize, drones, allocationMode, completionMode, repetition);
+              scenarios.push({ scale, drones, allocationMode, completionMode, chargingSites, repetition, seed });
+            }
           }
         }
       }

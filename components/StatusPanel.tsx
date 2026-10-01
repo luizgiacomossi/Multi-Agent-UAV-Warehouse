@@ -19,12 +19,17 @@ const ACTIVITY_STYLE: Record<DroneActivityKind, { label: string; color: string; 
   scanning:  { label: 'Scanning',   color: 'text-cyan-400',    icon: ScanLine },
   enRoute:   { label: 'En route',   color: 'text-blue-400',    icon: Navigation },
   returning: { label: 'Returning',  color: 'text-purple-400',  icon: Undo2 },
+  toCharger: { label: 'To charger', color: 'text-emerald-300', icon: Zap },
   holding:   { label: 'Holding',    color: 'text-amber-300',   icon: Activity },
   inTransit: { label: 'In transit', color: 'text-blue-300',    icon: Navigation },
   charging:  { label: 'Charging',   color: 'text-emerald-400', icon: BatteryCharging },
   docked:    { label: 'Docked',     color: 'text-slate-400',   icon: Warehouse },
   complete:  { label: 'Complete',   color: 'text-slate-400',   icon: CheckCircle2 },
 };
+
+/** Battery as a percentage of the drone's capacity (the battery model works in capacity units). */
+const batteryPercent = (agent: Agent, battery: number) =>
+  Math.max(0, Math.min(100, agent.maxBattery > 0 ? (battery / agent.maxBattery) * 100 : battery));
 
 interface StatusPanelProps {
   agents: Agent[];
@@ -102,7 +107,7 @@ const StatusPanel: React.FC<StatusPanelProps> = ({
                   position: activeTask.position,
                   type: activeTask.type,
                   priority: activeTask.priority,
-                  battery: snap.battery
+                  battery: batteryPercent(a, snap.battery)
               });
           }
       });
@@ -228,12 +233,12 @@ const StatusPanel: React.FC<StatusPanelProps> = ({
         {agents.map((agent) => {
           const finishTime = agent.path.length - 1;
           const snapshot = getSnapshot(agent);
-          const currentBattery = Math.max(0, Math.min(100, snapshot.battery));
+          const currentBattery = batteryPercent(agent, snapshot.battery);
           const isRecharging = snapshot.isRecharging;
 
           // Per-tick activity from the planned records (agent.status is only the final outcome)
           const dock = agent instanceof Drone ? agent.mission.warehouseLocation : agent.start;
-          const activity = describeDroneActivity(agent, tick, dock, snapshot);
+          const activity = describeDroneActivity(agent, tick, dock, snapshot, chargeStations);
           const isDestroyed = activity.kind === 'crashed';
           const isDeadBattery = activity.kind === 'depleted';
 

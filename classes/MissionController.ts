@@ -9,6 +9,9 @@ export class MissionController {
     public currentPalletId: string | null = null;   // Pallet being scanned
     public currentScanType: string | null = null;   // 'camera' | 'rfid'
 
+    /** Charging station of the current recharge job (state RECHARGING). */
+    public chargerTarget: Position3D | null = null;
+
     // mTSP Clustering additions
     public currentCluster: TaskCluster | null = null;
     public clusterTaskIndex: number = 0;
@@ -71,6 +74,10 @@ export class MissionController {
 
         if (this.state === 'RETURNING') {
             return this.warehouseLocation;
+        }
+
+        if (this.state === 'RECHARGING') {
+            return this.chargerTarget;
         }
 
         return null;
@@ -148,6 +155,12 @@ export class MissionController {
                 }
                 return false; // Still executing intra-cluster tour
             }
+        } else if (this.state === 'RECHARGING') {
+            // Arrived at the charging station; the SimulationManager adds the charging ticks.
+            // A recharge job is not a mission: the drone is simply free again afterwards.
+            this.chargerTarget = null;
+            this.state = 'IDLE';
+            return true;
         } else if (this.state === 'RETURNING') {
             this.currentPalletId = null;
             this.currentScanType = null;
@@ -170,7 +183,7 @@ export class MissionController {
      */
     public continuesAfterCurrentLeg(): boolean {
         // A pallet stop is always followed by another leg: the next task or the flight home.
-        // Only the dock is a place where a drone may stay.
+        // Only the dock and a charging station (RECHARGING: it stays to charge) are places to stay.
         return this.state === 'OUTBOUND' || this.state === 'EXECUTING_TOUR';
     }
 
@@ -180,6 +193,23 @@ export class MissionController {
      */
     public returnToDock() {
         if (this.state === 'IDLE') this.state = 'RETURNING';
+    }
+
+    /**
+     * Recharge job: an idle drone flies to a charging station and charges there, then becomes
+     * IDLE again. (Recharging at the base is a plain return to the dock.)
+     */
+    public assignRecharge(station: Position3D) {
+        if (this.state !== 'IDLE') return;
+        this.chargerTarget = { ...station };
+        this.state = 'RECHARGING';
+    }
+
+    /** Gives up on an unreachable charging station and flies home to charge on the dock instead. */
+    public cancelRecharge() {
+        if (this.state !== 'RECHARGING') return;
+        this.chargerTarget = null;
+        this.state = 'RETURNING';
     }
 
     /**
@@ -197,6 +227,7 @@ export class MissionController {
 
     public reset() {
         this.state = 'IDLE';
+        this.chargerTarget = null;
         this.currentGoal = null;
         this.currentPalletId = null;
         this.currentScanType = null;
