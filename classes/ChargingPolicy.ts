@@ -11,6 +11,21 @@ export interface ChargerChoice {
     isStation: boolean;
 }
 
+/** What the charger choice needs to know about the current allocation round. */
+export interface ChargingRound {
+    pBase: Position3D;
+    /** Chargers the energy feasibility may count on (none when drones return to the base). */
+    feasibilityChargers: Position3D[];
+    /** Tasks offered to the drones in this round (the candidate pool). */
+    offered: Task[];
+    /** Every open pallet as a task. */
+    open: Task[];
+    /** Committed space-time reservations of every drone. */
+    reservations: SpaceTimeReservations;
+    /** Last tick any reservation can reach. */
+    horizon: number;
+}
+
 /** Where the drone's planned path currently ends. */
 const lastPosition = (drone: Drone): Position3D | undefined => drone.path[drone.path.length - 1];
 
@@ -90,8 +105,8 @@ export class ChargingPolicy {
      * charge (see chooseCharger), and books the station. Returns false when it should not go to a
      * station: the caller then sends it home (its dock is also its charger).
      */
-    sendToStation(drone: Drone, pBase: Position3D, feasibilityChargers: Position3D[], offered: Task[], open: Task[]): boolean {
-        const charger = this.chooseCharger(drone, pBase, feasibilityChargers, offered, open);
+    sendToStation(drone: Drone, round: ChargingRound): boolean {
+        const charger = this.chooseCharger(drone, round);
         if (!charger?.isStation) return false;
         drone.mission.assignRecharge(charger.site);
         drone.goal = { ...charger.site };
@@ -100,17 +115,34 @@ export class ChargingPolicy {
     }
 
     /**
+     * A station is free for a drone if no other drone holds it now: none is booked on it, and none
+     * has reserved its cell from the drone's current tick on. Drones plan at different clocks, so
+     * a drone that is behind may otherwise be sent to a station that others already use later in
+     * time; it could then never park there to charge, and its legs failed until it gave up.
+     */
+    private isStationFree(station: Position3D, droneId: string, fromTick: number, round: ChargingRound): boolean {
+        if (this.bookings.has(positionKey(station))) return false;
+        for (let t = fromTick; t <= round.horizon; t++) {
+            const owner = round.reservations.getVertexOwner(spaceTimeKey(station, t));
+            if (owner && owner !== droneId) return false;
+        }
+        return true;
+    }
+
+    /**
      * Where an idle drone left without a task should charge, or null if charging would not help.
      * It applies when none of the tasks `offered` in this allocation round is affordable from where
      * it is (the energy check of the allocation). Tasks outside the round's candidate pool do not
      * count: the drone could not have been given them, and it must not fly home instead. Candidates
-     * are its dock (one per drone, always free) and the stations no other drone holds, rated by
+     * are its dock (one per drone, always free) and the stations no other drone holds (see
+     * isStationFree), rated by
      * ready time: travel plus charging to full. A charger is preferred if some `open` task is
      * affordable from it on a full battery, which also lets a fully charged drone stage at a
      * station closer to pallets it cannot reach from where it is. Chargers the drone cannot reach
      * on its battery are skipped.
      */
-    chooseCharger(drone: Drone, pBase: Position3D, feasibilityChargers: Position3D[], offered: Task[], open: Task[]): ChargerChoice | null {
+    chooseCharger(drone: Drone, round: ChargingRound): ChargerChoice | null {
+        const { pBase, feasibilityChargers, offered, open } = round;
         const battery = drone.batteryModel;
         const compatible = (task: Task) => drone.payload.includes(task.req_payload);
         const affordableFrom = (pos: Position3D, charge: number) => (task: Task) =>
@@ -118,13 +150,14 @@ export class ChargingPolicy {
 
         const tasks = open.filter(compatible);
         const from = lastPosition(drone)!;
+        const now = drone.path.length - 1;
         const workableHere = offered.some(task => compatible(task) && affordableFrom(from, drone.battery)(task));
         if (tasks.length === 0 || workableHere) return null;
 
         const candidates: ChargerChoice[] = [
             { site: drone.mission.warehouseLocation, isStation: false },
             ...this.stations()
-                .filter(s => !this.bookings.has(positionKey(s)))
+                .filter(s => this.isStationFree(s, drone.id, now, round))
                 .map(site => ({ site, isStation: true })),
         ].filter(c => !samePosition(c.site, from)); // already charged here
 

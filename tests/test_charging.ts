@@ -1,5 +1,7 @@
 import { Drone } from '../classes/Drone';
 import { BatteryModel } from '../classes/BatteryModel';
+import { ChargingPolicy } from '../classes/ChargingPolicy';
+import { SpaceTimeReservations, spaceTimeKey } from '../classes/PathPlanner';
 import { MissionController } from '../classes/MissionController';
 import { World } from '../classes/World';
 import { CostModel } from '../classes/CostModel';
@@ -204,6 +206,25 @@ export async function runChargingTests(): Promise<{ passed: number; failed: numb
     `${pingPong.maxTicks} ticks`);
   assert(pingPong.agents.every(a => samePos(a.path[a.path.length - 1], (a as Drone).mission.warehouseLocation)),
     'It lands once nothing reachable is left');
+
+  // Drones plan at different clocks. A station another drone uses later in time cannot be a
+  // parking goal for a drone that is behind: it charges at its dock instead (CBS searched for
+  // minutes for a slot that did not exist).
+  const station2 = { x: 10, y: 0, z: 0 };
+  const lagging = new Drone('lag', 'Lagging', '#fff', 30);
+  lagging.mission.warehouseLocation = { x: 0, y: 0, z: 0 };
+  lagging.path = [{ x: 8, y: 0, z: 0 }];
+  lagging.battery = 22;
+  const nearStation: Task = { id: 'near', target: { x: 11, y: 1, z: 0 }, req_payload: 'camera', palletId: 'near', pi_k: 0.5, t_hover: 5, status: 'PENDING' };
+  const round = (reservations: SpaceTimeReservations) => ({
+    pBase: { x: 0, y: 0, z: 0 }, feasibilityChargers: [station2], offered: [], open: [nearStation], reservations, horizon: 600,
+  });
+  const policy = new ChargingPolicy(() => [station2]);
+  assert(policy.chooseCharger(lagging, round(new SpaceTimeReservations()))?.isStation === true, 'A free nearby station is chosen');
+  const usedLater = new SpaceTimeReservations();
+  usedLater.addVertex(spaceTimeKey(station2, 300), 'other-drone');
+  const choice = policy.chooseCharger(lagging, round(usedLater));
+  assert(choice !== null && !choice.isStation, 'A station another drone uses later in time is not offered; the dock is', JSON.stringify(choice));
 
   // ─────────────────────────────────────────────────────────────
   // 6. Battery drain multiplier

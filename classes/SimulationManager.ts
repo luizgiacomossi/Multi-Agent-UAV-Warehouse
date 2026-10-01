@@ -13,10 +13,11 @@ import {
     EnergySaverPlanner,
     CollisionAnalyzer,
     SpaceTimeReservations,
-    MAX_LEG_RETRIES
+    MAX_LEG_RETRIES,
+    PARKING_TAIL_TICKS
 } from './PathPlanner';
 import { CostModel } from './CostModel';
-import { ChargingPolicy, isAtDock } from './ChargingPolicy';
+import { ChargingPolicy, ChargingRound, isAtDock } from './ChargingPolicy';
 import { manhattanDistance } from '../utils/Position';
 import { CBSPlanner } from './CBSPlanner';
 import { Task } from '../types';
@@ -728,10 +729,14 @@ export class SimulationManager {
             // pallet from where it is goes to charge (or to stage at a station nearer the pallets);
             // any other drone away from its dock flies home.
             const pBase = this.world.warehouse?.position || { x: 0, y: 0, z: 0 };
+            const chargingRound = (): ChargingRound => ({
+                pBase, feasibilityChargers, offered: offeredTasks, open: this.openPalletTasks(), reservations: reservedSpaceTime,
+                horizon: Math.min(MAX_TIMESTEPS, Math.max(...this.swarm.drones.map(d => d.path.length)) + PARKING_TAIL_TICKS),
+            });
             idleDrones
                 .filter(d => d.mission.state === 'IDLE')
                 .forEach(d => {
-                    const toStation = batteryEnabled && this.charging.sendToStation(d, pBase, feasibilityChargers, offeredTasks, this.openPalletTasks());
+                    const toStation = batteryEnabled && this.charging.sendToStation(d, chargingRound());
                     if (!toStation && !isAtDock(d)) {
                         d.mission.returnToDock();
                         d.goal = { ...d.mission.warehouseLocation };
