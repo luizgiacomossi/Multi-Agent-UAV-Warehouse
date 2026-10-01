@@ -344,8 +344,9 @@ export abstract class PathFindingStrategy {
 
     const startPos = drone.path[drone.path.length - 1] || drone.start;
     const startTime = drone.path.length > 0 ? drone.path.length - 1 : 0;
+    // Search energy is counted in nominal β units, so the budget is the battery over the drain multiplier
     const availableEnergy = batteryEnabled
-      ? drone.calculateStateAt(startTime, world.chargeStations, batteryEnabled).battery
+      ? drone.calculateStateAt(startTime, world.chargeStations, batteryEnabled).battery / drone.drainMultiplier
       : undefined;
     return { target, startPos, startTime, availableEnergy };
   }

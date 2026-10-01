@@ -72,19 +72,23 @@ For each time step:
 2. Otherwise a move consumes `BETA_FLY`.
 3. A wait consumes `BETA_HOVER`.
 
+Both costs are scaled by the **drain multiplier** \(m\) (`Drone.drainMultiplier`, UI "Battery drain", default 1): \(m = 2\) empties the battery twice as fast. Every energy estimate uses the same \(m\): the battery replay, the planner's energy budget (the battery divided by \(m\), since the search counts nominal β units), the allocation's \(e_{req}\), and the charger choice.
+
 Formally, if \(p(t-1)\neq p(t)\), then
 
 \[
-B(t)=B(t-1)-\beta_{fly},
+B(t)=B(t-1)-m\,\beta_{fly},
 \]
 
 and if \(p(t-1)=p(t)\), then
 
 \[
-B(t)=B(t-1)-\beta_{hover},
+B(t)=B(t-1)-m\,\beta_{hover},
 \]
 
 except at charging states, where \(B(t)=\min(B_{max}, B(t-1) + r B_{max}/100)\).
+
+`Drone.chargingSessions` lists every stay on a charger during which the battery fills up (start and end tick, battery before and after). The telemetry panel shows them for the whole fleet as the **Charging Schedule** (`classes/ChargingSchedule.ts`): since paths are planned before playback, the schedule is known in full, and each session is marked planned, charging or done at the current tick. Station numbers match the "CHARGE S*n*" labels in the 3D view.
 
 The charge rate is set in the UI ("Instant" or "% per tick", default 2%/tick, i.e. a full charge in 50 ticks) and passed to `runPathfinding`. Instant charging keeps earlier results reproducible: with instant charging and the base only, the benchmark reproduces the earlier results exactly.
 

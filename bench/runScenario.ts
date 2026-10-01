@@ -16,6 +16,7 @@ export interface RunRecord extends Partial<MissionMetrics> {
   chargingSites: number;
   /** % of capacity per tick; Infinity = instant. */
   chargeRate: number;
+  drainMultiplier: number;
   repetition: number;
   seed: number;
   algorithm: string;
@@ -71,6 +72,7 @@ export async function runScenario(spec: ScenarioSpec, plan: BenchmarkPlan): Prom
       completionMode: spec.completionMode,
       chargingSites: spec.chargingSites,
       chargeRate: plan.chargeRate,
+      drainMultiplier: plan.drainMultiplier,
       repetition: spec.repetition,
       seed: spec.seed,
       algorithm,
@@ -90,7 +92,8 @@ export async function runScenario(spec: ScenarioSpec, plan: BenchmarkPlan): Prom
         plan.clusterRadius,
         plan.maxClusterSize,
         spec.completionMode,
-        plan.chargeRate
+        plan.chargeRate,
+        plan.drainMultiplier
       )));
       records.push({
         ...base,

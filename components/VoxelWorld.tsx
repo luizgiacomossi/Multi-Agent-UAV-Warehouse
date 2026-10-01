@@ -48,7 +48,7 @@ const ChargingStation: React.FC<ChargingStationProps> = ({ positions }) => {
                         <meshStandardMaterial color="#10b981" emissive="#10b981" emissiveIntensity={0.5} />
                     </mesh>
                     <pointLight distance={2} intensity={1} color="#10b981" />
-                    <Text position={[0, 0.5, 0]} fontSize={0.2} color="#10b981" anchorX="center" anchorY="middle">CHARGE</Text>
+                    <Text position={[0, 0.5, 0]} fontSize={0.2} color="#10b981" anchorX="center" anchorY="middle">{`CHARGE S${i + 1}`}</Text>
                 </group>
             ))}
         </group>

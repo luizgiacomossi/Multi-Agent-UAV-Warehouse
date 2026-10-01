@@ -10,6 +10,13 @@ import { Drone } from '../classes/Drone';
 import { Metrics } from '../classes/Metrics';
 import { AlertLog } from '../classes/AlertLog';
 import { DroneActivityKind, describeDroneActivity } from '../classes/DroneActivity';
+import { buildChargingSchedule, chargeStatusAt, ChargeStatus } from '../classes/ChargingSchedule';
+
+const CHARGE_STATUS_STYLE: Record<ChargeStatus, { label: string; className: string; order: number }> = {
+  active:   { label: 'Charging', className: 'text-emerald-300 bg-emerald-500/10 border-emerald-500/30 animate-pulse', order: 0 },
+  upcoming: { label: 'Planned',  className: 'text-sky-300 bg-sky-500/10 border-sky-500/30', order: 1 },
+  done:     { label: 'Done',     className: 'text-slate-400 bg-slate-700/30 border-slate-600/40', order: 2 },
+};
 
 /** Label, colour and icon for each drone activity in the scan manifest. */
 const ACTIVITY_STYLE: Record<DroneActivityKind, { label: string; color: string; icon: LucideIcon }> = {
@@ -93,6 +100,20 @@ const StatusPanel: React.FC<StatusPanelProps> = ({
     const historicalIds = new Set(historicalTasks.map(h => h.pallet?.id).filter(Boolean));
     return pallets.filter(p => !activeIds.has(p.id) && !historicalIds.has(p.id));
   }, [agents, historicalTasks, pallets, tick]);
+
+  // Charging sessions are known in full after planning; only their status depends on the tick
+  const chargingSchedule = useMemo(
+    () => buildChargingSchedule(agents, chargeStations, batteryEnabled),
+    [agents, chargeStations, batteryEnabled]
+  );
+  const chargingRows = useMemo(() => chargingSchedule
+    .map(session => ({ session, status: chargeStatusAt(session, tick) }))
+    // Charging now first, then the next ones, then the most recent finished ones
+    .sort((a, b) => CHARGE_STATUS_STYLE[a.status].order - CHARGE_STATUS_STYLE[b.status].order ||
+      (a.status === 'done' ? b.session.startTick - a.session.startTick : a.session.startTick - b.session.startTick)),
+    [chargingSchedule, tick]
+  );
+  const activeCharges = chargingRows.filter(r => r.status === 'active').length;
 
   const activeMatrixRows = useMemo(() => {
       const rows: { agent: Agent; taskId: string; position: Position3D; type: string; priority: number; battery: number }[] = [];
@@ -400,6 +421,73 @@ const StatusPanel: React.FC<StatusPanelProps> = ({
         </div>
       </div>
       
+      {batteryEnabled && (
+        <>
+          <hr className="border-slate-700/50" />
+
+          {/* Charging Schedule */}
+          <div className="space-y-1.5">
+            <h3 className="text-[10px] font-bold text-slate-500 mb-1 uppercase tracking-wider flex items-center justify-between gap-1.5">
+              <span className="flex items-center gap-1.5"><BatteryCharging size={10} /> Charging Schedule</span>
+              <span className="text-[9px] bg-slate-800 px-1.5 rounded-full border border-slate-700 text-slate-400">
+                {activeCharges > 0 ? `${activeCharges} now · ` : ''}{chargingSchedule.length}
+              </span>
+            </h3>
+            <div className="bg-slate-800/60 rounded-lg border border-slate-700 overflow-hidden max-h-[200px] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-600">
+              <table className="w-full text-left text-[9px] text-slate-300">
+                <thead className="bg-slate-800 border-b border-slate-700 text-slate-500 sticky top-0 z-10">
+                  <tr>
+                    <th className="p-1.5 font-semibold">AGENT</th>
+                    <th className="p-1.5 font-semibold">SITE</th>
+                    <th className="p-1.5 font-semibold text-center">TICKS</th>
+                    <th className="p-1.5 font-semibold text-center">BATT</th>
+                    <th className="p-1.5 font-semibold text-right">STATUS</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {chargingRows.map(({ session, status }) => {
+                    const style = CHARGE_STATUS_STYLE[status];
+                    const pct = (b: number) => Math.round((b / session.maxBattery) * 100);
+                    return (
+                      <tr
+                        key={`charge-${session.droneId}-${session.startTick}`}
+                        className={`border-b border-slate-700/50 last:border-0 hover:bg-slate-700/30 ${status === 'done' ? 'opacity-60' : ''}`}
+                      >
+                        <td className="p-1.5 font-medium">
+                          <span className="flex items-center gap-1.5">
+                            <span className="w-2 h-2 rounded-full" style={{ backgroundColor: session.color }} />
+                            {session.droneName}
+                          </span>
+                        </td>
+                        <td className={`p-1.5 ${session.charger === 'station' ? 'text-emerald-300' : 'text-slate-300'}`}>{session.site}</td>
+                        <td className="p-1.5 font-mono text-center opacity-80">
+                          {session.startTick === session.endTick ? `T+${session.startTick}` : `T+${session.startTick}–${session.endTick}`}
+                        </td>
+                        <td className="p-1.5 font-mono text-center">
+                          <span className="text-amber-400">{pct(session.batteryFrom)}%</span>
+                          <span className="text-slate-500"> → </span>
+                          <span className="text-emerald-400">{pct(session.batteryTo)}%</span>
+                        </td>
+                        <td className="p-1.5 text-right">
+                          <span className={`px-1.5 py-0.5 rounded border text-[8px] font-bold uppercase ${style.className}`}>{style.label}</span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {chargingRows.length === 0 && (
+                    <tr>
+                      <td colSpan={5} className="p-3 text-center text-slate-500 italic font-mono opacity-70">
+                        No charging planned.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      )}
+
       <hr className="border-slate-700/50" />
 
       {/* Historical Tasks Table */}

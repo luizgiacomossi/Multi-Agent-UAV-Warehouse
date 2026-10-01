@@ -41,8 +41,12 @@ export class CostModel {
    * e_req = \beta_{fly} \gamma (||p_i - p_k|| + ||p_k - p_{base}||) + \beta_{hover} t_{task}
    */
   static calculate_e_req(drone: Agent, task: Task, p_base: Position3D, chargingStations: Position3D[] = []): number {
-    const currentPos = this.getDroneCurrentPosition(drone);
-    const dist_to_task = this.distanceEuclidean(currentPos, task.target);
+    return this.requiredEnergyFrom(this.getDroneCurrentPosition(drone), task, p_base, chargingStations, this.drainOf(drone));
+  }
+
+  /** Equation 13 for a drone at `from` (e.g. a charger it could fly to first). */
+  static requiredEnergyFrom(from: Position3D, task: Task, p_base: Position3D, chargingStations: Position3D[] = [], drain: number = 1): number {
+    const dist_to_task = this.distanceEuclidean(from, task.target);
     // Afterwards the drone must still reach a charger (the base, or the nearest station)
     const dist_to_base = this.distanceToNearestCharger(task.target, p_base, chargingStations);
     
@@ -51,7 +55,18 @@ export class CostModel {
     const gamma = MATH_CONSTANTS.GAMMA;
     const beta_hover = MATH_CONSTANTS.BETA_HOVER;
     
-    return beta_fly * gamma * (dist_to_task + dist_to_base) + (beta_hover * task.t_hover);
+    const nominal = beta_fly * gamma * (dist_to_task + dist_to_base) + (beta_hover * task.t_hover);
+    return nominal * drain;
+  }
+
+  /** The energy part of Equation 14: the battery covers the requirement plus the safety margin. */
+  static isAffordable(battery: number, e_req: number): boolean {
+    return battery >= e_req + MATH_CONSTANTS.DELTA_SAFE;
+  }
+
+  /** Battery drain multiplier of a drone (1 = nominal β_fly / β_hover). */
+  static drainOf(drone: Agent): number {
+    return drone.drainMultiplier ?? 1;
   }
 
   /**
@@ -88,7 +103,7 @@ export class CostModel {
     const dist_return = this.distanceToNearestCharger(lastTask.target, p_base, chargingStations);
     
     // The tour cost already contains the internal kinetic flight and structural hovering
-    return MATH_CONSTANTS.BETA_FLY * MATH_CONSTANTS.GAMMA * (dist_outbound + dist_return) + tour.cost;
+    return (MATH_CONSTANTS.BETA_FLY * MATH_CONSTANTS.GAMMA * (dist_outbound + dist_return) + tour.cost) * this.drainOf(drone);
   }
 
   /**

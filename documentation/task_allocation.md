@@ -129,7 +129,11 @@ e_{req}(i,k) = \beta_{fly}\gamma\left(\lVert p_i - g_k \rVert_2 + \min_{c \in \{
 
 Stations \(S\) are only counted when "Return" is off. With "Return" on, every task ends at the base anyway.
 
-**Recharge job.** After allocation, an idle drone away from its dock that got no task is checked by `needsRecharge`: if some open pallet needs its payload but none passes the energy check, the drone is given a recharge job. The charging site is the one at which it is fully charged soonest (`chooseChargingStation`): travel time plus `ticksToFullCharge` of the battery left on arrival. Sites the drone cannot reach on its battery are skipped.
+All energy terms are multiplied by the drone's drain multiplier \(m\) (see `agent_model.md`).
+
+**Recharge job.** After allocation, an idle drone that got no task is checked by `chooseCharger`: if some open pallet needs its payload but none passes the energy check from where the drone is, it is sent to a charger. Candidates are its dock and the free stations, excluding the one it stands on. A charger from which some open pallet is affordable on a full battery is preferred; among those, the one where the drone is fully charged soonest wins (travel time plus `ticksToFullCharge` of the battery left on arrival). Chargers the drone cannot reach on its battery are skipped.
+
+This also covers **staging**: a fully charged drone that cannot afford any open pallet from where it is (e.g. pallets far from the base) moves to a station from which one is affordable. Pallets out of reach from every charger, even on a full battery, are left unscanned, and the drones land instead of flying out of their safety margin.
 
 - **Base:** one dock per drone, so it is always available; the drone flies home and charges on the dock.
 - **Station:** holds one drone. A station is booked from dispatch until its drone leaves (`stationBookings`), and booked stations are not offered to other drones. Drones never queue: a drone that would have to wait for a station uses another site, so it never hovers in the air waiting.

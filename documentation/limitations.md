@@ -25,7 +25,7 @@ Future work:
 The path planners bound search using true residual battery calculated at dispatch time (`drone.calculateStateAt(...)`). Drones recharge at the base or at one-drone charging stations through recharge jobs (see `task_allocation.md`, Section 5), with some limits:
 
 - a recharge is triggered only when an idle drone's battery cannot cover any open pallet; there is no proactive recharging or look-ahead;
-- the safety margin \(\delta_{safe}\) is an absolute 20 battery units. With small capacities (e.g. 30) drones recharge at about two thirds of a full battery;
+- the safety margin \(\delta_{safe}\) is an absolute 20 battery units. With small capacities (e.g. 30) drones recharge at about two thirds of a full battery, and with a high drain some far pallets can be out of reach from every charger; those are left unscanned (the drones land safely instead). A margin relative to capacity would avoid this;
 - drones never queue for a busy station. A queue (waiting on the ground nearby) could use stations better when many drones share few stations;
 - after its last mission a drone flies to its dock. With "Return" off, the energy check counted on the nearest charger, so this final flight relies on the safety margin;
 - charging stations only matter with "Return" off; with "Return" on every task ends at the base.

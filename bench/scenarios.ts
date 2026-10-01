@@ -29,6 +29,8 @@ export interface BenchmarkPlan {
   roundTrip: boolean;
   /** Charging speed in % of capacity per tick; INSTANT_CHARGE_RATE restores a full battery in one tick. */
   chargeRate: number;
+  /** Scales battery consumption per move and per hover tick (1 = nominal). */
+  drainMultiplier: number;
   clusterRadius: number;
   maxClusterSize: number;
 }
@@ -66,6 +68,7 @@ const BASE_PLAN: Omit<BenchmarkPlan, 'name'> = {
   batteryEnabled: true,
   roundTrip: true,
   chargeRate: INSTANT_CHARGE_RATE,
+  drainMultiplier: 1,
   clusterRadius: 5,
   maxClusterSize: 3,
 };

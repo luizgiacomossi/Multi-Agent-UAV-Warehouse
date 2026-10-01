@@ -17,7 +17,7 @@ export interface MissionMetrics {
   batteryDeaths: number;
   /** Drones left without a path by the planner (neither crashed nor out of battery). */
   strandedDrones: number;
-  /** Battery consumed by flight and hover (charging not subtracted), summed over drones. */
+  /** Battery consumed by flight and hover, scaled by the drain multiplier (charging not subtracted), summed over drones. */
   energyConsumed: number;
   /** Grid cells travelled, summed over drones. */
   distance: number;
@@ -53,7 +53,7 @@ export function computeMissionMetrics(
       const prev = agent.path[i - 1];
       const curr = agent.path[i];
       const moved = prev.x !== curr.x || prev.y !== curr.y || prev.z !== curr.z;
-      energyConsumed += moved ? MATH_CONSTANTS.BETA_FLY : MATH_CONSTANTS.BETA_HOVER;
+      energyConsumed += (moved ? MATH_CONSTANTS.BETA_FLY : MATH_CONSTANTS.BETA_HOVER) * (agent.drainMultiplier ?? 1);
       if (moved) distance++;
       if (!moved && stationCells.has(`${curr.x},${curr.y},${curr.z}`)) {
         stationTicks++;

@@ -34,6 +34,7 @@ const HELP = `Usage: npm run bench -- [options]
   --sites <n,n>       charging sites incl. the base (1 = base only; extra sites are one-drone stations)
   --charge-rate <r>   charging speed in % of capacity per tick, or "instant"
   --battery <n>       battery capacity per drone
+  --drain <x>         battery drain multiplier (1 = nominal β_fly / β_hover)
   --no-return         do not return to the base between tasks (lets drones use charging stations)
   --out <dir>         output directory`;
 
@@ -68,6 +69,7 @@ function parseArgs(argv: string[]): CliOptions {
       }
       case '--no-return': options.overrides.roundTrip = false; break;
       case '--battery': options.overrides.batteryCapacity = Number(needValue()); break;
+      case '--drain': options.overrides.drainMultiplier = Number(needValue()); break;
       case '--grids': {
         options.overrides.scales = numbers(needValue()).map(size => {
           const scale = Object.values(SCALES).find(s => s.gridSize === size);

@@ -19,7 +19,7 @@ import {
 import { CostModel } from './CostModel';
 import { CBSPlanner } from './CBSPlanner';
 import { Task } from '../types';
-import { MAX_TIMESTEPS, GRID_SIZE, DEFAULT_AGENT_COUNT, MATH_CONSTANTS, INSTANT_CHARGE_RATE } from '../SimulationConfig';
+import { MAX_TIMESTEPS, GRID_SIZE, DEFAULT_AGENT_COUNT, MATH_CONSTANTS, INSTANT_CHARGE_RATE, DEFAULT_DRAIN_MULTIPLIER } from '../SimulationConfig';
 import { random } from '../utils/Random';
 
 type PalletReservation = {
@@ -335,46 +335,48 @@ export class SimulationManager {
     }
 
     /**
-     * True if the drone has to recharge before taking any work: some open pallet needs its payload,
-     * but its battery cannot cover any of them (the same energy check the allocation uses).
+     * Where an idle drone left without a task should charge, or null if charging would not help.
+     * It applies when no open pallet with its payload is affordable from where it is (the energy
+     * check of the allocation). Candidates are its dock (one per drone, always free) and the
+     * stations no other drone holds (drones never queue in the air), rated by ready time: travel
+     * plus charging to full. A charger is preferred if some open pallet is affordable from it on a
+     * full battery, which also lets a fully charged drone stage at a station closer to pallets it
+     * cannot reach from where it is. Chargers the drone cannot reach on its battery are skipped.
      */
-    private needsRecharge(drone: Drone, pBase: Position3D, chargers: Position3D[]): boolean {
-        if (drone.battery >= drone.maxBattery) return false;
+    private chooseCharger(drone: Drone, pBase: Position3D, chargers: Position3D[]): { site: Position3D; isStation: boolean } | null {
         const tasks: Task[] = this.getAvailablePallets()
             .filter(plt => drone.payload.includes(plt.payload_type))
             .map(plt => ({
                 id: plt.id, target: plt.position, req_payload: plt.payload_type, palletId: plt.id,
                 pi_k: plt.weight / 100, t_hover: 5, status: 'PENDING' as const
             }));
-        if (tasks.length === 0) return false;
-        return !tasks.some(task => CostModel.is_feasible(drone, task, CostModel.calculate_e_req(drone, task, pBase, chargers)));
-    }
-
-    /**
-     * Picks where a drone recharges: the charger at which it is fully charged soonest (travel plus
-     * charging time). The base has a dock for every drone; a station holds one drone, so stations
-     * held by another drone are skipped (drones never queue in the air). Chargers the drone cannot
-     * reach on its battery are skipped too. Returns the station, or null when the dock is best.
-     */
-    private chooseChargingStation(drone: Drone): Position3D | null {
         const from = drone.path[drone.path.length - 1];
-        const readyTime = (site: Position3D) => {
-            const travel = Math.abs(from.x - site.x) + Math.abs(from.y - site.y) + Math.abs(from.z - site.z);
-            const energy = travel * MATH_CONSTANTS.BETA_FLY * MATH_CONSTANTS.GAMMA;
-            if (energy >= drone.battery) return Infinity;
-            return travel + drone.ticksToFullCharge(drone.battery - energy);
-        };
+        const affordableFrom = (pos: Position3D, battery: number) => tasks.some(task =>
+            CostModel.isAffordable(battery, CostModel.requiredEnergyFrom(pos, task, pBase, chargers, drone.drainMultiplier)));
+        if (tasks.length === 0 || affordableFrom(from, drone.battery)) return null;
 
-        let best: Position3D | null = null;
-        let bestTime = readyTime(drone.mission.warehouseLocation);
-        for (const station of this.world.chargeStations) {
-            if (this.stationBookings.has(this.stationKey(station))) continue;
-            const time = readyTime(station);
-            if (time < bestTime) {
-                best = station;
-                bestTime = time;
+        const candidates = [
+            { site: drone.mission.warehouseLocation, isStation: false },
+            ...this.world.chargeStations
+                .filter(s => !this.stationBookings.has(this.stationKey(s)))
+                .map(site => ({ site, isStation: true })),
+        ].filter(c => this.stationKey(c.site) !== this.stationKey(from)); // already charged here
+
+        let best: { site: Position3D; isStation: boolean } | null = null;
+        let bestRank = [Infinity, Infinity]; // [not useful, ready time]
+        for (const candidate of candidates) {
+            const { site } = candidate;
+            const travel = Math.abs(from.x - site.x) + Math.abs(from.y - site.y) + Math.abs(from.z - site.z);
+            const energy = travel * MATH_CONSTANTS.BETA_FLY * MATH_CONSTANTS.GAMMA * drone.drainMultiplier;
+            if (energy >= drone.battery) continue;
+            const rank = [affordableFrom(site, drone.maxBattery) ? 0 : 1, travel + drone.ticksToFullCharge(drone.battery - energy)];
+            if (rank[0] < bestRank[0] || (rank[0] === bestRank[0] && rank[1] < bestRank[1])) {
+                best = candidate;
+                bestRank = rank;
             }
         }
+        // A full battery gains nothing from a charger that does not make any pallet affordable
+        if (bestRank[0] === 1 && drone.battery >= drone.maxBattery) return null;
         return best;
     }
 
@@ -426,7 +428,8 @@ export class SimulationManager {
         clusterRadius: number = 5,
         maxClusterSize: number = 3,
         missionCompletionMode: MissionCompletionMode = 'count',
-        chargeRatePercent: number = INSTANT_CHARGE_RATE
+        chargeRatePercent: number = INSTANT_CHARGE_RATE,
+        drainMultiplier: number = DEFAULT_DRAIN_MULTIPLIER
     ): Promise<{ agents: Drone[], incidents: SimulationIncident[], maxTicks: number, clusters: ClusterVisualization[] }> {
 
         const isAllPalletsMode = missionCompletionMode === 'all-pallets';
@@ -452,6 +455,7 @@ export class SimulationManager {
             // sync MissionController with the correct pallet context and docking slot
             drone.setMissionConfig(drone.start, drone.goal, effectiveMissionCount, isRoundTrip, dockFor(index, drone));
             drone.chargeRatePercent = chargeRatePercent;
+            drone.drainMultiplier = drainMultiplier;
             // Re-apply pallet metadata that initializeScenario set, since setMissionConfig resets mission
             if (drone.currentPalletId) {
                 drone.mission.currentPalletId = drone.currentPalletId;
@@ -776,21 +780,19 @@ export class SimulationManager {
             const everyoneDone = this.swarm.drones.every(d => d.mission.state === 'COMPLETED' || d.status === 'STRANDED');
             if (everyoneDone) break;
 
-            // Idle drones that got no task and are away from their dock never wait airborne. A drone
-            // left without a task because its battery cannot cover any open pallet goes to recharge
-            // at the charger that gets it ready soonest; any other drone flies home.
+            // Idle drones that got no task never wait airborne. One that cannot afford any open
+            // pallet from where it is goes to charge (or to stage at a station nearer the pallets);
+            // any other drone away from its dock flies home.
             const pBase = this.world.warehouse?.position || { x: 0, y: 0, z: 0 };
             idleDrones
-                .filter(d => d.mission.state === 'IDLE' && !this.isAtDock(d))
+                .filter(d => d.mission.state === 'IDLE')
                 .forEach(d => {
-                    const station = batteryEnabled && this.needsRecharge(d, pBase, feasibilityChargers)
-                        ? this.chooseChargingStation(d)
-                        : null;
-                    if (station) {
-                        d.mission.assignRecharge(station);
-                        d.goal = { ...station };
-                        this.stationBookings.set(this.stationKey(station), d.id);
-                    } else {
+                    const charger = batteryEnabled ? this.chooseCharger(d, pBase, feasibilityChargers) : null;
+                    if (charger?.isStation) {
+                        d.mission.assignRecharge(charger.site);
+                        d.goal = { ...charger.site };
+                        this.stationBookings.set(this.stationKey(charger.site), d.id);
+                    } else if (!this.isAtDock(d)) {
                         d.mission.returnToDock();
                         d.goal = { ...d.mission.warehouseLocation };
                     }
