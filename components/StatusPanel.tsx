@@ -11,6 +11,7 @@ import { Metrics } from '../classes/Metrics';
 import { AlertLog } from '../classes/AlertLog';
 import { DroneActivityKind, describeDroneActivity } from '../classes/DroneActivity';
 import { buildChargingSchedule, chargeStatusAt, ChargeStatus } from '../classes/ChargingSchedule';
+import { BUS_PARTS, totalsByPart } from '../classes/PalletContents';
 
 const CHARGE_STATUS_STYLE: Record<ChargeStatus, { label: string; className: string; order: number }> = {
   active:   { label: 'Charging', className: 'text-emerald-300 bg-emerald-500/10 border-emerald-500/30 animate-pulse', order: 0 },
@@ -90,6 +91,12 @@ const StatusPanel: React.FC<StatusPanelProps> = ({
     // Sort descending by completion tick to show newest results at the top
     return logs.sort((a, b) => b.tick - a.tick);
   }, [agents, tick, pallets]);
+
+  // Units of each part found so far (contents are known once a pallet has been scanned)
+  const foundTotals = useMemo(
+    () => totalsByPart(historicalTasks.flatMap(h => h.pallet ? [h.pallet.contents] : [])),
+    [historicalTasks]
+  );
 
   const unassignedTasks = useMemo(() => {
     const activeIds = new Set<string>();
@@ -496,12 +503,21 @@ const StatusPanel: React.FC<StatusPanelProps> = ({
           <span className="flex items-center gap-1.5"><History size={10} /> Completed Scans</span>
           <span className="text-[9px] bg-slate-800 px-1.5 rounded-full border border-slate-700 text-slate-400">{historicalTasks.length}</span>
         </h3>
+        <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[9px] font-mono text-slate-400">
+          {Object.entries(BUS_PARTS).map(([id, part]) => (
+            <span key={id} className="flex items-center gap-1" title={part.name}>
+              <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: part.color }} />
+              {id} <span className="text-slate-200">{foundTotals[id as keyof typeof foundTotals].toLocaleString('en-US')}</span>
+            </span>
+          ))}
+        </div>
         <div className="bg-slate-800/60 rounded-lg border border-slate-700 overflow-hidden max-h-[220px] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-600">
           <table className="w-full text-left text-[9px] text-slate-300">
             <thead className="bg-slate-800 border-b border-slate-700 text-slate-500 sticky top-0 z-10">
               <tr>
                 <th className="p-1.5 font-semibold">TICK</th>
                 <th className="p-1.5 font-semibold">TARGET</th>
+                <th className="p-1.5 font-semibold">CONTENTS</th>
                 <th className="p-1.5 font-semibold text-right">AGENT</th>
               </tr>
             </thead>
@@ -513,6 +529,15 @@ const StatusPanel: React.FC<StatusPanelProps> = ({
                     PLT-{log.pallet?.id.slice(-6).toUpperCase() || 'UKN'}
                     {log.pallet && <div className="text-[8px] opacity-60">[{log.pallet.position.x}, {log.pallet.position.y}, {log.pallet.position.z}]</div>}
                   </td>
+                  <td className="p-1.5">
+                    {log.pallet ? (
+                      <span className="flex items-center gap-1.5 whitespace-nowrap">
+                        <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: BUS_PARTS[log.pallet.contents.part].color }} />
+                        {BUS_PARTS[log.pallet.contents.part].name}
+                        <span className="font-mono text-slate-400">×{log.pallet.contents.quantity}</span>
+                      </span>
+                    ) : <span className="text-slate-500">?</span>}
+                  </td>
                   <td className="p-1.5 font-medium flex items-center justify-end gap-1.5">
                     {log.agent.name}
                     <div className="w-2 h-2 rounded-full shadow-[0_0_5px_rgba(0,0,0,0.5)]" style={{ backgroundColor: log.agent.color }} />
@@ -521,7 +546,7 @@ const StatusPanel: React.FC<StatusPanelProps> = ({
               ))}
               {historicalTasks.length === 0 && (
                 <tr>
-                  <td colSpan={3} className="p-3 text-center text-slate-500 italic font-mono opacity-70">
+                  <td colSpan={4} className="p-3 text-center text-slate-500 italic font-mono opacity-70">
                     No historic data.
                   </td>
                 </tr>

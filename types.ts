@@ -49,6 +49,16 @@ export interface Pallet {
   position: Position3D;
   weight: number;
   payload_type: string;
+  /** What the pallet holds; revealed in the UI once a drone has scanned it. */
+  contents: PalletContents;
+}
+
+/** Bus spare parts stored in the warehouse (see `classes/PalletContents.ts`). */
+export type BusPart = 'BRK' | 'FLT' | 'TYR';
+
+export interface PalletContents {
+  part: BusPart;
+  quantity: number;
 }
 
 export type TaskPriorityMode = 'uniform' | 'mixed';
