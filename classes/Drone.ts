@@ -3,7 +3,17 @@ import { Agent, Position3D, MATH_CONSTANTS, MissionState } from '../types';
 import { MissionController } from './MissionController';
 import { World } from './World';
 import { random } from '../utils/Random';
-import { INSTANT_CHARGE_RATE } from '../SimulationConfig';
+import { INSTANT_CHARGE_RATE, DEFAULT_DRAIN_MULTIPLIER } from '../SimulationConfig';
+
+/** One stay on a charger during which the battery filled up (ticks inclusive). */
+export interface ChargingSession {
+    charger: 'base' | 'station';
+    position: Position3D;
+    startTick: number;
+    endTick: number;
+    batteryFrom: number;
+    batteryTo: number;
+}
 
 export class Drone implements Agent {
     // drone properties
@@ -31,6 +41,8 @@ export class Drone implements Agent {
     lastLegFailed: boolean = false; // set by the planner when the latest planLeg found no path
     /** Battery gained per waiting tick on a charger, in % of capacity (Infinity = instant full charge). */
     chargeRatePercent: number = INSTANT_CHARGE_RATE;
+    /** Scales battery consumption per move and per hover tick (1 = nominal β_fly / β_hover). */
+    drainMultiplier: number = DEFAULT_DRAIN_MULTIPLIER;
 
     public mission: MissionController;
 
@@ -70,6 +82,7 @@ export class Drone implements Agent {
         d.assignedTasksLog = this.assignedTasksLog ? this.assignedTasksLog.map(t => ({ ...t })) : [];
         d.destructionTime = this.destructionTime;
         d.chargeRatePercent = this.chargeRatePercent;
+        d.drainMultiplier = this.drainMultiplier;
         d.currentPalletId = this.mission.currentPalletId || undefined;
         d.currentScanType = this.mission.currentScanType || undefined;
         // We don't deep clone mission controller state for React rendering, 
@@ -243,35 +256,14 @@ export class Drone implements Agent {
 
             // -- Movement & Battery Logic --
             if (i > 0) {
-                const prev = this.path[i - 1];
-                const curr = this.path[i];
-                const isWaiting = this.isWaiting(prev, curr);
+                const step = this.batteryStep(battery, this.path[i - 1], this.path[i], chargeStations, batteryEnabled);
+                // Flagged only while the battery is actually filling up
+                if (i === tick) isRecharging = step.charging;
+                battery = step.battery;
 
-                // Check for Base/Station Recharge
-                // We recharge if we are at a station OR at the starting base (warehouse location)
-                // Check Mission Warehouse
-                const atBase = (curr.x === this.mission.warehouseLocation.x &&
-                    curr.y === this.mission.warehouseLocation.y &&
-                    curr.z === this.mission.warehouseLocation.z);
-
-                const atStation = this.isAtStation(curr, chargeStations);
-
-                if ((atBase || atStation) && isWaiting) {
-                    // Recharging (flagged only while the battery is actually filling up)
-                    if (i === tick) isRecharging = battery < this.maxBattery;
-                    if (batteryEnabled) battery = Math.min(this.maxBattery, battery + this.chargePerTick());
-
-                    // If at base and waiting, and we don't have a package, we pick one up (Reloading)
-                    if (atBase && !hasPackage) {
-                        hasPackage = true;
-                    }
-
-                } else {
-                    // Consuming
-                    if (batteryEnabled) {
-                        const cost = isWaiting ? MATH_CONSTANTS.BETA_HOVER : MATH_CONSTANTS.BETA_FLY;
-                        battery -= cost;
-                    }
+                // If at base and waiting, and we don't have a package, we pick one up (Reloading)
+                if (step.onCharger === 'base' && !hasPackage) {
+                    hasPackage = true;
                 }
 
                 // Death Check
@@ -282,6 +274,54 @@ export class Drone implements Agent {
         }
 
         return { battery: Math.max(0, battery), hasPackage, isRecharging, deathTick };
+    }
+
+    /**
+     * One tick of the battery model: waiting on the dock or a station charges, anything else
+     * consumes β_fly (move) or β_hover (wait), scaled by the drain multiplier.
+     */
+    private batteryStep(battery: number, prev: Position3D, curr: Position3D, chargeStations: Position3D[], batteryEnabled: boolean) {
+        const isWaiting = this.isWaiting(prev, curr);
+        const atBase = curr.x === this.mission.warehouseLocation.x &&
+            curr.y === this.mission.warehouseLocation.y &&
+            curr.z === this.mission.warehouseLocation.z;
+        const onCharger = !isWaiting ? null : atBase ? 'base' as const : this.isAtStation(curr, chargeStations) ? 'station' as const : null;
+
+        if (onCharger) {
+            const charging = battery < this.maxBattery;
+            const next = batteryEnabled ? Math.min(this.maxBattery, battery + this.chargePerTick()) : battery;
+            return { battery: next, charging, onCharger };
+        }
+        if (!batteryEnabled) return { battery, charging: false, onCharger };
+        const cost = isWaiting ? MATH_CONSTANTS.BETA_HOVER : MATH_CONSTANTS.BETA_FLY;
+        return { battery: battery - cost * this.drainMultiplier, charging: false, onCharger };
+    }
+
+    /**
+     * Every charging session in the planned path: consecutive ticks spent charging (battery below
+     * full) on the dock or on one charging station, with the battery before and after.
+     */
+    public chargingSessions(chargeStations: Position3D[], batteryEnabled: boolean): ChargingSession[] {
+        const sessions: ChargingSession[] = [];
+        if (!batteryEnabled) return sessions;
+        let battery = this.maxBattery;
+        let open: ChargingSession | null = null;
+        for (let i = 1; i < this.path.length; i++) {
+            const before = battery;
+            const step = this.batteryStep(battery, this.path[i - 1], this.path[i], chargeStations, batteryEnabled);
+            battery = step.battery;
+            if (battery <= 0) break; // depleted: nothing after this happens
+            if (step.charging && step.onCharger) {
+                if (open && open.endTick === i - 1) {
+                    open.endTick = i;
+                    open.batteryTo = battery;
+                } else {
+                    open = { charger: step.onCharger, position: { ...this.path[i] }, startTick: i, endTick: i, batteryFrom: before, batteryTo: battery };
+                    sessions.push(open);
+                }
+            }
+        }
+        return sessions;
     }
 
     /** Battery gained per waiting tick on a charger. */

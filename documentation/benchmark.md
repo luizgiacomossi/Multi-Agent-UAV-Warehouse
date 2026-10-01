@@ -27,6 +27,7 @@ npm run bench -- --help
 | `--sites` | charging sites including the base (1 = base only; each extra site is a one-drone station) |
 | `--charge-rate` | charging speed in % of capacity per tick, or `instant` |
 | `--battery` | battery capacity per drone |
+| `--drain` | battery drain multiplier (scales `β_fly` and `β_hover`; 1 = nominal) |
 | `--no-return` | do not return to the base between tasks (needed for drones to use stations) |
 | `--out` | output directory (default `bench-results/<preset>-<timestamp>/`) |
 
@@ -62,11 +63,11 @@ Results (5 runs per configuration, Cooperative and CBS pooled; mean makespan in 
 | M-16 | 2 | 599 | 540 (-9% ± 4) | 535 (-10% ± 5) | 513 (-14% ± 4) |
 | M-16 | 4 | 294 | 283 (-4% ± 4) | 267 (-9% ± 3) | 250 (-15% ± 6) |
 | M-16 | 8 | 161 | 145 (-8% ± 10) | 138 (-12% ± 10) | 134 (-16% ± 7) |
-| L-24 | 2 | 2153 | 1916 (-11% ± 2) | 1871 (-13% ± 4) | 1765 (-18% ± 2) |
+| L-24 | 2 | 2153 | 1916 (-11% ± 2) | 1891 (-12% ± 3) | 1762 (-18% ± 2) |
 | L-24 | 4 | 1151 | 961 (-16% ± 5) | 946 (-18% ± 1) | 869 (-24% ± 3) |
-| L-24 | 8 | 551 | 483 (-12% ± 3) | 466 (-15% ± 2) | 428 (-22% ± 2) |
+| L-24 | 8 | 551 | 478 (-13% ± 4) | 466 (-15% ± 1) | 429 (-22% ± 2) |
 
-Stations shorten full-coverage missions by 9–24% with four stations, more in the large warehouse, where the base is farther from most pallets.
+Stations shorten full-coverage missions by 14–24% with four stations, more in the large warehouse, where the base is farther from most pallets.
 
 **Generator limits.** The warehouse generator places forklifts only in aisles where `x % 4 === 0`. That caps them at 1 (12³), 2 (16³) and 3 (24³), regardless of the requested count. The benchmark records the counts actually generated.
 
@@ -80,7 +81,7 @@ All randomness in the simulation core goes through [`utils/Random.ts`](../utils/
 
 ## 4. Metrics
 
-Each row of `runs.csv` is one strategy on one scenario. Besides the scenario coordinates it records `chargingSites` and `chargeRate` (`Infinity` = instant).
+Each row of `runs.csv` is one strategy on one scenario. Besides the scenario coordinates it records `chargingSites`, `chargeRate` (`Infinity` = instant) and `drainMultiplier`.
 
 | Field | Definition |
 |---|---|
@@ -95,7 +96,7 @@ Each row of `runs.csv` is one strategy on one scenario. Besides the scenario coo
 | `lostDrones` | drones destroyed in a collision |
 | `batteryDeaths` | drones whose battery reached 0 |
 | `strandedDrones` | drones left without a path, neither crashed nor out of battery |
-| `energyConsumed` | battery used by flight (`β_fly` per move) and hover (`β_hover` per wait), summed over drones; recharging is not subtracted |
+| `energyConsumed` | battery used by flight (`β_fly` per move) and hover (`β_hover` per wait), times the drain multiplier, summed over drones; recharging is not subtracted |
 | `distance` | grid cells travelled, summed over drones |
 | `stationVisits` | charging sessions at charging stations |
 | `stationTicks` | ticks drones spent waiting on charging stations |

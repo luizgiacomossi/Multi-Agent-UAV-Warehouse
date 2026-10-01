@@ -21,6 +21,8 @@ export interface Agent {
   scanTimes?: number[];     // ticks at which pallet scans were completed
   battery: number;
   maxBattery: number;
+  /** Scales battery consumption (β_fly per move, β_hover per wait); 1 = nominal. */
+  drainMultiplier?: number;
   payload: string[];          // e.g., ['camera', 'rfid']
   missionState?: MissionState;
   // Current inspection assignment

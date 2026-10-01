@@ -73,9 +73,9 @@ export class Metrics {
                     const prev = agent.path[i - 1]; // Get the previous position 
                     const curr = agent.path[i]; // Get the current position 
                     if (prev.x === curr.x && prev.y === curr.y && prev.z === curr.z) { // Check if the drone is hovering 
-                        totalEnergyConsumed += MATH_CONSTANTS.BETA_HOVER; // Add the hover energy cost 
+                        totalEnergyConsumed += MATH_CONSTANTS.BETA_HOVER * (agent.drainMultiplier ?? 1); // Add the hover energy cost 
                     } else { // If the drone is not hovering 
-                        totalEnergyConsumed += MATH_CONSTANTS.BETA_FLY; // Add the fly energy cost 
+                        totalEnergyConsumed += MATH_CONSTANTS.BETA_FLY * (agent.drainMultiplier ?? 1); // Add the fly energy cost 
                     }
                 }
             }

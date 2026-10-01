@@ -2,7 +2,7 @@
 import React from 'react';
 import { Play, Pause, RotateCcw, Box, Grid3X3, Settings, Building2, ShieldCheck, Skull, Shuffle, Cpu, Repeat, Battery, Zap, Infinity as InfinityIcon, ArrowUpToLine, Power, Palette } from 'lucide-react';
 import { GenerationTheme, TaskPriorityMode, MissionCompletionMode } from '../types';
-import { MAX_TASKS, MAX_CHARGING_SITES, DEFAULT_CHARGE_RATE, INSTANT_CHARGE_RATE } from '../SimulationConfig';
+import { MAX_TASKS, MAX_CHARGING_SITES, DEFAULT_CHARGE_RATE, INSTANT_CHARGE_RATE, BETA_FLY, BETA_HOVER } from '../SimulationConfig';
 
 interface ControlPanelProps {
   isPlaying: boolean;
@@ -44,6 +44,9 @@ interface ControlPanelProps {
   /** Charging speed in % of capacity per tick; Infinity = instant. */
   chargeRate: number;
   setChargeRate: (n: number) => void;
+  /** Scales battery consumption per move and per hover tick (1 = nominal). */
+  drainMultiplier: number;
+  setDrainMultiplier: (n: number) => void;
 
   maxAltitude: number;
   setMaxAltitude: (n: number) => void;
@@ -105,6 +108,8 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   setChargingSites,
   chargeRate,
   setChargeRate,
+  drainMultiplier,
+  setDrainMultiplier,
   maxAltitude,
   setMaxAltitude,
   allocationMode,
@@ -412,6 +417,23 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                         step="10"
                         value={batteryCapacity} 
                         onChange={(e) => setBatteryCapacity(Number(e.target.value))}
+                        className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                    />
+
+                    {/* Drain: scales the battery used per move (β_fly) and per hover tick (β_hover) */}
+                    <div className="flex items-center justify-between text-[10px] text-slate-500 pt-1">
+                        <span title="Scales the battery used per move and per hover tick">Battery drain ×{drainMultiplier.toFixed(2)}</span>
+                        <span className="font-mono text-emerald-400">
+                            fly {(BETA_FLY * drainMultiplier).toFixed(3)} · hover {(BETA_HOVER * drainMultiplier).toFixed(3)} /tick
+                        </span>
+                    </div>
+                    <input
+                        type="range"
+                        min="0.25"
+                        max="3"
+                        step="0.25"
+                        value={drainMultiplier}
+                        onChange={(e) => setDrainMultiplier(Number(e.target.value))}
                         className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500"
                     />
 

@@ -155,6 +155,12 @@ export const INSTANT_CHARGE_RATE = Infinity;
 export const DEFAULT_CHARGE_RATE = 2;
 
 /**
+ * Battery drain multiplier: scales the energy a drone uses per move (β_fly) and per hover tick
+ * (β_hover). 1 is the nominal drain; 2 empties the battery twice as fast.
+ */
+export const DEFAULT_DRAIN_MULTIPLIER = 1;
+
+/**
  * Charging sites, counting the base: 1 means base only; each extra site is a charging station.
  * The base charges any number of drones at once (one dock per drone); a station holds one drone.
  */
