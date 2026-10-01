@@ -44,12 +44,12 @@ Future work:
 
 ## 5. Cluster Routing Is Heuristic
 
-Cluster tours are constructed with greedy nearest-neighbor search. That is fast, but it is not optimal and has no approximation guarantee in this implementation.
+Cluster tours are ordered exactly from the assigned drone's position for clusters of up to 6 pallets (the default maximum is 3). Larger clusters fall back to nearest neighbour, which has no approximation guarantee. Cluster formation itself is greedy (priority-seeded, one cluster at a time), and the Hungarian cost still uses the distance to the cluster centroid and the average priority rather than the full tour cost.
 
 Future work:
 
-- compare greedy tours with exact small-cluster TSP,
-- or use insertion heuristics, 2-opt, or beam search.
+- use insertion heuristics or 2-opt for large clusters,
+- include the tour cost in \(C_{ik}\), and form clusters jointly with the assignment.
 
 ## 6. Experimentation Coverage
 

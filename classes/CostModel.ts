@@ -69,15 +69,17 @@ export class CostModel {
    */
   static calculate_e_req_cluster(drone: Agent, cluster: TaskCluster, p_base: Position3D): number {
     const currentPos = this.getDroneCurrentPosition(drone);
-    const firstTask = cluster.tourSequence[0];
-    const lastTask = cluster.tourSequence[cluster.tourSequence.length - 1];
+    // The tour this drone would fly: ordered from its own position, closed at the base
+    const tour = cluster.planTour(currentPos, p_base);
+    const firstTask = tour.sequence[0];
+    const lastTask = tour.sequence[tour.sequence.length - 1];
     
     // Fly distance to the start of the tour, and return distance from the end of the tour
     const dist_outbound = this.distanceEuclidean(currentPos, firstTask.target);
     const dist_return = this.distanceEuclidean(lastTask.target, p_base);
     
-    // The tourCost already contains the internal kinetic flight and structural hovering
-    return MATH_CONSTANTS.BETA_FLY * MATH_CONSTANTS.GAMMA * (dist_outbound + dist_return) + cluster.tourCost;
+    // The tour cost already contains the internal kinetic flight and structural hovering
+    return MATH_CONSTANTS.BETA_FLY * MATH_CONSTANTS.GAMMA * (dist_outbound + dist_return) + tour.cost;
   }
 
   /**
@@ -235,6 +237,8 @@ export class CostModel {
           if (c < clusters.length) {
               const assignedCost = matrix[r][c];
               if (assignedCost < 1e8) {
+                  // Fly the order the feasibility check was computed for
+                  clusters[c].orderTourFrom(this.getDroneCurrentPosition(drones[r]), p_base);
                   assignments.push({ drone: drones[r], cluster: clusters[c], cost: assignedCost });
               }
           }

@@ -1,19 +1,29 @@
 import { Task, Position3D, MATH_CONSTANTS } from '../types';
 import { random } from '../utils/Random';
 
+/** Clusters up to this size are ordered exactly (all permutations, 6! = 720); larger ones greedily. */
+export const EXACT_TOUR_MAX_TASKS = 6;
+
+/** A visiting order for a cluster's tasks and its internal energy cost. */
+export interface TourPlan {
+    sequence: Task[];
+    cost: number;
+}
+
 export class TaskCluster {
     public id: string;
     public tasks: Task[];
     public centroid: Position3D;
     public tourSequence: Task[] = [];
-    public tourCost: number = 0; // Total battery cost to execute the internal TSP (TSP=Travelinng Salesman Problem)
+    public tourCost: number = 0; // Battery cost of the tour itself: flight between tasks plus hovering at each
 
-    constructor(tasks: Task[]) { // Lets start empty and add tasks later
+    constructor(tasks: Task[]) {
         if (tasks.length === 0) throw new Error("Cluster initialized with no tasks");
         this.id = `cluster-${random().toString(36).slice(2, 10)}`;
         this.tasks = tasks;
         this.centroid = this.calculateCentroid();
-        this.calculateTour();
+        // Provisional order until a drone is assigned (see orderTourFrom)
+        this.orderTourFrom(this.centroid);
     }
 
     private calculateCentroid(): Position3D { // Calculate the geometric center of the cluster of tasks
@@ -35,34 +45,78 @@ export class TaskCluster {
     }
 
     /**
-     * Executes a Greedy Nearest-Neighbor Traveling Salesman Problem (TSP).
-     * Since K_max is intentionally kept small (< 10 for battery),
-     * - greedy approach resolves almost instantly inside the cluster.
+     * Visiting order (a small open TSP) that minimises the flight distance
+     * start -> tasks -> end, where `end` is optional. Pure: the cluster is not modified.
+     * Exact by enumeration up to EXACT_TOUR_MAX_TASKS, nearest neighbour from `start` beyond.
      */
-    private calculateTour() { // Calculate the tour sequence and cost
-        const unvisited = [...this.tasks]; // Create a copy of the tasks to not modify the original array
+    public planTour(start: Position3D, end?: Position3D): TourPlan {
+        const sequence = this.tasks.length <= EXACT_TOUR_MAX_TASKS
+            ? this.exactOrder(start, end)
+            : this.nearestNeighbourOrder(start);
+        return { sequence, cost: this.internalCost(sequence) };
+    }
 
-        // Start with the task physically closest to the geometric centroid
-        unvisited.sort((a, b) => this.dist(a.target, this.centroid) - this.dist(b.target, this.centroid));
+    /** Fixes the tour for a drone departing from `start` (and heading to `end` afterwards). */
+    public orderTourFrom(start: Position3D, end?: Position3D) {
+        const plan = this.planTour(start, end);
+        this.tourSequence = plan.sequence;
+        this.tourCost = plan.cost;
+    }
 
-        let current = unvisited.shift()!;
-        this.tourSequence.push(current);
+    private routeLength(sequence: Task[], start: Position3D, end?: Position3D): number {
+        let length = this.dist(start, sequence[0].target);
+        for (let i = 1; i < sequence.length; i++) length += this.dist(sequence[i - 1].target, sequence[i].target);
+        if (end) length += this.dist(sequence[sequence.length - 1].target, end);
+        return length;
+    }
 
-        while (unvisited.length > 0) {
-            unvisited.sort((a, b) => this.dist(current.target, a.target) - this.dist(current.target, b.target)); // Sort the remaining tasks by distance from the current task
-            const next = unvisited.shift()!;
-
-            // Add Kinetic energy cost of moving from Current to Next (scaled by path complexity gamma)
-            this.tourCost += (this.dist(current.target, next.target) * MATH_CONSTANTS.BETA_FLY * MATH_CONSTANTS.GAMMA);
-
-            // Add structural Hover cost to stop and scan the Next pallet
-            this.tourCost += (next.t_hover * MATH_CONSTANTS.BETA_HOVER);
-
-            this.tourSequence.push(next);
-            current = next;
+    private exactOrder(start: Position3D, end?: Position3D): Task[] {
+        let best = this.tasks;
+        let bestLength = Infinity;
+        for (const order of permutations(this.tasks)) {
+            const length = this.routeLength(order, start, end);
+            if (length < bestLength) {
+                bestLength = length;
+                best = order;
+            }
         }
+        return best;
+    }
 
-        // Add the structural hover cost for the very first task in the list
-        this.tourCost += (this.tourSequence[0].t_hover * MATH_CONSTANTS.BETA_HOVER);
+    private nearestNeighbourOrder(start: Position3D): Task[] {
+        const unvisited = [...this.tasks];
+        const sequence: Task[] = [];
+        let current = start;
+        while (unvisited.length > 0) {
+            let nearest = 0;
+            for (let i = 1; i < unvisited.length; i++) {
+                if (this.dist(current, unvisited[i].target) < this.dist(current, unvisited[nearest].target)) nearest = i;
+            }
+            const [next] = unvisited.splice(nearest, 1);
+            sequence.push(next);
+            current = next.target;
+        }
+        return sequence;
+    }
+
+    /** Kinetic cost between consecutive tasks (scaled by path complexity gamma) plus hover cost at every task. */
+    private internalCost(sequence: Task[]): number {
+        let cost = 0;
+        for (let i = 1; i < sequence.length; i++) {
+            cost += this.dist(sequence[i - 1].target, sequence[i].target) * MATH_CONSTANTS.BETA_FLY * MATH_CONSTANTS.GAMMA;
+        }
+        for (const task of sequence) cost += task.t_hover * MATH_CONSTANTS.BETA_HOVER;
+        return cost;
+    }
+}
+
+function* permutations<T>(items: T[]): Generator<T[]> {
+    if (items.length <= 1) {
+        yield [...items];
+        return;
+    }
+    for (let i = 0; i < items.length; i++) {
+        const rest = [...items.slice(0, i), ...items.slice(i + 1)];
+        for (const tail of permutations(rest)) yield [items[i], ...tail];
     }
 }

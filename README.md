@@ -29,7 +29,7 @@ The codebase implements the following major mechanisms.
   - `CBS` (Conflict-Based Search)
   The first three are implemented in [`classes/PathPlanner.ts`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/classes/PathPlanner.ts); CBS is in [`classes/CBSPlanner.ts`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/classes/CBSPlanner.ts).
 - Centralized allocation with `munkres-js`; see [`classes/CostModel.ts`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/classes/CostModel.ts).
-- Optional clustered missions built from a KD-tree neighborhood query and a greedy intra-cluster tour heuristic; see [`utils/KDTree.ts`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/utils/KDTree.ts) and [`classes/TaskCluster.ts`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/classes/TaskCluster.ts).
+- Optional clustered missions built from a KD-tree neighborhood query and an intra-cluster tour ordered from the assigned drone's position; see [`utils/KDTree.ts`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/utils/KDTree.ts) and [`classes/TaskCluster.ts`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/classes/TaskCluster.ts).
 - Deterministic playback from precomputed paths, including battery depletion, recharging, and crash/fall visualization; see [`classes/Drone.ts`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/classes/Drone.ts).
 - Console-driven experiment helpers for Monte Carlo allocation sweeps and a simplified fault-injection timing scenario; see [`classes/SimulationManager.ts`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/classes/SimulationManager.ts).
 
@@ -39,7 +39,7 @@ The earlier documentation overstated several aspects of the implementation. The 
 
 In particular:
 
-- clustered missions are implemented, but cluster tours are greedy nearest-neighbor heuristics, not exact TSP solutions;
+- cluster formation is greedy (priority-seeded); tours are exact only for clusters of up to 6 pallets;
 - the `Cooperative` and `Energy Saver` planners reserve both vertices and directed edges in space-time, but planning is prioritized and therefore incomplete; `CBS` plans the drones of each leg jointly and is conflict-free within a leg, but it is optimal per leg only (not over the whole mission) and falls back to prioritized A* when its search budget runs out;
 - the `Energy Saver` planner changes the A* objective, but the other planners still optimize time steps rather than a full energy objective;
 - the 1-to-1 allocator applies Hungarian matching only to a truncated subset of currently available pallets, not to the full remaining task set;
