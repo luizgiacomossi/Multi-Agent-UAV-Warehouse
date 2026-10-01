@@ -146,6 +146,20 @@ export const INFINITE_MISSION_CYCLES = 3;
 /** Default initial battery capacity for each drone (% units). */
 export const DEFAULT_BATTERY = 50;
 
+/**
+ * Charging speed at the base and at charging stations, in % of battery capacity per waiting tick.
+ * `Infinity` is instant charging: one waiting tick restores a full battery (the original model,
+ * kept so earlier results stay comparable).
+ */
+export const INSTANT_CHARGE_RATE = Infinity;
+export const DEFAULT_CHARGE_RATE = 2;
+
+/**
+ * Charging sites, counting the base: 1 means base only; each extra site is a charging station.
+ * The base charges any number of drones at once (one dock per drone); a station holds one drone.
+ */
+export const MAX_CHARGING_SITES = 5;
+
 /** Default maximum flight altitude (voxel Y ceiling). */
 export const DEFAULT_MAX_ALTITUDE = 8;
 

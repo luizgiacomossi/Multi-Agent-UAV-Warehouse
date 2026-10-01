@@ -1,4 +1,4 @@
-import { Agent, SimulationIncident, MATH_CONSTANTS } from '../types';
+import { Agent, SimulationIncident, MATH_CONSTANTS, Position3D } from '../types';
 
 /** Outcome metrics of one planned mission, independent of how it was produced. */
 export interface MissionMetrics {
@@ -21,6 +21,10 @@ export interface MissionMetrics {
   energyConsumed: number;
   /** Grid cells travelled, summed over drones. */
   distance: number;
+  /** Charging sessions at charging stations (arrivals followed by waiting on a station). */
+  stationVisits: number;
+  /** Ticks drones spent waiting on charging stations. */
+  stationTicks: number;
 }
 
 /** Computes mission metrics from a planned result. */
@@ -28,8 +32,12 @@ export function computeMissionMetrics(
   agents: Agent[],
   incidents: SimulationIncident[],
   makespan: number,
-  palletCount: number
+  palletCount: number,
+  chargeStations: Position3D[] = []
 ): MissionMetrics {
+  const stationCells = new Set(chargeStations.map(s => `${s.x},${s.y},${s.z}`));
+  let stationVisits = 0;
+  let stationTicks = 0;
   const collisions = incidents.filter(i => i.type === 'collision');
   const batteryDead = new Set(
     incidents.filter(i => i.type === 'battery_dead').flatMap(i => i.agentIds)
@@ -47,6 +55,12 @@ export function computeMissionMetrics(
       const moved = prev.x !== curr.x || prev.y !== curr.y || prev.z !== curr.z;
       energyConsumed += moved ? MATH_CONSTANTS.BETA_FLY : MATH_CONSTANTS.BETA_HOVER;
       if (moved) distance++;
+      if (!moved && stationCells.has(`${curr.x},${curr.y},${curr.z}`)) {
+        stationTicks++;
+        const before = agent.path[i - 2];
+        const arrivedLastTick = !before || before.x !== prev.x || before.y !== prev.y || before.z !== prev.z;
+        if (arrivedLastTick) stationVisits++;
+      }
     }
   }
 
@@ -65,5 +79,7 @@ export function computeMissionMetrics(
     ).length,
     energyConsumed,
     distance,
+    stationVisits,
+    stationTicks,
   };
 }

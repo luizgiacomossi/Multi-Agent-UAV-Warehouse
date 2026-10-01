@@ -3,6 +3,7 @@ import { Agent, Position3D, MATH_CONSTANTS, MissionState } from '../types';
 import { MissionController } from './MissionController';
 import { World } from './World';
 import { random } from '../utils/Random';
+import { INSTANT_CHARGE_RATE } from '../SimulationConfig';
 
 export class Drone implements Agent {
     // drone properties
@@ -28,6 +29,8 @@ export class Drone implements Agent {
     initialAssignment: { goal: Position3D; palletId?: string; scanType?: string } | null = null;
     legFailures: number = 0;        // consecutive failed plan attempts for the current leg
     lastLegFailed: boolean = false; // set by the planner when the latest planLeg found no path
+    /** Battery gained per waiting tick on a charger, in % of capacity (Infinity = instant full charge). */
+    chargeRatePercent: number = INSTANT_CHARGE_RATE;
 
     public mission: MissionController;
 
@@ -66,6 +69,7 @@ export class Drone implements Agent {
         d.scanLog = this.scanLog ? [...this.scanLog] : [];
         d.assignedTasksLog = this.assignedTasksLog ? this.assignedTasksLog.map(t => ({ ...t })) : [];
         d.destructionTime = this.destructionTime;
+        d.chargeRatePercent = this.chargeRatePercent;
         d.currentPalletId = this.mission.currentPalletId || undefined;
         d.currentScanType = this.mission.currentScanType || undefined;
         // We don't deep clone mission controller state for React rendering, 
@@ -117,9 +121,10 @@ export class Drone implements Agent {
      * @param isScanning True if this segment targets a pallet (Outbound or mid-Tour)
      */
     public appendPath(newLeg: Position3D[], isScanning: boolean) {
-        if (newLeg.length <= 1) return; // ignore zero-length segments
-        const slice = newLeg.slice(1);
-        this.path.push(...slice);
+        if (newLeg.length === 0) return;
+        // A one-cell leg means the drone already is at its goal (e.g. it charged on a station that is
+        // also the pallet's hover cell): nothing to fly, but a scan there still has to be recorded.
+        this.path.push(...newLeg.slice(1));
 
         // Register the arrival tick in scanLog so App.tsx can tick-gate coloring correctly.
         // The allScanned exclusion in SimulationManager uses currentPalletId + currentCluster (in-flight),
@@ -252,16 +257,15 @@ export class Drone implements Agent {
                 const atStation = this.isAtStation(curr, chargeStations);
 
                 if ((atBase || atStation) && isWaiting) {
-                    // Recharging
-                    if (batteryEnabled) battery = this.maxBattery;
+                    // Recharging (flagged only while the battery is actually filling up)
+                    if (i === tick) isRecharging = battery < this.maxBattery;
+                    if (batteryEnabled) battery = Math.min(this.maxBattery, battery + this.chargePerTick());
 
                     // If at base and waiting, and we don't have a package, we pick one up (Reloading)
                     if (atBase && !hasPackage) {
                         hasPackage = true;
                     }
 
-                    // Set flag for current tick only
-                    if (i === tick) isRecharging = true;
                 } else {
                     // Consuming
                     if (batteryEnabled) {
@@ -278,6 +282,18 @@ export class Drone implements Agent {
         }
 
         return { battery: Math.max(0, battery), hasPackage, isRecharging, deathTick };
+    }
+
+    /** Battery gained per waiting tick on a charger. */
+    private chargePerTick(): number {
+        return this.maxBattery * this.chargeRatePercent / 100;
+    }
+
+    /** Waiting ticks on a charger to go from `battery` to a full battery (1 tick when instant). */
+    public ticksToFullCharge(battery: number): number {
+        const deficit = this.maxBattery - battery;
+        if (deficit <= 0) return 0;
+        return Math.max(1, Math.ceil(deficit / this.chargePerTick()));
     }
 
     private isAtStation(pos: Position3D, stations: Position3D[]): boolean {

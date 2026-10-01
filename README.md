@@ -31,6 +31,7 @@ The codebase implements the following major mechanisms.
 - Centralized allocation with `munkres-js`; see [`classes/CostModel.ts`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/classes/CostModel.ts).
 - Optional clustered missions built from a KD-tree neighborhood query and an intra-cluster tour ordered from the assigned drone's position; see [`utils/KDTree.ts`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/utils/KDTree.ts) and [`classes/TaskCluster.ts`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/classes/TaskCluster.ts).
 - Deterministic playback from precomputed paths, including battery depletion, recharging, and crash/fall visualization; see [`classes/Drone.ts`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/classes/Drone.ts).
+- Charging at the base (every drone at once) and at optional charging stations (one drone each), instantly or at a set rate in % per tick. Drones that cannot afford any task get a recharge job at the charger where they are ready soonest; see [`documentation/task_allocation.md`](documentation/task_allocation.md).
 - Console-driven experiment helpers for Monte Carlo allocation sweeps and a simplified fault-injection timing scenario; see [`classes/SimulationManager.ts`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/classes/SimulationManager.ts).
 
 ## Important Scope Notes

@@ -31,6 +31,10 @@ const HELP = `Usage: npm run bench -- [options]
   --alloc <m,m>       1-to-1 | Cluster
   --completion <m,m>  count | all-pallets
   --missions <n>      missions per drone (count mode)
+  --sites <n,n>       charging sites incl. the base (1 = base only; extra sites are one-drone stations)
+  --charge-rate <r>   charging speed in % of capacity per tick, or "instant"
+  --battery <n>       battery capacity per drone
+  --no-return         do not return to the base between tasks (lets drones use charging stations)
   --out <dir>         output directory`;
 
 function parseArgs(argv: string[]): CliOptions {
@@ -56,6 +60,14 @@ function parseArgs(argv: string[]): CliOptions {
       case '--missions': options.overrides.missionsPerDrone = Number(needValue()); break;
       case '--alloc': options.overrides.allocationModes = list(needValue()) as AllocationMode[]; break;
       case '--completion': options.overrides.completionModes = list(needValue()) as MissionCompletionMode[]; break;
+      case '--sites': options.overrides.chargingSites = numbers(needValue()); break;
+      case '--charge-rate': {
+        const rate = needValue();
+        options.overrides.chargeRate = rate === 'instant' ? Infinity : Number(rate);
+        break;
+      }
+      case '--no-return': options.overrides.roundTrip = false; break;
+      case '--battery': options.overrides.batteryCapacity = Number(needValue()); break;
       case '--grids': {
         options.overrides.scales = numbers(needValue()).map(size => {
           const scale = Object.values(SCALES).find(s => s.gridSize === size);

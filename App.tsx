@@ -9,7 +9,7 @@ import { OperatorAssistant } from './services/slm/OperatorAssistant';
 import { Agent, Position3D, GenerationTheme, SimulationIncident, Forklift, Pallet, ClusterVisualization, TaskPriorityMode, MissionCompletionMode } from './types';
 import { SimulationManager } from './classes/SimulationManager';
 import { Warehouse } from './classes/Warehouse';
-import { GRID_SIZE, DEFAULT_AGENT_COUNT } from './SimulationConfig';
+import { GRID_SIZE, DEFAULT_AGENT_COUNT, DEFAULT_CHARGE_RATE } from './SimulationConfig';
 import { ThemeModal } from './components/ThemeModal';
 import { ThemeService } from './services/theme/ThemeService';
 import { ThemeId } from './services/theme/ThemeTypes';
@@ -25,7 +25,8 @@ const App: React.FC = () => {
   const [missionCount, setMissionCount] = useState<number>(3);
   const [batteryCapacity, setBatteryCapacity] = useState(100);
   const [batteryEnabled, setBatteryEnabled] = useState(true);
-  const [enableCharging, setEnableCharging] = useState(false);
+  const [chargingSites, setChargingSites] = useState(1); // base only; extra sites are one-drone stations
+  const [chargeRate, setChargeRate] = useState(DEFAULT_CHARGE_RATE); // % per tick, Infinity = instant
   const [selectedAlgorithm, setSelectedAlgorithm] = useState<string>('Cooperative');
   const [maxAltitude, setMaxAltitude] = useState(24);
 
@@ -66,11 +67,11 @@ const App: React.FC = () => {
   const planRequestRef = useRef(0);
 
   // Core Update Function
-  const updateSimulation = async (algo: string, roundTrip: boolean, mCount: number, altitude: number, batEnabled: boolean, aMode: '1-to-1' | 'Cluster', cRadius: number, cMaxSize: number, completionMode: MissionCompletionMode) => {
+  const updateSimulation = async (algo: string, roundTrip: boolean, mCount: number, altitude: number, batEnabled: boolean, aMode: '1-to-1' | 'Cluster', cRadius: number, cMaxSize: number, completionMode: MissionCompletionMode, rate: number) => {
     try {
       setError(null);
       const request = ++planRequestRef.current;
-      const result = await engineRef.current.runPathfinding(algo, roundTrip, mCount, altitude, batEnabled, aMode, cRadius, cMaxSize, completionMode);
+      const result = await engineRef.current.runPathfinding(algo, roundTrip, mCount, altitude, batEnabled, aMode, cRadius, cMaxSize, completionMode, rate);
       if (request !== planRequestRef.current) return; // a newer plan (e.g. a regenerated world) replaced this one
 
       setAgents(result.agents);
@@ -102,9 +103,9 @@ const App: React.FC = () => {
   useEffect(() => {
     if (!isGenerating && agents.length > 0) {
       setIsPlaying(false);
-      updateSimulation(selectedAlgorithm, isRoundTrip, missionCount, maxAltitude, batteryEnabled, allocationMode, clusterRadius, maxClusterSize, missionCompletionMode);
+      updateSimulation(selectedAlgorithm, isRoundTrip, missionCount, maxAltitude, batteryEnabled, allocationMode, clusterRadius, maxClusterSize, missionCompletionMode, chargeRate);
     }
-  }, [selectedAlgorithm, isRoundTrip, missionCount, maxAltitude, batteryEnabled, allocationMode, clusterRadius, maxClusterSize, missionCompletionMode]);
+  }, [selectedAlgorithm, isRoundTrip, missionCount, maxAltitude, batteryEnabled, allocationMode, clusterRadius, maxClusterSize, missionCompletionMode, chargeRate]);
 
   // Agent Count / Battery Capacity — requires full swarm re-initialization
   useEffect(() => {
@@ -118,7 +119,7 @@ const App: React.FC = () => {
       const palletPositionSet = new Set(engine.world.pallets.map(p => `${p.position.x},${p.position.y},${p.position.z}`));
       setObstacles(engine.world.obstacleList.filter(o => !palletPositionSet.has(`${o.x},${o.y},${o.z}`)));
       setPallets([...engine.world.pallets]);
-      updateSimulation(selectedAlgorithm, isRoundTrip, missionCount, maxAltitude, batteryEnabled, allocationMode, clusterRadius, maxClusterSize, missionCompletionMode);
+      updateSimulation(selectedAlgorithm, isRoundTrip, missionCount, maxAltitude, batteryEnabled, allocationMode, clusterRadius, maxClusterSize, missionCompletionMode, chargeRate);
     }
   }, [agentCount, batteryCapacity]);
 
@@ -149,7 +150,7 @@ const App: React.FC = () => {
           setDeployFromBase(true); // Sync UI
         }
 
-        engine.generateWorld(theme, gridSizeVal, enableCharging, effectiveDeployFromBase, agentCount, useAllPallets ? Infinity : totalTasks, numForklifts, taskPriorityMode);
+        engine.generateWorld(theme, gridSizeVal, chargingSites - 1, effectiveDeployFromBase, agentCount, useAllPallets ? Infinity : totalTasks, numForklifts, taskPriorityMode);
         const palletPositionSet = new Set(
           engine.world.pallets.map(p => `${p.position.x},${p.position.y},${p.position.z}`)
         );
@@ -166,7 +167,7 @@ const App: React.FC = () => {
         setWarehouse(engine.world.warehouse); // Reference copy is fine here since Warehouse is immutable-ish
 
         // 3. Run Pathfinding
-        await updateSimulation(selectedAlgorithm, isRoundTrip, missionCount, maxAltitude, batteryEnabled, allocationMode, clusterRadius, maxClusterSize, missionCompletionMode);
+        await updateSimulation(selectedAlgorithm, isRoundTrip, missionCount, maxAltitude, batteryEnabled, allocationMode, clusterRadius, maxClusterSize, missionCompletionMode, chargeRate);
 
       } catch (e) {
         console.error(e);
@@ -191,20 +192,21 @@ const App: React.FC = () => {
       // Sync Warehouse state
       setWarehouse(engine.world.warehouse);
 
-      await updateSimulation(selectedAlgorithm, isRoundTrip, missionCount, maxAltitude, batteryEnabled, allocationMode, clusterRadius, maxClusterSize, missionCompletionMode);
+      await updateSimulation(selectedAlgorithm, isRoundTrip, missionCount, maxAltitude, batteryEnabled, allocationMode, clusterRadius, maxClusterSize, missionCompletionMode, chargeRate);
       setIsGenerating(false);
     }, 50);
   };
 
-  // Regenerate the scenario when the grid size changes, once the slider settles. The ref calls
+  // Regenerate the scenario when the grid size or charging sites change, once the slider settles. The ref calls
   // the latest handleGenerate, so it sees state adjusted in the meantime (e.g. clamped altitude).
   const handleGenerateRef = useRef(handleGenerate);
   handleGenerateRef.current = handleGenerate;
   useEffect(() => {
-    if (gridSizeVal === engineRef.current.world.size) return; // world already has this size
+    const world = engineRef.current.world;
+    if (gridSizeVal === world.size && chargingSites - 1 === world.chargeStations.length) return; // world is up to date
     const timer = window.setTimeout(() => handleGenerateRef.current(currentTheme), GRID_REGENERATE_DELAY_MS);
     return () => window.clearTimeout(timer);
-  }, [gridSizeVal]);
+  }, [gridSizeVal, chargingSites]);
 
   // Playback Loop
   useEffect(() => {
@@ -396,8 +398,10 @@ const App: React.FC = () => {
         setBatteryCapacity={setBatteryCapacity}
         batteryEnabled={batteryEnabled}
         setBatteryEnabled={setBatteryEnabled}
-        enableCharging={enableCharging}
-        setEnableCharging={setEnableCharging}
+        chargingSites={chargingSites}
+        setChargingSites={setChargingSites}
+        chargeRate={chargeRate}
+        setChargeRate={setChargeRate}
         maxAltitude={maxAltitude}
         setMaxAltitude={setMaxAltitude}
         allocationMode={allocationMode}

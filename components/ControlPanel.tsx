@@ -2,7 +2,7 @@
 import React from 'react';
 import { Play, Pause, RotateCcw, Box, Grid3X3, Settings, Building2, ShieldCheck, Skull, Shuffle, Cpu, Repeat, Battery, Zap, Infinity as InfinityIcon, ArrowUpToLine, Power, Palette } from 'lucide-react';
 import { GenerationTheme, TaskPriorityMode, MissionCompletionMode } from '../types';
-import { MAX_TASKS } from '../SimulationConfig';
+import { MAX_TASKS, MAX_CHARGING_SITES, DEFAULT_CHARGE_RATE, INSTANT_CHARGE_RATE } from '../SimulationConfig';
 
 interface ControlPanelProps {
   isPlaying: boolean;
@@ -38,8 +38,12 @@ interface ControlPanelProps {
   batteryEnabled: boolean;
   setBatteryEnabled: (b: boolean) => void;
   
-  enableCharging: boolean;
-  setEnableCharging: (b: boolean) => void;
+  /** Charging sites counting the base (1 = base only); extra sites are one-drone stations. */
+  chargingSites: number;
+  setChargingSites: (n: number) => void;
+  /** Charging speed in % of capacity per tick; Infinity = instant. */
+  chargeRate: number;
+  setChargeRate: (n: number) => void;
 
   maxAltitude: number;
   setMaxAltitude: (n: number) => void;
@@ -97,8 +101,10 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   setBatteryCapacity,
   batteryEnabled,
   setBatteryEnabled,
-  enableCharging,
-  setEnableCharging,
+  chargingSites,
+  setChargingSites,
+  chargeRate,
+  setChargeRate,
   maxAltitude,
   setMaxAltitude,
   allocationMode,
@@ -408,6 +414,68 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                         onChange={(e) => setBatteryCapacity(Number(e.target.value))}
                         className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500"
                     />
+
+                    {/* Charging speed: instant (one tick) or a rate in % of capacity per tick */}
+                    <div className="flex items-center justify-between text-[10px] text-slate-500 pt-1">
+                        <span className="flex items-center gap-1"><Zap size={10} /> Charging</span>
+                        <span className="font-mono text-emerald-400">
+                            {Number.isFinite(chargeRate) ? `${chargeRate}%/tick · full in ${Math.ceil(100 / chargeRate)} ticks` : 'instant'}
+                        </span>
+                    </div>
+                    <div className="flex items-center justify-between bg-slate-900 p-1 rounded-lg border border-slate-700 gap-1">
+                        {([
+                          { label: 'Instant', instant: true },
+                          { label: '% per tick', instant: false }
+                        ] as const).map(({ label, instant }) => {
+                          const isSelected = instant === !Number.isFinite(chargeRate);
+                          return (
+                            <button
+                              key={label}
+                              onClick={() => setChargeRate(instant ? INSTANT_CHARGE_RATE : DEFAULT_CHARGE_RATE)}
+                              className={`flex-1 py-1 text-[10px] rounded-md transition-all font-medium ${
+                                isSelected
+                                  ? 'bg-emerald-600 text-white shadow-sm border border-emerald-500'
+                                  : 'text-slate-500 hover:text-slate-300'
+                              }`}
+                            >
+                              {label}
+                            </button>
+                          );
+                        })}
+                    </div>
+                    {Number.isFinite(chargeRate) && (
+                        <input
+                            type="range"
+                            min="1"
+                            max="10"
+                            step="1"
+                            value={chargeRate}
+                            onChange={(e) => setChargeRate(Number(e.target.value))}
+                            className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                        />
+                    )}
+
+                    {/* Charging sites: the base charges every drone at once, a station one drone */}
+                    <div className="flex items-center justify-between text-[10px] text-slate-500 pt-1">
+                        <span title="The base charges every drone at once; each station charges one drone at a time">Charging sites (incl. base)</span>
+                        <span className="font-mono text-emerald-400">
+                            {chargingSites === 1 ? 'base only' : `base + ${chargingSites - 1} station${chargingSites > 2 ? 's' : ''}`}
+                        </span>
+                    </div>
+                    <input
+                        type="range"
+                        min="1"
+                        max={MAX_CHARGING_SITES}
+                        step="1"
+                        value={chargingSites}
+                        onChange={(e) => setChargingSites(Number(e.target.value))}
+                        className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                    />
+                    {chargingSites > 1 && isRoundTrip && (
+                        <p className="text-[10px] text-amber-400/80 leading-snug">
+                            "Return" is on: drones fly home after every task, so stations are rarely used.
+                        </p>
+                    )}
                 </div>
              )}
         </div>
@@ -435,16 +503,6 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                 </span>
             </div>
 
-            {/* Charging Stations Toggle */}
-            <div className="flex-1 min-w-[100px] flex items-center gap-2 cursor-pointer hover:bg-slate-700/50 p-1.5 rounded transition-colors border border-transparent hover:border-slate-700" onClick={() => setEnableCharging(!enableCharging)}>
-                <div className={`w-4 h-4 rounded border border-slate-500 flex items-center justify-center ${enableCharging ? 'bg-emerald-500 border-emerald-500' : 'bg-slate-800'}`}>
-                    {enableCharging && <div className="w-2 h-2 bg-white rounded-[1px]" />}
-                </div>
-                <span className="text-xs text-slate-300 flex items-center gap-1">
-                    <Zap size={12} />
-                    Recharge
-                </span>
-            </div>
         </div>
 
         {/* Algorithm Selection */}

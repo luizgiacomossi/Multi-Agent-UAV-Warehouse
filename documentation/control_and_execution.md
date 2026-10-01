@@ -24,7 +24,7 @@ The loop is ordered by time. Each drone's clock is the last tick of its planned 
 2. the planner appends one leg to each drone with a leg to fly whose clock is within the horizon. Planning them together lets CBS resolve their conflicts jointly;
 3. each of those drones updates its mission-controller state through `completeLeg()`;
 4. idle drones whose clock is within the horizon are allocated. An idle drone further ahead in time waits, because a busy drone may still become free earlier. Docked idle drones recharge first;
-5. idle drones that got no task and are away from their dock fly home. Drones never wait, or finish, airborne;
+5. idle drones that got no task and are away from their dock never wait airborne. A drone whose battery cannot cover any open pallet gets a recharge job (the base or a free station, see [`task_allocation.md`](task_allocation.md)); any other drone flies home. A drone arriving at a station charges to full there;
 6. the loop repeats until all drones are completed or stranded, nothing can progress, or the safety bound is reached.
 
 Planning all drones every cycle, regardless of their clocks, let clocks drift apart by hundreds of ticks. A drone that was free early could then not pick up tasks another drone took much later, and full-coverage missions ended with one drone idle for up to 17% of the mission. With time ordering the gap is under about 5%.

@@ -64,7 +64,9 @@ The open generator creates sparse pillars. The random generator creates voxel oc
 
 ## 4. Warehouse Base and Stations
 
-If the simulation is configured to deploy from base (`deployFromBase = true`), `World.setupWarehouse(...)` clears a protected spawn and airspace region near the origin. Optional charging stations can also be generated.
+If the simulation is configured to deploy from base (`deployFromBase = true`), `World.setupWarehouse(...)` clears a protected spawn and airspace region near the origin. The base has one dock per drone, so it charges every drone at once.
+
+The number of **charging sites** counts the base: 1 means base only, and each extra site is a charging station that holds **one drone at a time** (up to `MAX_CHARGING_SITES` = 5). `World.generateStations(...)` places stations on free floor cells by farthest-point sampling: each station is the cell farthest from the base and from the stations already placed. Cells in the base zone, under forklift lanes, or not reachable from the base are skipped. Placement uses no randomness, so the same seed gives the same warehouse for every station count.
 
 In `CollisionAnalyzer.detect(...)`, base exclusion is strictly scoped to resting floor level (\(y = \text{warehouse.position.y}\)), ensuring resting drones on charge pads are not falsely flagged as colliding with each other while all mid-air flight collisions over the base structure are detected.
 

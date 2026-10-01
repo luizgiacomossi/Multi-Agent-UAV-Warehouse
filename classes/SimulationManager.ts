@@ -13,12 +13,13 @@ import {
     EnergySaverPlanner,
     CollisionAnalyzer,
     SpaceTimeReservations,
-    MAX_LEG_RETRIES
+    MAX_LEG_RETRIES,
+    spaceTimeKey
 } from './PathPlanner';
 import { CostModel } from './CostModel';
 import { CBSPlanner } from './CBSPlanner';
 import { Task } from '../types';
-import { MAX_TIMESTEPS, GRID_SIZE, DEFAULT_AGENT_COUNT, MATH_CONSTANTS } from '../SimulationConfig';
+import { MAX_TIMESTEPS, GRID_SIZE, DEFAULT_AGENT_COUNT, MATH_CONSTANTS, INSTANT_CHARGE_RATE } from '../SimulationConfig';
 import { random } from '../utils/Random';
 
 type PalletReservation = {
@@ -37,6 +38,8 @@ export class SimulationManager {
     private completedPalletIds = new Set<string>();
     private abandonCounts = new Map<string, number>();
     private unreachablePalletIds = new Set<string>();
+    /** Charging station (by cell) -> the one drone holding it, from dispatch until it leaves. */
+    private stationBookings = new Map<string, string>();
 
     /** A pallet abandoned this many times is treated as unreachable and no longer offered. */
     private static readonly MAX_PALLET_ABANDONS = 2;
@@ -72,7 +75,8 @@ export class SimulationManager {
         return this.algorithms[name]?.description || "";
     }
 
-    public generateWorld(theme: string, size: number, enableStations: boolean, deployFromBase: boolean, agentCount: number, totalTasks: number = 50, numForklifts: number = 3, priorityMode: TaskPriorityMode = 'mixed') {
+    /** `stationCount` charging stations are placed in addition to the base (0 = base only). */
+    public generateWorld(theme: string, size: number, stationCount: number, deployFromBase: boolean, agentCount: number, totalTasks: number = 50, numForklifts: number = 3, priorityMode: TaskPriorityMode = 'mixed') {
         this.world.setSize(size);
 
         let reservedZone: ReservedZone | undefined = undefined;
@@ -89,10 +93,7 @@ export class SimulationManager {
 
         this.world.generate(theme, reservedZone, totalTasks, numForklifts, priorityMode);
 
-        if (enableStations) {
-            const stationCount = size > 20 ? 3 : 1;
-            this.world.generateStations(stationCount);
-        }
+        this.world.generateStations(stationCount, reservedZone);
     }
 
     public initializeAgents(count: number, battery: number, deployFromBase: boolean, maxAltitude: number) {
@@ -244,6 +245,7 @@ export class SimulationManager {
     }
 
     private resetPalletTracking() {
+        this.stationBookings.clear();
         this.palletAssignments.clear();
         this.completedPalletIds.clear();
         this.abandonCounts.clear();
@@ -300,17 +302,99 @@ export class SimulationManager {
     }
 
     /**
-     * Idle drones parked on their dock swap/charge their battery before the next dispatch. The
-     * battery model recharges on a waiting tick at the dock (Drone.calculateStateAt), so a single
-     * hover tick restores full capacity. Without it, drones returning below the task threshold
-     * were never dispatched again and the fleet ran dry.
+     * Idle drones parked on their dock charge to full before the next dispatch. Without it, drones
+     * returning below the task threshold were never dispatched again and the fleet ran dry.
      */
     private rechargeDockedDrones(drones: Drone[]) {
         drones.forEach(drone => {
             if (drone.battery >= drone.maxBattery || !this.isAtDock(drone)) return;
-            drone.path.push({ ...drone.path[drone.path.length - 1] });
-            drone.battery = drone.maxBattery;
+            this.chargeInPlace(drone, null);
         });
+    }
+
+    /**
+     * Charges a drone to full where it stands by appending waiting ticks: one tick with instant
+     * charging, otherwise as many as the charge rate needs. On a station (`reservations` given) each
+     * tick is reserved for the drone, and charging stops early if another drone already holds the
+     * cell. Docks are not reserved: each drone has its own dock and the dock floor is exempt from
+     * conflicts (this keeps instant-charging results identical to the original model).
+     */
+    private chargeInPlace(drone: Drone, reservations: SpaceTimeReservations | null) {
+        const tick = drone.path.length - 1;
+        const battery = drone.calculateStateAt(tick, this.world.chargeStations, true).battery;
+        const pos = drone.path[tick];
+        for (let t = tick + 1; t <= tick + drone.ticksToFullCharge(battery) && t < MAX_TIMESTEPS; t++) {
+            if (reservations) {
+                const key = spaceTimeKey(pos, t);
+                if (reservations.isVertexReserved(key, drone.id)) break;
+                reservations.addVertex(key, drone.id);
+            }
+            drone.path.push({ ...pos });
+        }
+        drone.battery = drone.calculateStateAt(drone.path.length - 1, this.world.chargeStations, true).battery;
+    }
+
+    /**
+     * True if the drone has to recharge before taking any work: some open pallet needs its payload,
+     * but its battery cannot cover any of them (the same energy check the allocation uses).
+     */
+    private needsRecharge(drone: Drone, pBase: Position3D, chargers: Position3D[]): boolean {
+        if (drone.battery >= drone.maxBattery) return false;
+        const tasks: Task[] = this.getAvailablePallets()
+            .filter(plt => drone.payload.includes(plt.payload_type))
+            .map(plt => ({
+                id: plt.id, target: plt.position, req_payload: plt.payload_type, palletId: plt.id,
+                pi_k: plt.weight / 100, t_hover: 5, status: 'PENDING' as const
+            }));
+        if (tasks.length === 0) return false;
+        return !tasks.some(task => CostModel.is_feasible(drone, task, CostModel.calculate_e_req(drone, task, pBase, chargers)));
+    }
+
+    /**
+     * Picks where a drone recharges: the charger at which it is fully charged soonest (travel plus
+     * charging time). The base has a dock for every drone; a station holds one drone, so stations
+     * held by another drone are skipped (drones never queue in the air). Chargers the drone cannot
+     * reach on its battery are skipped too. Returns the station, or null when the dock is best.
+     */
+    private chooseChargingStation(drone: Drone): Position3D | null {
+        const from = drone.path[drone.path.length - 1];
+        const readyTime = (site: Position3D) => {
+            const travel = Math.abs(from.x - site.x) + Math.abs(from.y - site.y) + Math.abs(from.z - site.z);
+            const energy = travel * MATH_CONSTANTS.BETA_FLY * MATH_CONSTANTS.GAMMA;
+            if (energy >= drone.battery) return Infinity;
+            return travel + drone.ticksToFullCharge(drone.battery - energy);
+        };
+
+        let best: Position3D | null = null;
+        let bestTime = readyTime(drone.mission.warehouseLocation);
+        for (const station of this.world.chargeStations) {
+            if (this.stationBookings.has(this.stationKey(station))) continue;
+            const time = readyTime(station);
+            if (time < bestTime) {
+                best = station;
+                bestTime = time;
+            }
+        }
+        return best;
+    }
+
+    /** Frees stations whose drone has left (it is neither flying there nor standing on it). */
+    private releaseStationBookings() {
+        for (const [key, droneId] of [...this.stationBookings.entries()]) {
+            const drone = this.swarm.drones.find(d => d.id === droneId);
+            const pos = drone?.path[drone.path.length - 1];
+            const holding = !!drone && (drone.mission.state === 'RECHARGING' || (!!pos && this.stationKey(pos) === key));
+            if (!holding) this.stationBookings.delete(key);
+        }
+    }
+
+    private stationKey(pos: Position3D): string {
+        return `${pos.x},${pos.y},${pos.z}`;
+    }
+
+    private isAtStation(drone: Drone): boolean {
+        const pos = drone.path[drone.path.length - 1];
+        return !!pos && this.world.chargeStations.some(s => this.stationKey(s) === this.stationKey(pos));
     }
 
     private isAtDock(drone: Drone): boolean {
@@ -341,7 +425,8 @@ export class SimulationManager {
         allocationMode: '1-to-1' | 'Cluster' = '1-to-1',
         clusterRadius: number = 5,
         maxClusterSize: number = 3,
-        missionCompletionMode: MissionCompletionMode = 'count'
+        missionCompletionMode: MissionCompletionMode = 'count',
+        chargeRatePercent: number = INSTANT_CHARGE_RATE
     ): Promise<{ agents: Drone[], incidents: SimulationIncident[], maxTicks: number, clusters: ClusterVisualization[] }> {
 
         const isAllPalletsMode = missionCompletionMode === 'all-pallets';
@@ -366,6 +451,7 @@ export class SimulationManager {
             drone.restoreInitialAssignment();
             // sync MissionController with the correct pallet context and docking slot
             drone.setMissionConfig(drone.start, drone.goal, effectiveMissionCount, isRoundTrip, dockFor(index, drone));
+            drone.chargeRatePercent = chargeRatePercent;
             // Re-apply pallet metadata that initializeScenario set, since setMissionConfig resets mission
             if (drone.currentPalletId) {
                 drone.mission.currentPalletId = drone.currentPalletId;
@@ -430,7 +516,11 @@ export class SimulationManager {
 
         // Maximum theoretical legs = missionCount * clusterCapacity * 2 (Outbound/Inbound padding)
         const maxLegTries = Math.max(effectiveMissionCount, this.world.pallets.length, 1) * 15;
+        // Energy feasibility may count on a station only when drones are not sent home after each task
+        const feasibilityChargers = isRoundTrip ? [] : this.world.chargeStations;
+
         for (let cycle = 0; cycle < maxLegTries; cycle++) {
+            this.releaseStationBookings();
 
             // 0. Register active assignment segments at the START of the physical leg
             this.swarm.drones.forEach(drone => {
@@ -482,6 +572,13 @@ export class SimulationManager {
                 // No path this cycle: the drone hovered in place and keeps its leg for a retry.
                 if (drone.lastLegFailed) {
                     drone.lastLegFailed = false;
+                    if (drone.mission.state === 'RECHARGING' && drone.legFailures >= MAX_LEG_RETRIES) {
+                        // Station stayed unreachable: charge on the dock instead
+                        drone.mission.cancelRecharge();
+                        drone.legFailures = 0;
+                        drone.goal = { ...drone.mission.warehouseLocation };
+                        return;
+                    }
                     const hasTask = drone.mission.state === 'OUTBOUND' || drone.mission.state === 'EXECUTING_TOUR';
                     if (!hasTask || drone.legFailures < MAX_LEG_RETRIES) return;
 
@@ -511,8 +608,12 @@ export class SimulationManager {
 
                 const prevPallet = drone.mission.currentPalletId;
                 const prevCluster = drone.mission.currentCluster;
+                const arrivedForCharge = drone.mission.state === 'RECHARGING';
                 const readyForNew = drone.mission.completeLeg();
                 this.completePallet(prevPallet);
+                if (arrivedForCharge && batteryEnabled && this.isAtStation(drone)) {
+                    this.chargeInPlace(drone, reservedSpaceTime);
+                }
 
                 // Keep drone mirror properties in sync with mission controller
                 drone.currentPalletId = drone.mission.currentPalletId || undefined;
@@ -568,7 +669,7 @@ export class SimulationManager {
 
                         // Fire the Munkres Cost Engine for spatial matching
                         if (pendingClusters.length > 0) {
-                            const assignments = CostModel.executeClusterAllocation(idleDrones, pendingClusters, pBase, dMax);
+                            const assignments = CostModel.executeClusterAllocation(idleDrones, pendingClusters, pBase, dMax, feasibilityChargers);
 
                             assignments.forEach(a => {
                                 const drone = idleDrones.find(d => d.id === a.drone.id);
@@ -626,7 +727,7 @@ export class SimulationManager {
                         }));
 
                         if (pendingTasks.length > 0) {
-                            const assignments = CostModel.executeOptimalAllocation(idleDrones, pendingTasks, pBase, dMax);
+                            const assignments = CostModel.executeOptimalAllocation(idleDrones, pendingTasks, pBase, dMax, feasibilityChargers);
 
                             assignments.forEach(a => {
                                 const drone = idleDrones.find(d => d.id === a.drone.id);
@@ -675,13 +776,24 @@ export class SimulationManager {
             const everyoneDone = this.swarm.drones.every(d => d.mission.state === 'COMPLETED' || d.status === 'STRANDED');
             if (everyoneDone) break;
 
-            // Idle drones that got no task and are away from their dock fly home: a drone never
-            // waits (or finishes) airborne.
+            // Idle drones that got no task and are away from their dock never wait airborne. A drone
+            // left without a task because its battery cannot cover any open pallet goes to recharge
+            // at the charger that gets it ready soonest; any other drone flies home.
+            const pBase = this.world.warehouse?.position || { x: 0, y: 0, z: 0 };
             idleDrones
                 .filter(d => d.mission.state === 'IDLE' && !this.isAtDock(d))
                 .forEach(d => {
-                    d.mission.returnToDock();
-                    d.goal = { ...d.mission.warehouseLocation };
+                    const station = batteryEnabled && this.needsRecharge(d, pBase, feasibilityChargers)
+                        ? this.chooseChargingStation(d)
+                        : null;
+                    if (station) {
+                        d.mission.assignRecharge(station);
+                        d.goal = { ...station };
+                        this.stationBookings.set(this.stationKey(station), d.id);
+                    } else {
+                        d.mission.returnToDock();
+                        d.goal = { ...d.mission.warehouseLocation };
+                    }
                 });
 
             // Stop once nothing can progress: no drone has a leg to fly, no idle drone is still
@@ -785,7 +897,7 @@ export class SimulationManager {
 
         // Ensure Warehouse exists so computational tasks bind correctly to physical Pallets
         if (this.world.pallets.length === 0) {
-            this.generateWorld('Warehouse', 24, false, false, droneCount);
+            this.generateWorld('Warehouse', 24, 0, false, droneCount);
         }
 
         for (let i = 0; i < iterations; i++) {
@@ -844,7 +956,7 @@ export class SimulationManager {
 
         // Ensure Warehouse exists so computational tasks bind correctly to physical Pallets
         if (this.world.pallets.length === 0) {
-            this.generateWorld('Warehouse', 24, false, false, 5);
+            this.generateWorld('Warehouse', 24, 0, false, 5);
         }
 
         // 1. Static Setup
