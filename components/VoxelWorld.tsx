@@ -613,6 +613,18 @@ const CameraController: React.FC<{
   );
 };
 
+// Unscanned pallet colour by priority: pale yellow (low) -> orange -> red (high).
+// Green (scanned) and cyan (active target) stay reserved for pallet state.
+const PRIORITY_STOPS = ['#fde68a', '#f97316', '#dc2626'].map(c => new THREE.Color(c));
+const PRIORITY_GRADIENT_CSS = 'linear-gradient(to right, #fde68a, #f97316, #dc2626)';
+
+/** Colour for a priority level t in [0, 1]. */
+function priorityColor(t: number): THREE.Color {
+  const scaled = Math.min(1, Math.max(0, t)) * (PRIORITY_STOPS.length - 1);
+  const i = Math.min(Math.floor(scaled), PRIORITY_STOPS.length - 2);
+  return PRIORITY_STOPS[i].clone().lerp(PRIORITY_STOPS[i + 1], scaled - i);
+}
+
 const VoxelWorld: React.FC<VoxelWorldProps> = ({ 
     gridSize, obstacles, agents, incidents, tick, warehouse, chargeStations = [], batteryEnabled, forklifts = [], pallets = [], clusters = [],
     scannedPalletIds = new Set(), activePalletIds = new Set(), cameraFocus = null
@@ -630,8 +642,26 @@ const VoxelWorld: React.FC<VoxelWorldProps> = ({
     [clusters, tick]
   );
 
+  // Priority is shown relative to the pallets in this world; equal weights map to the middle colour
+  const weightRange = useMemo(() => {
+    const weights = pallets.map(p => p.weight);
+    return { min: Math.min(...weights), max: Math.max(...weights) };
+  }, [pallets]);
+  const priorityLevel = (weight: number) =>
+    weightRange.max > weightRange.min ? (weight - weightRange.min) / (weightRange.max - weightRange.min) : 0.5;
+
   return (
-    <div className="w-full h-full">
+    <div className="w-full h-full relative">
+      {pallets.length > 0 && weightRange.max > weightRange.min && (
+        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10 pointer-events-none rounded-md bg-slate-900/80 border border-slate-700 px-3 py-1.5 text-[10px] text-slate-300 flex items-center gap-2">
+          <span>Pallet priority</span>
+          <span>low</span>
+          <span className="inline-block h-2 w-24 rounded-sm" style={{ background: PRIORITY_GRADIENT_CSS }} />
+          <span>high</span>
+          <span className="inline-block h-2 w-2 rounded-sm ml-2" style={{ background: '#06b6d4' }} /><span>target</span>
+          <span className="inline-block h-2 w-2 rounded-sm" style={{ background: '#22c55e' }} /><span>scanned</span>
+        </div>
+      )}
       <Canvas camera={{ position: camPos, fov: 45 }} shadows>
         <color attach="background" args={['#0f172a']} />
         <Stars radius={100} depth={50} count={5000} factor={4} saturation={0} fade speed={1} />
@@ -657,9 +687,10 @@ const VoxelWorld: React.FC<VoxelWorldProps> = ({
             const isScanned = scannedPalletIds.has(plt.id);
             const isActive  = activePalletIds.has(plt.id);
 
-            // Box color: green=scanned, cyan=active target, gold=unchecked
-            const boxColor   = isScanned ? '#22c55e' : isActive ? '#06b6d4' : '#cda434';
-            const emissive   = isScanned ? '#166534' : isActive ? '#0e7490' : '#78350f';
+            // Box color: green=scanned, cyan=active target, otherwise by priority
+            const priority   = priorityColor(priorityLevel(plt.weight));
+            const boxColor   = isScanned ? '#22c55e' : isActive ? '#06b6d4' : `#${priority.getHexString()}`;
+            const emissive   = isScanned ? '#166534' : isActive ? '#0e7490' : `#${priority.clone().multiplyScalar(0.4).getHexString()}`;
             const emissiveI  = isActive ? 0.6 : isScanned ? 0.3 : 0.1;
             const baseColor  = isScanned ? '#14532d' : '#8b5a2b';
 
