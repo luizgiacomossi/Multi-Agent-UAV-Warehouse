@@ -64,11 +64,11 @@ This design is subtle:
 
 ## 4. Battery Dynamics
 
-The battery bookkeeping is reconstructed by iterating through the planned path in `calculateStateAt(...)`.
+The battery bookkeeping is reconstructed by iterating through the planned path in `calculateStateAt(...)`. The drone decides for each tick whether it waits on a charger; the arithmetic (charging, consumption, ticks to a full charge, flight energy estimates) is in `BatteryModel` ([`classes/BatteryModel.ts`](../classes/BatteryModel.ts)), which `Drone.batteryModel` builds from the drone's capacity, charge rate and drain.
 
 For each time step:
 
-1. If the drone is waiting on its dock or on a charging station, it charges: the battery gains \(r \cdot B_{max}/100\) per tick, capped at `maxBattery`, where \(r\) is the charge rate in % of capacity per tick (`Drone.chargeRatePercent`). With instant charging (\(r = \infty\), the original model) one waiting tick restores a full battery. Idle drones parked on their dock charge to full before each allocation round (`SimulationManager.rechargeDockedDrones`), which takes \(\lceil (B_{max}-B)/(r B_{max}/100) \rceil\) ticks (`Drone.ticksToFullCharge`).
+1. If the drone is waiting on its dock or on a charging station, it charges: the battery gains \(r \cdot B_{max}/100\) per tick, capped at `maxBattery`, where \(r\) is the charge rate in % of capacity per tick (`Drone.chargeRatePercent`). With instant charging (\(r = \infty\), the original model) one waiting tick restores a full battery. Idle drones parked on their dock charge to full before each allocation round (`ChargingPolicy.rechargeDocked`), which takes \(\lceil (B_{max}-B)/(r B_{max}/100) \rceil\) ticks (`BatteryModel.ticksToFullCharge`).
 2. Otherwise a move consumes `BETA_FLY`.
 3. A wait consumes `BETA_HOVER`.
 
