@@ -3,6 +3,8 @@ import { OpenAITool } from './SLMService.types';
 import { MATH_CONSTANTS } from '../../SimulationConfig';
 import { Drone } from '../../classes/Drone';
 import { DroneActivity, activityAt, isFlying } from '../../classes/DroneActivity';
+import { buildInventoryReport, describeInventory } from '../../classes/InventoryReport';
+import { BUS_PARTS } from '../../classes/PalletContents';
 
 export interface SimulationContext {
   getAgents: () => Agent[];
@@ -17,6 +19,8 @@ export interface SimulationContext {
   onReset?: () => void;
   onSetTick?: (tick: number) => void;
   onNewMissions?: () => void;
+  /** Plans a mission that scans every pallet and starts playback; the result is announced at the end. */
+  onStartInventory?: () => void;
   onChangeAlgorithm?: (algo: string) => void;
   getAvailableAlgorithms?: () => string[];
   onControlCamera?: (action: { mode: 'overview' | 'drone' | 'zoom_in' | 'zoom_out'; droneId?: string }) => void;
@@ -194,6 +198,30 @@ export class SimulationToolRegistry {
       {
         type: 'function',
         function: {
+          name: 'start_inventory_mission',
+          description:
+            'Update the inventory: plan a mission in which the drones scan every pallet in the warehouse, then start it. Use when the operator asks to update, refresh, run or take a full inventory. The parts found are announced when the mission ends.',
+          parameters: {
+            type: 'object',
+            properties: {}
+          }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'get_inventory',
+          description:
+            'Current inventory: units of each bus part (brake pads, oil filters, tyres) found on the pallets scanned so far, and how many pallets have been scanned.',
+          parameters: {
+            type: 'object',
+            properties: {}
+          }
+        }
+      },
+      {
+        type: 'function',
+        function: {
           name: 'control_camera',
           description:
             'Control the 3D viewport camera: zoom in, zoom out, focus/zoom in on a specific drone, or reset to global overview.',
@@ -263,6 +291,10 @@ export class SimulationToolRegistry {
         return this.changeAlgorithm(args.algorithm);
       case 'generate_new_missions':
         return this.generateNewMissions();
+      case 'start_inventory_mission':
+        return this.startInventoryMission();
+      case 'get_inventory':
+        return this.getInventory();
       case 'control_camera':
         return this.controlCamera(args.action, args.droneId);
       case 'change_interface_theme':
@@ -546,6 +578,32 @@ export class SimulationToolRegistry {
       return { success: true, message: 'New warehouse inspection missions generated and dispatched.' };
     }
     return { success: false, error: 'Mission generation not supported in current context.' };
+  }
+
+  private startInventoryMission() {
+    if (!this.context.onStartInventory) {
+      return { success: false, error: 'Inventory missions are not supported in current context.' };
+    }
+    this.context.onStartInventory();
+    return {
+      success: true,
+      message: `Inventory mission started: the fleet will scan all ${this.context.getPallets().length} pallets. The parts found will be reported when it ends.`
+    };
+  }
+
+  private getInventory() {
+    const report = buildInventoryReport(this.context.getPallets(), this.context.getScannedPalletIds());
+    const units = Object.fromEntries(
+      Object.entries(report.unitsByPart).map(([id, n]) => [BUS_PARTS[id as keyof typeof BUS_PARTS].name, n])
+    );
+    return {
+      scannedPallets: report.scannedPallets,
+      totalPallets: report.totalPallets,
+      unitsFound: units,
+      note: 'Only scanned pallets reveal their contents.',
+      summary: describeInventory(report, false),
+      currentSimulationTick: this.context.getCurrentTick()
+    };
   }
 
   private controlCamera(action: 'zoom_in' | 'zoom_out' | 'focus_drone' | 'reset_overview', droneId?: string) {

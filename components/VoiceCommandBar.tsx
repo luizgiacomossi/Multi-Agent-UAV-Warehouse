@@ -32,6 +32,8 @@ export interface VoiceCommandBarProps {
   lmStudioUrl?: string;
   onUpdateLMStudioUrl?: (url: string) => void;
   isLMStudioConnected?: boolean;
+  /** A message the app reports on its own (e.g. a finished inventory); shown and spoken like a reply. */
+  announcement?: { id: number; text: string } | null;
 }
 
 /**
@@ -44,7 +46,8 @@ export const VoiceCommandBar: React.FC<VoiceCommandBarProps> = ({
   defaultProvider = 'whisper-local',
   lmStudioUrl = 'http://localhost:1234/v1',
   onUpdateLMStudioUrl,
-  isLMStudioConnected = false
+  isLMStudioConnected = false,
+  announcement = null
 }) => {
   const [inputText, setInputText] = useState('');
   const [lastCommands, setLastCommands] = useState<string[]>([]);
@@ -136,6 +139,23 @@ export const VoiceCommandBar: React.FC<VoiceCommandBarProps> = ({
     const nextProv: SpeechProviderType = providerType === 'whisper-local' ? 'web-speech' : 'whisper-local';
     setProvider(nextProv);
   };
+
+  // Show and speak announcements from the app (each id once)
+  useEffect(() => {
+    if (!announcement) return;
+    setAssistantReply({ text: announcement.text, toolsExecuted: [] });
+    if (ttsEnabled) {
+      ttsService.cancel();
+      ttsService.speak(announcement.text, {
+        rate: speechRate,
+        voiceURI: selectedVoiceURI,
+        onStart: () => setIsSpeaking(true),
+        onEnd: () => setIsSpeaking(false),
+        onError: () => setIsSpeaking(false)
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [announcement?.id]);
 
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
