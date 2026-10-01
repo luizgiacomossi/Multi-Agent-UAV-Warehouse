@@ -123,26 +123,21 @@ export class WorldGenerator {
 
       // Generate moving Dynamic Forklifts inside aisles
       world.forklifts = [];
-      const MAX_TICKS = 2000;
       let forkliftCount = 0;
-      
-      // Determine what Z range is safe
-      const zMin = reservedZone ? (reservedZone.maxZ + 1) : 2;
-      const zMax = world.size - 2;
 
       for (let x = 2; x < world.size - 2; x++) {
           if (forkliftCount >= numForklifts) break;
           const isAisleX = (x % (rackDepth + aisleWidth)) < aisleWidth;
-          
+
           if (isAisleX && x % 4 === 0) {
+              // The lane runs the whole aisle, past every rack row; only an aisle beside the dock starts after it
+              const besideDock = !!reservedZone && x >= reservedZone.minX && x <= reservedZone.maxX;
+              const zMin = besideDock ? reservedZone!.maxZ + 1 : 0;
+              const zMax = world.size - 1;
+              // Exactly one round trip: every user indexes the path with t % length, so it loops seamlessly
               const path: Position3D[] = [];
-              let cz = zMin;
-              let dir = 1;
-              for (let t = 0; t < MAX_TICKS; t++) {
-                  path.push({ x, y: 0, z: cz });
-                  cz += dir;
-                  if (cz >= zMax || cz <= zMin) dir *= -1;
-              }
+              for (let z = zMin; z <= zMax; z++) path.push({ x, y: 0, z });
+              for (let z = zMax - 1; z > zMin; z--) path.push({ x, y: 0, z });
               world.forklifts.push({
                   id: `FL-${forkliftCount}`,
                   name: `Forklift ${forkliftCount + 1}`,

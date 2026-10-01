@@ -60,18 +60,18 @@ Results (5 runs per configuration, Cooperative and CBS pooled; mean makespan in 
 
 | Scale | Drones | Base only | Base + 1 | Base + 2 | Base + 4 |
 |---|---|---|---|---|---|
-| M-16 | 2 | 554 | 528 (-5% ± 2) | 512 (-8% ± 2) | 469 (-15% ± 5) |
-| M-16 | 4 | 289 | 292 (+1% ± 2) | 258 (-10% ± 4) | 244 (-15% ± 6) |
-| M-16 | 8 | 161 | 145 (-8% ± 10) | 138 (-12% ± 10) | 134 (-15% ± 7) |
-| L-24 | 2 | 2004 | 1620 (-19% ± 5) | 1560 (-22% ± 3) | 1484 (-26% ± 3) |
-| L-24 | 4 | 1046 | 874 (-16% ± 3) | 825 (-21% ± 3) | 767 (-26% ± 3) |
-| L-24 | 8 | 530 | 452 (-14% ± 5) | 446 (-15% ± 5) | 426 (-19% ± 7) |
+| M-16 | 2 | 554 | 538 (-3% ± 1) | 521 (-6% ± 2) | 473 (-14% ± 6) |
+| M-16 | 4 | 286 | 263 (-8% ± 7) | 250 (-13% ± 4) | 231 (-19% ± 4) |
+| M-16 | 8 | 160 | 139 (-12% ± 7) | 135 (-14% ± 7) | 133 (-16% ± 6) |
+| L-24 | 2 | 2063 | 1625 (-21% ± 4) | 1558 (-24% ± 3) | 1475 (-28% ± 4) |
+| L-24 | 4 | 1063 | 866 (-19% ± 2) | 815 (-23% ± 2) | 770 (-28% ± 3) |
+| L-24 | 8 | 530 | 460 (-12% ± 5) | 446 (-15% ± 5) | 418 (-20% ± 6) |
 
-Stations shorten full-coverage missions by 15–26% with four stations, more in the large warehouse, where the base is farther from most pallets. With four drones in the medium warehouse, a single station makes no measurable difference.
+Stations shorten full-coverage missions by 14–28% with four stations, more in the large warehouse, where the base is farther from most pallets. A single station helps least in the medium warehouse with two drones (-3%).
 
 With `--drain 3` the same 240 runs plan in about 40 s in total (at most 0.5 s per run), with no incidents. Mean coverage is 70%, limited by reach: with a capacity of 30, the triple drain and the absolute 20-unit safety margin, many pallets cannot be reached from any charger (in the scenario we traced, none of the pallets left over could).
 
-**Generator limits.** The warehouse generator places forklifts only in aisles where `x % 4 === 0`. That caps them at 1 (12³), 2 (16³) and 3 (24³), regardless of the requested count. The benchmark records the counts actually generated.
+**Forklifts.** Each forklift drives up and down one aisle along z, over the whole length of the warehouse (an aisle beside the dock starts after it), so it passes every rack row. Its path is exactly one round trip and is replayed with `t % length`. The generator places forklifts only in aisles where `x % 4 === 0`, which caps them at 1 (12³), 2 (16³) and 3 (24³), regardless of the requested count. The benchmark records the counts actually generated.
 
 ## 3. Reproducibility
 

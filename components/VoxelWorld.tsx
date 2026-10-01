@@ -508,21 +508,25 @@ const KEEP_OUT_EDGES = new THREE.EdgesGeometry(new THREE.BoxGeometry(1, KEEP_OUT
 /**
  * Turnaround ticks of a forklift path (where the horizontal direction changes). The forklift
  * carries a load on every other leg: it lifts the forks at each turnaround to drop or pick it up.
+ * The path is a loop (it is replayed with tick % length), so the first and last ticks are neighbours.
  */
 function forkliftLegs(path: Position3D[]): { loaded: boolean[]; atTurnaround: boolean[] } {
+  const n = path.length;
   const turnarounds: number[] = [];
-  for (let i = 1; i < path.length - 1; i++) {
-    const inX = path[i].x - path[i - 1].x, inZ = path[i].z - path[i - 1].z;
-    const outX = path[i + 1].x - path[i].x, outZ = path[i + 1].z - path[i].z;
+  for (let i = 0; i < n && n > 2; i++) {
+    const prev = path[(i - 1 + n) % n], next = path[(i + 1) % n];
+    const inX = path[i].x - prev.x, inZ = path[i].z - prev.z;
+    const outX = next.x - path[i].x, outZ = next.z - path[i].z;
     if ((inX || inZ) && (outX || outZ) && (inX !== outX || inZ !== outZ)) turnarounds.push(i);
   }
+  const loopDistance = (a: number, b: number) => Math.min(Math.abs(a - b), n - Math.abs(a - b));
   const loaded: boolean[] = [];
   const atTurnaround: boolean[] = [];
   let leg = 0;
-  for (let i = 0; i < path.length; i++) {
+  for (let i = 0; i < n; i++) {
     while (leg < turnarounds.length && turnarounds[leg] <= i) leg++;
     loaded.push(leg % 2 === 0);
-    atTurnaround.push(turnarounds.some(r => Math.abs(r - i) <= 1));
+    atTurnaround.push(turnarounds.some(r => loopDistance(r, i) <= 1));
   }
   return { loaded, atTurnaround };
 }
