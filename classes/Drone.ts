@@ -1,13 +1,14 @@
 
-import { Agent, Position3D, MATH_CONSTANTS, MissionState } from '../types';
+import { Agent, Position3D, MissionState } from '../types';
 import { MissionController } from './MissionController';
 import { World } from './World';
 import { random } from '../utils/Random';
 import { INSTANT_CHARGE_RATE, DEFAULT_DRAIN_MULTIPLIER } from '../SimulationConfig';
+import { BatteryModel, ChargerKind } from './BatteryModel';
 
 /** One stay on a charger during which the battery filled up (ticks inclusive). */
 export interface ChargingSession {
-    charger: 'base' | 'station';
+    charger: ChargerKind;
     position: Position3D;
     startTick: number;
     endTick: number;
@@ -243,6 +244,7 @@ export class Drone implements Agent {
         let deathTick: number | undefined = undefined;
         let isRecharging = false;
 
+        const model = this.batteryModel;
         const maxPathIndex = this.path.length - 1;
         const deliverySet = new Set(this.deliveryTimes || []);
 
@@ -256,7 +258,7 @@ export class Drone implements Agent {
 
             // -- Movement & Battery Logic --
             if (i > 0) {
-                const step = this.batteryStep(battery, this.path[i - 1], this.path[i], chargeStations, batteryEnabled);
+                const step = this.batteryStep(model, battery, this.path[i - 1], this.path[i], chargeStations, batteryEnabled);
                 // Flagged only while the battery is actually filling up
                 if (i === tick) isRecharging = step.charging;
                 battery = step.battery;
@@ -276,25 +278,19 @@ export class Drone implements Agent {
         return { battery: Math.max(0, battery), hasPackage, isRecharging, deathTick };
     }
 
-    /**
-     * One tick of the battery model: waiting on the dock or a station charges, anything else
-     * consumes β_fly (move) or β_hover (wait), scaled by the drain multiplier.
-     */
-    private batteryStep(battery: number, prev: Position3D, curr: Position3D, chargeStations: Position3D[], batteryEnabled: boolean) {
+    /** The battery model with this drone's capacity, charge rate and drain. */
+    public get batteryModel(): BatteryModel {
+        return new BatteryModel(this.maxBattery, this.chargeRatePercent, this.drainMultiplier);
+    }
+
+    /** One tick of the battery replay: which charger (if any) the drone waits on, then the battery model. */
+    private batteryStep(model: BatteryModel, battery: number, prev: Position3D, curr: Position3D, chargeStations: Position3D[], batteryEnabled: boolean) {
         const isWaiting = this.isWaiting(prev, curr);
         const atBase = curr.x === this.mission.warehouseLocation.x &&
             curr.y === this.mission.warehouseLocation.y &&
             curr.z === this.mission.warehouseLocation.z;
-        const onCharger = !isWaiting ? null : atBase ? 'base' as const : this.isAtStation(curr, chargeStations) ? 'station' as const : null;
-
-        if (onCharger) {
-            const charging = battery < this.maxBattery;
-            const next = batteryEnabled ? Math.min(this.maxBattery, battery + this.chargePerTick()) : battery;
-            return { battery: next, charging, onCharger };
-        }
-        if (!batteryEnabled) return { battery, charging: false, onCharger };
-        const cost = isWaiting ? MATH_CONSTANTS.BETA_HOVER : MATH_CONSTANTS.BETA_FLY;
-        return { battery: battery - cost * this.drainMultiplier, charging: false, onCharger };
+        const onCharger: ChargerKind | null = !isWaiting ? null : atBase ? 'base' : this.isAtStation(curr, chargeStations) ? 'station' : null;
+        return { ...model.step(battery, isWaiting, onCharger, batteryEnabled), onCharger };
     }
 
     /**
@@ -304,11 +300,12 @@ export class Drone implements Agent {
     public chargingSessions(chargeStations: Position3D[], batteryEnabled: boolean): ChargingSession[] {
         const sessions: ChargingSession[] = [];
         if (!batteryEnabled) return sessions;
+        const model = this.batteryModel;
         let battery = this.maxBattery;
         let open: ChargingSession | null = null;
         for (let i = 1; i < this.path.length; i++) {
             const before = battery;
-            const step = this.batteryStep(battery, this.path[i - 1], this.path[i], chargeStations, batteryEnabled);
+            const step = this.batteryStep(model, battery, this.path[i - 1], this.path[i], chargeStations, batteryEnabled);
             battery = step.battery;
             if (battery <= 0) break; // depleted: nothing after this happens
             if (step.charging && step.onCharger) {
@@ -322,18 +319,6 @@ export class Drone implements Agent {
             }
         }
         return sessions;
-    }
-
-    /** Battery gained per waiting tick on a charger. */
-    private chargePerTick(): number {
-        return this.maxBattery * this.chargeRatePercent / 100;
-    }
-
-    /** Waiting ticks on a charger to go from `battery` to a full battery (1 tick when instant). */
-    public ticksToFullCharge(battery: number): number {
-        const deficit = this.maxBattery - battery;
-        if (deficit <= 0) return 0;
-        return Math.max(1, Math.ceil(deficit / this.chargePerTick()));
     }
 
     private isAtStation(pos: Position3D, stations: Position3D[]): boolean {

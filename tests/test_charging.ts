@@ -1,11 +1,12 @@
 import { Drone } from '../classes/Drone';
+import { BatteryModel } from '../classes/BatteryModel';
 import { MissionController } from '../classes/MissionController';
 import { World } from '../classes/World';
 import { CostModel } from '../classes/CostModel';
 import { SimulationManager } from '../classes/SimulationManager';
 import { withSeed } from '../utils/Random';
 import { buildChargingSchedule, chargeStatusAt } from '../classes/ChargingSchedule';
-import { Position3D, Task } from '../types';
+import { Position3D, Task, MATH_CONSTANTS } from '../types';
 
 let passed = 0;
 let failed = 0;
@@ -48,14 +49,14 @@ export async function runChargingTests(): Promise<{ passed: number; failed: numb
   assert(Math.abs(atArrival - 8) < 1e-9, 'Flying costs battery', `got ${atArrival}`);
   assert(Math.abs(slow.calculateStateAt(arrival + 2, [], true).battery - 9) < 1e-9, 'Each waiting tick on the dock adds the charge rate');
   assert(Math.abs(slow.calculateStateAt(arrival + 4, [], true).battery - 10) < 1e-9, 'Charging stops at full capacity');
-  assert(slow.ticksToFullCharge(atArrival) === 4, 'ticksToFullCharge matches the rate', `got ${slow.ticksToFullCharge(atArrival)}`);
+  assert(slow.batteryModel.ticksToFullCharge(atArrival) === 4, 'ticksToFullCharge matches the rate', `got ${slow.batteryModel.ticksToFullCharge(atArrival)}`);
   assert(slow.calculateStateAt(arrival + 1, [], true).isRecharging && !slow.calculateStateAt(arrival + 5, [], true).isRecharging,
     'A drone is shown charging only while its battery is filling up');
 
   const instant = new Drone('C2', 'Instant', '#fff', 10);
   flyAndWait(instant, 1);
   assert(instant.calculateStateAt(arrival + 1, [], true).battery === 10, 'Instant charging restores a full battery in one tick');
-  assert(instant.ticksToFullCharge(3) === 1 && instant.ticksToFullCharge(10) === 0, 'Instant charging needs one tick (none when full)');
+  assert(instant.batteryModel.ticksToFullCharge(3) === 1 && instant.batteryModel.ticksToFullCharge(10) === 0, 'Instant charging needs one tick (none when full)');
 
   const station = { x: 5, y: 0, z: 0 };
   const visitor = new Drone('C3', 'Visitor', '#fff', 10);
@@ -221,6 +222,22 @@ export async function runChargingTests(): Promise<{ passed: number; failed: numb
     'The fleet schedule is in time order and names each site', schedule.map(e => `${e.droneName}@${e.site}`).join(', '));
   const stationSchedule = buildChargingSchedule(result.agents, stations, true).filter(e => e.charger === 'station');
   assert(stationSchedule.length > 0 && stationSchedule.every(e => e.site.startsWith('Station ')), 'Mission schedule lists the station sessions');
+
+  // ─────────────────────────────────────────────────────────────
+  // 8. Battery model in isolation
+  // ─────────────────────────────────────────────────────────────
+  console.log('\n--- 8. Battery Model ---');
+
+  const model = new BatteryModel(20, 10, 2); // 2 units per charging tick, double drain
+  assert(model.step(10, false, null, true).battery === 10 - MATH_CONSTANTS.BETA_FLY * 2, 'A move costs β_fly times the drain');
+  assert(model.step(10, true, null, true).battery === 10 - MATH_CONSTANTS.BETA_HOVER * 2, 'A hover tick costs β_hover times the drain');
+  const charged = model.step(19, true, 'station', true);
+  assert(charged.battery === 20 && charged.charging, 'Charging is capped at capacity and flagged while filling');
+  assert(!model.step(20, true, 'base', true).charging, 'A full battery on a charger is not charging');
+  assert(model.step(10, false, null, false).battery === 10, 'Nothing changes with the battery disabled');
+  assert(model.ticksToFullCharge(15) === 3 && model.ticksToFullCharge(20) === 0, 'Ticks to full charge follow the rate');
+  assert(Math.abs(model.flightEnergy(10) - 10 * MATH_CONSTANTS.BETA_FLY * MATH_CONSTANTS.GAMMA * 2) < 1e-12, 'Flight estimate scales distance by β_fly, γ and the drain',
+    `got ${model.flightEnergy(10)}`);
 
   return { passed, failed };
 }
