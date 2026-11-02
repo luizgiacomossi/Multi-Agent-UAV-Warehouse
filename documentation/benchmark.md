@@ -118,6 +118,7 @@ Collisions are detected after planning. A drone destroyed in a collision stops a
 |---|---|
 | `runs.csv` | one row per strategy and scenario, with every field in Section 4 |
 | `summary.csv` | one row per configuration and strategy: `runs`, `successRate`, and for each metric `_mean`, `_std` (sample, n − 1), `_ci95` (normal-approximation half-width 1.96·s/√n), `_median`, `_min`, `_max` |
+| `tests.csv` | paired Wilcoxon signed-rank tests (`pairedTests`). For each factor that varies in the run (algorithm, allocation mode, charging sites, ceiling, rack levels), runs with the same seed and otherwise equal configuration are paired, and each pair of levels is tested on makespan, energy, sum of costs, priority-weighted scan time and planning time. Columns: the configuration, levels `a` and `b`, pairs, means, median of b − a, non-zero pairs, the statistic and the two-sided p. The p-value is exact up to 50 non-zero pairs (with ties too) and normal beyond; checked against `scipy.stats.wilcoxon`. With n pairs the smallest possible p is 2/2ⁿ (0.002 for 10) |
 | `summary.json` | the resolved plan, the code version (`environment`: commit hash, whether the tree had uncommitted changes, Node version) and the same summaries, for scripted analysis |
 
 The console prints one table per configuration, with the mean ± 95% CI for collisions, stranded drones, coverage, makespan, energy and planning time.

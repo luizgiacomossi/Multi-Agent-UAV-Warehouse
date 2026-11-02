@@ -6,6 +6,8 @@ import { MissionController } from '../classes/MissionController';
 import { TaskCluster } from '../classes/TaskCluster';
 import { Task, Pallet } from '../types';
 import { scanTimes } from '../bench/metrics';
+import { wilcoxonSignedRank } from '../bench/stats';
+import { pairedTests } from '../bench/report';
 import { Drone } from '../classes/Drone';
 import { describeDroneActivity } from '../classes/DroneActivity';
 
@@ -138,6 +140,27 @@ export async function runBenchmarkTests(): Promise<{ passed: number; failed: num
   ] as Pallet[];
   const times = scanTimes([timed], timedPallets);
   assert(times.mean === 20 && Math.abs(times.weighted - 12) < 1e-9, 'Scan times count first scans, weighted by priority (mean 20, weighted 12)', JSON.stringify(times));
+
+  // Wilcoxon signed-rank test (values checked against scipy.stats.wilcoxon)
+  const allBelow = wilcoxonSignedRank([-5, -3, -4, -6, -2, -1, -7, -8, -3, -4]);
+  assert(allBelow.method === 'exact' && allBelow.statistic === 0 && Math.abs(allBelow.p - 0.001953125) < 1e-9,
+    'Wilcoxon: 10 negative differences give the exact p = 2/1024, also with ties', JSON.stringify(allBelow));
+  const withZeros = wilcoxonSignedRank([1, 1, 2, -2, 3, 3, 3, -1, 4, 5, 0, 0, 2]);
+  assert(withZeros.n === 11 && withZeros.statistic === 7 && Math.abs(withZeros.p - 0.01953125) < 1e-9, 'Wilcoxon: zeros dropped, ties averaged (scipy p = 0.019531)', JSON.stringify(withZeros));
+  const large = wilcoxonSignedRank(Array.from({ length: 60 }, (_, i) => (i % 3 === 0 ? -1 : 1) * (i + 1)));
+  assert(large.method === 'normal' && large.p > 0 && large.p < 1, 'Wilcoxon: normal approximation beyond 50 pairs');
+  assert(Number.isNaN(wilcoxonSignedRank([0, 0, 0]).p), 'Wilcoxon: no p-value when every difference is zero');
+
+  // Paired tests match runs by seed within the same configuration
+  const record = (algorithm: string, seed: number, makespan: number) => ({
+    scale: 'S-12', gridSize: 12, pallets: 50, forklifts: 1, drones: 4, allocationMode: '1-to-1', completionMode: 'count',
+    chargingSites: 1, maxAltitude: 12, rackLevels: 8, chargeRate: Infinity, drainMultiplier: 1, repetition: seed, seed,
+    algorithm, ok: true, planningMs: 1, makespan,
+  });
+  const tests = pairedTests([1, 2, 3, 4, 5, 6].flatMap(seed => [record('Cooperative', seed, 100 + seed), record('CBS', seed, 90 + seed)]));
+  const makespanTest = tests.find(t => t.factor === 'algorithm' && t.metric === 'makespan');
+  assert(tests.every(t => t.factor === 'algorithm') && makespanTest?.pairs === 6 && makespanTest.medianDiff === -10 && Math.abs(makespanTest.p - 0.03125) < 1e-9,
+    'Paired tests: only varying factors, pairs by seed, b − a differences', JSON.stringify(makespanTest));
 
   // Allocation methods and ceilings share the warehouse of a repetition, so they are compared paired
   const paired = expandScenarios({ ...PRESETS.quick, droneCounts: [2], repetitions: 2, allocationModes: ['1-to-1', 'Greedy', 'Cluster'], maxAltitudes: [6, 12] });

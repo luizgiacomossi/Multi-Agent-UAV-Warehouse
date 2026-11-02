@@ -2,7 +2,7 @@ import { execSync } from 'child_process';
 import { mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { RunRecord } from './runScenario';
-import { Summary, summarize } from './stats';
+import { Summary, summarize, wilcoxonSignedRank } from './stats';
 import { BenchmarkPlan } from './scenarios';
 
 /** Numeric per-run fields that are aggregated into the summary. */
@@ -98,7 +98,88 @@ const RUN_COLUMNS: (keyof RunRecord)[] = [
 ];
 const STAT_FIELDS: (keyof Summary)[] = ['mean', 'std', 'ci95', 'median', 'min', 'max'];
 
-/** Writes runs.csv, summary.csv and summary.json into `outDir`. */
+/** Factors whose levels can be compared on the same scenarios (same seed, all else equal). */
+const PAIRED_FACTORS = ['algorithm', 'allocationMode', 'chargingSites', 'maxAltitude', 'rackLevels'] as const;
+/** Metrics compared by the paired tests. */
+const TESTED_METRICS = ['makespan', 'energyConsumed', 'sumOfCosts', 'priorityScanTime', 'planningMs'] as const;
+/** Configuration columns that identify the comparison (pallet and forklift counts follow the scale). */
+const CONTEXT_KEYS = GROUP_KEYS.filter(k => k !== 'pallets' && k !== 'forklifts');
+
+/** A paired comparison of two levels of one factor on one configuration, for one metric. */
+export interface PairedTest {
+  factor: typeof PAIRED_FACTORS[number];
+  context: Partial<Record<typeof CONTEXT_KEYS[number], RunRecord[typeof CONTEXT_KEYS[number]]>>;
+  a: string;
+  b: string;
+  metric: typeof TESTED_METRICS[number];
+  /** Paired runs (same seed) with the metric for both levels. */
+  pairs: number;
+  meanA: number;
+  meanB: number;
+  /** Median of b − a over the pairs. */
+  medianDiff: number;
+  /** Wilcoxon signed-rank test of b − a (pairs with a zero difference are dropped). */
+  nonZero: number;
+  statistic: number;
+  p: number;
+}
+
+/**
+ * Paired Wilcoxon signed-rank tests. For every factor that takes more than one level in the run,
+ * runs are paired by seed with all other configuration equal (every level of a factor runs on the
+ * same warehouse, see expandScenarios), and each pair of levels is tested on each metric.
+ */
+export function pairedTests(records: RunRecord[]): PairedTest[] {
+  const ok = records.filter(r => r.ok);
+  const tests: PairedTest[] = [];
+  for (const factor of PAIRED_FACTORS) {
+    const levels = [...new Set(ok.map(r => String(r[factor])))];
+    if (levels.length < 2) continue;
+    const contextKeys = CONTEXT_KEYS.filter(k => k !== factor);
+    const groups = new Map<string, RunRecord[]>();
+    for (const r of ok) {
+      const key = contextKeys.map(k => r[k]).join('|');
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(r);
+    }
+    for (const runs of groups.values()) {
+      const bySeed = new Map<string, Map<number, RunRecord>>();
+      for (const r of runs) {
+        const level = String(r[factor]);
+        if (!bySeed.has(level)) bySeed.set(level, new Map());
+        bySeed.get(level)!.set(r.seed, r);
+      }
+      const present = levels.filter(l => bySeed.has(l));
+      const context = Object.fromEntries(contextKeys.map(k => [k, runs[0][k]]));
+      for (let i = 0; i < present.length; i++) {
+        for (let j = i + 1; j < present.length; j++) {
+          const [a, b] = [present[i], present[j]];
+          for (const metric of TESTED_METRICS) {
+            const pairs: [number, number][] = [];
+            for (const [seed, ra] of bySeed.get(a)!) {
+              const rb = bySeed.get(b)!.get(seed);
+              const va = ra[metric], vb = rb?.[metric];
+              if (typeof va === 'number' && typeof vb === 'number') pairs.push([va, vb]);
+            }
+            if (pairs.length === 0) continue;
+            const diffs = pairs.map(([x, y]) => y - x);
+            const test = wilcoxonSignedRank(diffs);
+            tests.push({
+              factor, context, a, b, metric, pairs: pairs.length,
+              meanA: summarize(pairs.map(p => p[0])).mean,
+              meanB: summarize(pairs.map(p => p[1])).mean,
+              medianDiff: summarize(diffs).median,
+              nonZero: test.n, statistic: test.statistic, p: test.p,
+            });
+          }
+        }
+      }
+    }
+  }
+  return tests;
+}
+
+/** Writes runs.csv, summary.csv, tests.csv and summary.json into `outDir`. */
 export function writeReports(outDir: string, plan: BenchmarkPlan, records: RunRecord[], summaries: GroupSummary[]): void {
   mkdirSync(outDir, { recursive: true });
 
@@ -113,6 +194,14 @@ export function writeReports(outDir: string, plan: BenchmarkPlan, records: RunRe
     ...SUMMARY_METRICS.flatMap(m => STAT_FIELDS.map(f => s.metrics[m]?.[f])),
   ]);
   writeFileSync(join(outDir, 'summary.csv'), toCsv(summaryHeader, summaryRows));
+
+  const tests = pairedTests(records);
+  const testHeader = ['factor', ...CONTEXT_KEYS, 'a', 'b', 'metric', 'pairs', 'meanA', 'meanB', 'medianDiff', 'nonZero', 'statistic', 'p'];
+  writeFileSync(join(outDir, 'tests.csv'), toCsv(testHeader, tests.map(t => [
+    t.factor, ...CONTEXT_KEYS.map(k => k === t.factor ? '' : t.context[k]), t.a, t.b, t.metric,
+    t.pairs, t.meanA, t.meanB, t.medianDiff, t.nonZero, t.statistic,
+    Number.isNaN(t.p) ? undefined : t.p < 1e-4 ? t.p.toExponential(2) : t.p.toFixed(4),
+  ])));
 
   writeFileSync(join(outDir, 'summary.json'), JSON.stringify({ plan, generatedAt: new Date().toISOString(), environment: runEnvironment(), summaries }, null, 2));
 }

@@ -101,7 +101,8 @@ Situação em 2/11: Introdução e Related Work juntos têm cerca de 900 palavra
     - Com 1 a 4 drones ociosos por rodada, a matriz é pequena.
     - Para o paper: a contribuição é a função de custo e a checagem de energia, não o solver ótimo. Planejamento que olhe várias rodadas à frente fica como trabalho futuro.
   - Para o paper: E1 com ida e volta mostra o efeito da prioridade com clareza. Dizer que o Hungarian ótimo e o greedy dão quase o mesmo resultado, e que sem ida e volta há um trade-off entre distância e prioridade.
-- [ ] Teste estatístico pareado no `bench/report.ts` (Wilcoxon signed-rank, já que os cenários são pareados por semente).
+- [x] Teste estatístico pareado no `bench/report.ts` (Wilcoxon signed-rank, já que os cenários são pareados por semente). Feito: o benchmark grava `tests.csv` com o teste de cada par de níveis de cada fator, pareado por seed. p exato até 50 pares (com empates também), conferido com o scipy. Amostra de 2/11 (S-12, 4 drones, todos os paletes, 10 runs): Hungarian vs Greedy p = 0,63 a 0,80 (empate), Hungarian vs Nearest p = 0,002 no tempo ponderado por prioridade (30 ticks a menos), Cluster vs 1-para-1 p = 0,002 em energia, CBS vs Cooperative p = 0,03 a 0,13 com diferenças de 0,1%.
+  - Atenção: com n runs o menor p possível é 2/2ⁿ (0,002 com 10, 2e-6 com 20). Com muitas comparações, considerar a correção de Holm. Diferença significativa não é diferença relevante: o CBS ganha 0,2 ticks com p = 0,03.
 - [ ] Script que gera as figuras a partir de `summary.csv` (matplotlib ou similar), salvo no repositório.
 
 ### 5.3 Experimentos (mínimo 10 repetições por célula, idealmente 20)

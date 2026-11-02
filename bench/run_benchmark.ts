@@ -7,7 +7,7 @@
  *   npm run bench -- --preset full --runs 20 --seed 7
  *   npm run bench -- --algos Cooperative,CBS --grids 12,24 --drones 4,8 --alloc Cluster
  *
- * Output: bench-results/<preset>-<timestamp>/{runs.csv, summary.csv, summary.json}
+ * Output: bench-results/<preset>-<timestamp>/{runs.csv, summary.csv, tests.csv, summary.json}
  */
 import { join } from 'path';
 import { BenchmarkPlan, PRESETS, SCALES, AllocationMode, expandScenarios } from './scenarios';
@@ -125,7 +125,7 @@ async function main() {
   const summaries = summarizeRecords(records);
   printSummary(summaries);
   writeReports(outDir, plan, records, summaries);
-  console.log(`\nResults written to ${outDir}/ (runs.csv, summary.csv, summary.json)`);
+  console.log(`\nResults written to ${outDir}/ (runs.csv, summary.csv, tests.csv, summary.json)`);
 }
 
 main().catch(err => {
