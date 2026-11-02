@@ -65,6 +65,8 @@ Afirmações do abstract que o paper precisa sustentar:
 
 Limite prático: **3 figuras e 2 tabelas**. Um screenshot do visualizador só entra se couber.
 
+Situação em 2/11: Introdução e Related Work juntos têm cerca de 900 palavras, perto de 1,4 página contra 1,2 do orçamento. Fig. 1 (252 × 128 pt) e Fig. 2 (252 × 300 pt) somam cerca de 0,4 página. Cortar quando o resto estiver escrito, começando pelos exemplos mais longos da Introdução.
+
 ## 5. Trabalho no código e experimentos
 
 ### 5.1 Correções e ajustes antes de rodar
@@ -97,23 +99,43 @@ Limite prático: **3 figuras e 2 tabelas**. Um screenshot do visualizador só en
 
 ### 5.4 Figuras e tabelas planejadas
 
-- [ ] Fig. 1: arquitetura (alocação → planejamento por trecho → reservas → detecção de colisão → playback).
-- [ ] Fig. 2: makespan vs número de drones (1-para-1 vs Cluster), com barras de erro.
-- [ ] Fig. 3: makespan e energia vs número de pontos de recarga.
-- [ ] Fig. 4 ou tabela: CBS vs Cooperative em densidade crescente.
+Plano revisto em 2/11: uma figura do problema e um diagrama da solução, e os resultados juntos numa figura de dois painéis. Fontes e geradores em `figures/` no repo do paper (SVG e PDF vetorial, Times).
+
+- [x] Fig. 1: problema. Vista isométrica do cenário S-12 (seed 42), com os três desafios numerados. Na Introdução, depois do primeiro parágrafo.
+- [x] Fig. 2: diagrama da solução (loop por eventos: alocação, recarga, planejamento por trecho, atualização, com a tabela de reservas espaço-tempo). Na Seção IV.
+- [x] Figura dos cenários (largura total, Seção V): renders do simulador dos três armazéns com todas as prateleiras cheias, mais close-ups do drone, da empilhadeira e do rack renderizados sozinhos. Captura em `figures/scenarios_capture.mjs` (repo do paper) e `paper/figure-renders/` (aqui). É a 4ª figura, então o texto precisa encolher.
+- [ ] Fig. de resultados: dois painéis, (a) makespan vs número de drones (1-para-1 vs Cluster) com barras de erro, (b) makespan e energia vs número de pontos de recarga.
+- [ ] CBS vs Cooperative em densidade crescente: entra na Tabela II.
 - [ ] Tabela I: parâmetros do modelo (β_fly, β_hover, γ, δ_safe, λ, w1, w2, escalas S/M/L).
-- [ ] Tabela II: comparação entre métodos de alocação (E1).
+- [ ] Tabela II: comparação entre métodos de alocação (E1), mais CBS vs Cooperative (E4).
 
 ## 6. Escrita
 
-- [ ] Baixar o template LaTeX do MIPRO e montar o esqueleto das seções.
-- [ ] III. Formulação: notação igual à do `SimulationConfig.ts` (equações 13 a 18).
-- [ ] IV. Método: pseudocódigo do loop de planejamento por eventos (`SimulationManager.runPathfinding`).
+- [x] Baixar o template LaTeX do MIPRO e montar o esqueleto das seções. O paper fica no repo do Overleaf, clonado em `paper/Paper_MIPRO_Planning_Warehouse/`.
+- [x] Título, autores, afiliação, abstract e keywords no `paper.tex`.
+- [x] I. Introdução: rascunho com citações. Rever depois dos resultados. Falta confirmar o "few" da lacuna e decidir sobre o link do código (C5).
+- [x] II. Related work: rascunho em quatro parágrafos (drones em armazém, alocação, MAPF, alocação + path finding + energia). Falta checar se os trabalhos de armazém modelam conflitos.
+- [x] III. Formulação: rascunho em sete parágrafos (grid, drones, tarefas, empilhadeiras, energia e recarga, conflitos, objetivo), com a notação do `SimulationConfig.ts`. Falta resolver o tempo de leitura (ver abaixo).
+- [x] IV. Método: rascunho com abertura que percorre a Fig. 2 e as quatro subseções (custo e viabilidade com as equações de energia, viabilidade e custo, clusters, planejadores, recarga). Tem cerca de 920 palavras, uns 0,5 página acima do orçamento. Cortar depois.
+- [ ] IV. Pseudocódigo do loop por eventos (`SimulationManager.runPathfinding`): ficou de fora por espaço. Decidir se entra.
 - [ ] V. Setup: semente, repetições, hardware, versão do código.
 - [ ] VI. Resultados: só números do commit atual, com média ± IC95 e resultado dos testes estatísticos.
 - [ ] VII. Limitações, ditas abertamente: modelo em grid sem dinâmica nem unidades físicas, empilhadeiras com rotas conhecidas, planejamento offline sem replanejamento durante a execução, CBS por janela de trechos (não ótimo para a missão inteira), escala até 24³ células.
-- [ ] Introdução e conclusão por último.
-- [ ] Referências: o Luiz define as citações. Preparar palavras-chave de busca para cada seção do related work: "multi-robot task allocation survey", "Hungarian algorithm multi-robot assignment", "conflict-based search multi-agent path finding", "prioritized planning multi-agent", "UAV warehouse inventory RFID", "drone charging station scheduling", "mTSP clustering UAV".
+- [ ] Conclusão por último.
+- [x] Referências: 21 no `.bib`, sem arXiv, incluindo 4 self-citations. Falta página e DOI do Bavaro e Amigoni (ECMR 2025).
+- [ ] Referências novas: o Luiz define as citações. Preparar palavras-chave de busca para cada seção do related work: "multi-robot task allocation survey", "Hungarian algorithm multi-robot assignment", "conflict-based search multi-agent path finding", "prioritized planning multi-agent", "UAV warehouse inventory RFID", "drone charging station scheduling", "mTSP clustering UAV".
+
+### TODOs abertos no `paper.tex`
+
+Cada `\todo` vermelho no texto tem um item aqui. Tirar o `\todo` do texto e marcar aqui quando resolver.
+
+- [ ] Introdução: confirmar o "few" da lacuna depois do Related Work.
+- [ ] Introdução: link do código aberto na contribuição C5, se o simulador for liberado.
+- [ ] Related Work: checar se os trabalhos de drones em armazém modelam conflitos entre drones ou com veículos de chão.
+- [ ] Formulação (tarefas): no código, `t_hover = 5` só entra na estimativa de energia e o scan não ocupa passos no caminho. Corrigir o código ou dizer isso no texto. Mesmo item da seção 5.1.
+- [ ] Método (recarga): "sem fila no ar" só vale se o trecho até a estação der certo. Se falhar, o drone paira e tenta de novo. Contar quantas vezes isso acontece nos benchmarks. Mesmo item da seção 2.
+- [ ] Método (custo): o texto diz D_max = 2N, que é o que o código usa. A constante `D_MAX` do `SimulationConfig.ts` não é usada. Mesmo item da seção 5.1.
+- [ ] Seções V a VIII: ainda são só `\todo`.
 
 ### Regras de estilo (sempre)
 

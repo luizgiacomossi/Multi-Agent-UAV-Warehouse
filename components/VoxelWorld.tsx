@@ -169,7 +169,7 @@ interface DroneModelProps {
 }
 
 /** Quadcopter: X frame with four rotors, front (white) and rear (red) lights, camera and RFID sensors. */
-const DroneModel: React.FC<DroneModelProps> = ({ color, dead, charging, spinning, activeSensor }) => {
+export const DroneModel: React.FC<DroneModelProps> = ({ color, dead, charging, spinning, activeSensor }) => {
   const bodyColor = dead ? '#334155' : color;
   const glow = dead ? '#ef4444' : charging ? '#3b82f6' : color;
   const cameraColor = activeSensor === 'camera' ? CAMERA_COLOR : SENSOR_IDLE_COLOR;
@@ -559,7 +559,7 @@ const ForkliftWheel: React.FC<{
 );
 
 /** Counterbalance forklift (local +z is the front, with the forks; y = 0 is the floor). */
-const ForkliftModel: React.FC<{
+export const ForkliftModel: React.FC<{
   color: string;
   wheelSpinRefs: React.MutableRefObject<(THREE.Group | null)[]>;
   rearSteerRefs: React.MutableRefObject<(THREE.Group | null)[]>;
@@ -1215,7 +1215,7 @@ function findRackBlocks(obstacles: Position3D[]): RackBlock[] {
  * Pallet racks: a dark pad under each block, blue uprights at its corners, orange beams under
  * each level along the long sides, and a yellow line painted on the aisle floor around it.
  */
-const RackStructures: React.FC<{ cells: Position3D[] }> = ({ cells }) => {
+export const RackStructures: React.FC<{ cells: Position3D[] }> = ({ cells }) => {
   const blocks = useMemo(() => findRackBlocks(cells), [cells]);
   return (
     <group>
