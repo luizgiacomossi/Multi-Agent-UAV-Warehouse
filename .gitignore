@@ -25,3 +25,4 @@ dist-ssr
 
 # Benchmark output
 bench-results/
+paper/Paper_MIPRO_Planning_Warehouse/
