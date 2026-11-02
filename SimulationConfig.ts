@@ -35,6 +35,11 @@ export const WAREHOUSE = {
   BASE_SIZE: 12,    // footprint side length (voxels)
   RACK_HEIGHT: 1,   // rack column height (voxels)
   AISLE_WIDTH: 2,   // gap between rack rows (voxels)
+  /**
+   * Maximum pallets stacked in one rack column. Each column gets 1 to this many levels at random
+   * (capped at the grid size minus 2). Was tied to DEFAULT_MAX_ALTITUDE before, with the same value.
+   */
+  RACK_LEVELS: 8,
 };
 
 /**

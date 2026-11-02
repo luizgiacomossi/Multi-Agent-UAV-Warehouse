@@ -80,7 +80,7 @@ export class SimulationManager {
     }
 
     /** `stationCount` charging stations are placed in addition to the base (0 = base only). */
-    public generateWorld(theme: string, size: number, stationCount: number, deployFromBase: boolean, agentCount: number, totalTasks: number = 50, numForklifts: number = 3, priorityMode: TaskPriorityMode = 'mixed') {
+    public generateWorld(theme: string, size: number, stationCount: number, deployFromBase: boolean, agentCount: number, totalTasks: number = 50, numForklifts: number = 3, priorityMode: TaskPriorityMode = 'mixed', rackLevels?: number) {
         this.world.setSize(size);
 
         let reservedZone: ReservedZone | undefined = undefined;
@@ -95,7 +95,7 @@ export class SimulationManager {
             };
         }
 
-        this.world.generate(theme, reservedZone, totalTasks, numForklifts, priorityMode);
+        this.world.generate(theme, reservedZone, totalTasks, numForklifts, priorityMode, rackLevels);
 
         this.world.generateStations(stationCount, reservedZone);
     }

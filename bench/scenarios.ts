@@ -1,5 +1,5 @@
 import { MissionCompletionMode, AllocationMode } from '../types';
-import { INSTANT_CHARGE_RATE } from '../SimulationConfig';
+import { INSTANT_CHARGE_RATE, WAREHOUSE } from '../SimulationConfig';
 
 export type { AllocationMode };
 
@@ -27,6 +27,8 @@ export interface BenchmarkPlan {
    * above it cannot be reached.
    */
   maxAltitudes: number[];
+  /** Maximum pallets per rack column. Empty = WAREHOUSE.RACK_LEVELS (8). */
+  rackLevels: number[];
   repetitions: number;
   baseSeed: number;
   missionsPerDrone: number;
@@ -49,6 +51,7 @@ export interface ScenarioSpec {
   completionMode: MissionCompletionMode;
   chargingSites: number;
   maxAltitude: number;
+  rackLevels: number;
   repetition: number;
   seed: number;
 }
@@ -69,6 +72,7 @@ const BASE_PLAN: Omit<BenchmarkPlan, 'name'> = {
   completionModes: ['count'],
   chargingSites: [1],
   maxAltitudes: [],
+  rackLevels: [],
   repetitions: 5,
   baseSeed: 1,
   missionsPerDrone: 3,
@@ -135,11 +139,14 @@ export function expandScenarios(plan: BenchmarkPlan): ScenarioSpec[] {
         for (const completionMode of plan.completionModes) {
           for (const chargingSites of plan.chargingSites) {
             for (const maxAltitude of plan.maxAltitudes.length > 0 ? plan.maxAltitudes : [scale.gridSize]) {
+            for (const rackLevels of plan.rackLevels.length > 0 ? plan.rackLevels : [WAREHOUSE.RACK_LEVELS]) {
             for (let repetition = 0; repetition < plan.repetitions; repetition++) {
               // The allocation mode, site count and ceiling are left out of the seed: each of them gets the
-              // same warehouse, so their comparisons are paired.
+              // same warehouse, so their comparisons are paired. Rack levels are left out too, so every
+              // height uses the same random draws (the same rack layout, with taller or shorter columns).
               const seed = scenarioSeed(plan.baseSeed, scale.gridSize, drones, completionMode, repetition);
-              scenarios.push({ scale, drones, allocationMode, completionMode, chargingSites, maxAltitude, repetition, seed });
+              scenarios.push({ scale, drones, allocationMode, completionMode, chargingSites, maxAltitude, rackLevels, repetition, seed });
+            }
             }
             }
           }

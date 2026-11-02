@@ -45,7 +45,7 @@ The warehouse generator creates:
 
 - aisle regions,
 - rack regions,
-- pallets embedded in blocked rack voxels,
+- pallets embedded in blocked rack voxels, stacked 1 to `WAREHOUSE.RACK_LEVELS` (8) high per rack column at random, whatever the grid size (capped at the grid size minus 2). The grid is a cube, so on 24³ about 16 layers stay empty above the racks. The requested pallet count is then drawn from all stacked pallets,
 - optional forklifts with periodic trajectories.
 
 Pallets are both logical targets and blocked cells. Because of that, the planner cannot route into a pallet voxel directly; it later resolves the target to a nearby free voxel with bounded BFS.

@@ -25,6 +25,7 @@ npm run bench -- --help
 | `--completion` | `count` (fixed missions per drone), `all-pallets` (full coverage) |
 | `--missions` | missions per drone in `count` mode |
 | `--sites` | charging sites including the base (1 = base only; each extra site is a one-drone station) |
+| `--rack-levels` | maximum pallets per rack column (default 8, `WAREHOUSE.RACK_LEVELS`). Each column gets 1 to this many levels at random. Left out of the scenario seed, so every height uses the same rack layout |
 | `--altitude` | flight ceilings, the highest cell y a drone may use (default: the grid size). Pallets sit at y ≤ 6 (S-12, M-16) and y ≤ 7 (L-24), so a ceiling of 8 still reaches every pallet while packing the drones into fewer layers |
 | `--charge-rate` | charging speed in % of capacity per tick, or `instant` |
 | `--battery` | battery capacity per drone |

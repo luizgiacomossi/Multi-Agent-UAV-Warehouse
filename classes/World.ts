@@ -71,8 +71,8 @@ export class World {
       }
   }
 
-    public generate(theme: string, reservedZone?: ReservedZone, totalTasks: number = 50, numForklifts: number = 3, priorityMode: TaskPriorityMode = 'mixed') {
-        WorldGenerator.generate(this, theme, reservedZone, totalTasks, numForklifts, priorityMode);
+    public generate(theme: string, reservedZone?: ReservedZone, totalTasks: number = 50, numForklifts: number = 3, priorityMode: TaskPriorityMode = 'mixed', rackLevels?: number) {
+        WorldGenerator.generate(this, theme, reservedZone, totalTasks, numForklifts, priorityMode, rackLevels);
     }
 
   /**

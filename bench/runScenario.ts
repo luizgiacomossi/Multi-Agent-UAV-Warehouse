@@ -16,6 +16,8 @@ export interface RunRecord extends Partial<MissionMetrics> {
   chargingSites: number;
   /** Flight ceiling (highest cell y a drone may use). */
   maxAltitude: number;
+  /** Maximum pallets per rack column. */
+  rackLevels: number;
   /** % of capacity per tick; Infinity = instant. */
   chargeRate: number;
   drainMultiplier: number;
@@ -45,7 +47,7 @@ async function buildScenario(spec: ScenarioSpec, plan: BenchmarkPlan): Promise<S
   return withSeed(spec.seed, () => {
     const { gridSize, pallets, forklifts } = spec.scale;
     const manager = new SimulationManager(gridSize, spec.drones);
-    manager.generateWorld('Warehouse', gridSize, spec.chargingSites - 1, true, spec.drones, pallets, forklifts, 'mixed');
+    manager.generateWorld('Warehouse', gridSize, spec.chargingSites - 1, true, spec.drones, pallets, forklifts, 'mixed', spec.rackLevels);
     manager.initializeAgents(spec.drones, plan.batteryCapacity, true, gridSize);
     return manager;
   });
@@ -74,6 +76,7 @@ export async function runScenario(spec: ScenarioSpec, plan: BenchmarkPlan): Prom
       completionMode: spec.completionMode,
       chargingSites: spec.chargingSites,
       maxAltitude: spec.maxAltitude,
+      rackLevels: spec.rackLevels,
       chargeRate: plan.chargeRate,
       drainMultiplier: plan.drainMultiplier,
       repetition: spec.repetition,

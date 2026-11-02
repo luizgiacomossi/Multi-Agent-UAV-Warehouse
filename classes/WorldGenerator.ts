@@ -1,6 +1,6 @@
 import { World } from './World';
 import { GenerationTheme, Position3D, TaskPriorityMode } from '../types';
-import { WAREHOUSE, DEFAULT_MAX_ALTITUDE, MAX_TASKS } from '../SimulationConfig';
+import { WAREHOUSE, MAX_TASKS } from '../SimulationConfig';
 import { random } from '../utils/Random';
 import { palletContentsAt } from './PalletContents';
 
@@ -15,7 +15,7 @@ export class WorldGenerator {
     return priorityMode === 'uniform' ? 100 : Math.floor(random() * 91) + 10;
   }
 
-  static generate(world: World, theme: string, reservedZone?: ReservedZone, totalTasks: number = 50, numForklifts: number = 3, priorityMode: TaskPriorityMode = 'mixed') {
+  static generate(world: World, theme: string, reservedZone?: ReservedZone, totalTasks: number = 50, numForklifts: number = 3, priorityMode: TaskPriorityMode = 'mixed', rackLevels: number = WAREHOUSE.RACK_LEVELS) {
     world.clear();
 
     switch (theme) {
@@ -29,7 +29,7 @@ export class WorldGenerator {
         this.generateOpen(world, reservedZone);
         break;
       case 'Warehouse':
-        this.generateWarehouse(world, reservedZone, totalTasks, numForklifts, priorityMode);
+        this.generateWarehouse(world, reservedZone, totalTasks, numForklifts, priorityMode, rackLevels);
         break;
       default:
         this.generateRandom(world, reservedZone);
@@ -76,10 +76,10 @@ export class WorldGenerator {
       return Date.now().toString(36) + random().toString(36).substring(2, 10).padEnd(8, '0');
   }
 
-  private static generateWarehouse(world: World, reservedZone?: ReservedZone, totalTasks: number = 50, numForklifts: number = 3, priorityMode: TaskPriorityMode = 'mixed') {
+  private static generateWarehouse(world: World, reservedZone?: ReservedZone, totalTasks: number = 50, numForklifts: number = 3, priorityMode: TaskPriorityMode = 'mixed', rackLevels: number = WAREHOUSE.RACK_LEVELS) {
       const aisleWidth = WAREHOUSE.AISLE_WIDTH;
       const rackDepth  = WAREHOUSE.RACK_HEIGHT;  // depth of each rack cluster (voxels)
-      const maxRackHeight = Math.min(world.size - 2, DEFAULT_MAX_ALTITUDE);
+      const maxRackHeight = Math.min(world.size - 2, rackLevels);
 
       // Clear existing pallets just in case
       world.pallets = [];

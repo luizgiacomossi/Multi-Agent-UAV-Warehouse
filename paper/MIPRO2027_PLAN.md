@@ -85,21 +85,31 @@ Situação em 2/11: Introdução e Related Work juntos têm cerca de 900 palavra
 - [x] **Baselines de alocação** (essencial, revisor vai pedir): greedy por custo, tarefa mais próxima, aleatório. Opcional: leilão simples (sequential single-item auction). Feito: `--alloc Greedy,Nearest,Random`, todos com a mesma checagem de energia. A seed não depende mais do modo de alocação, então todos os métodos (e 1-para-1 vs Cluster) rodam no mesmo armazém, pareados.
 - [x] **Opção `--altitude` no benchmark** (hoje `runScenario` usa o tamanho do grid como teto). Necessária para o E4. Feito: `--altitude 8,16` roda os tetos na mesma rodada, pareados. Os paletes vão até y = 6 (S, M) e y = 7 (L), então teto 8 alcança todos.
 - [ ] Opcional: corredores de 1 célula ou outro jeito de aumentar a densidade de conflitos.
-- [ ] **Achado de 2/11 sobre o teto:** os drones já voam em y ≤ 7 sem teto (os paletes vão até y = 6 ou 7), então teto 8 não muda nada, e teto abaixo de 7 deixa paletes de fora. O teto não serve para aumentar a densidade no E4. Usar número de drones (8 a 32) ou corredores estreitos.
-- [ ] **Achado de 2/11 sobre os baselines (amostra pequena, 3 runs):** com ida e volta à base, todos os métodos dão quase o mesmo resultado (diferença menor que 1%), porque todo drone está na base quando recebe tarefa. Sem ida e volta (`--no-return`), Random fica cerca de 50% pior, mas Nearest voa de 3% a 12% menos que o Hungarian. Provável causa: o Hungarian divide o custo por π_k e atende primeiro os paletes urgentes. Métricas `meanScanTime` e `priorityScanTime` adicionadas (tempo médio da primeira leitura, simples e ponderado por π_k). Amostra de 5 runs, S/M, 4 e 8 drones, Cooperative, todos os paletes:
+- [x] **Achado de 2/11 sobre a altura dos racks:** o gerador sorteia cada pilha com 1 a `min(N − 2, DEFAULT_MAX_ALTITUDE = 8)` paletes, então os racks param em 8 níveis (y de 0 a 7) em qualquer grid. No L-24 sobram 16 camadas vazias. Em S-12 e M-16 o máximo saiu y = 6 porque o gerador só mantém 50 ou 90 paletes depois do sorteio. No paper, descrever o armazém como área N × N com racks de até 8 níveis, e não como N³. Opção `--rack-levels` adicionada (padrão 8, agora `WAREHOUSE.RACK_LEVELS`, separado do teto de voo da interface). Sensibilidade (2/11, 5 runs, 8 drones, todos os paletes, Cooperative e CBS):
+  - M-16 com 4, 8 e 12 níveis, L-24 com 4, 8 e 16. Com 4 níveis não cabem todos os paletes (56 em vez de 90, 154 em vez de 200), então a carga muda e o caso não é comparável.
+  - De 8 para 12 ou 16 níveis (mesmos paletes, mais altos): makespan e energia sobem cerca de 10% (M-16 1-para-1: makespan 474 → 513, energia 336 → 369; L-24: 1452 → 1590, 1093 → 1191).
+  - As conclusões não mudam. Cluster continua economizando cerca de 50% de energia (48% a 53%). CBS vs Cooperative fica abaixo de 0,3% em soma de custos, sem fallbacks. A estimativa de energia continua certa (razão 1,00 a 1,08). Zero colisões, baterias esgotadas e drones presos.
+  - Para o paper: manter 8 níveis e dizer em uma frase que 12 e 16 níveis só aumentam os números absolutos em cerca de 10%.
+- [x] **Achado de 2/11 sobre o teto:** os drones já voam em y ≤ 7 sem teto (os paletes vão até y = 6 ou 7), então teto 8 não muda nada, e teto abaixo de 7 deixa paletes de fora. O teto não serve para aumentar a densidade no E4. Usar número de drones (8 a 32) ou corredores estreitos.
+- [x] **Achado de 2/11 sobre os baselines (amostra pequena, 3 runs):** com ida e volta à base, todos os métodos dão quase o mesmo resultado (diferença menor que 1%), porque todo drone está na base quando recebe tarefa. Sem ida e volta (`--no-return`), Random fica cerca de 50% pior, mas Nearest voa de 3% a 12% menos que o Hungarian. Provável causa: o Hungarian divide o custo por π_k e atende primeiro os paletes urgentes. Métricas `meanScanTime` e `priorityScanTime` adicionadas (tempo médio da primeira leitura, simples e ponderado por π_k). Amostra de 5 runs, S/M, 4 e 8 drones, Cooperative, todos os paletes:
   - Com ida e volta: makespan e energia iguais entre os métodos (diferença de até 1%, mas Nearest chega a 6% pior em S-12 com 8 drones). Hungarian e Greedy leem os paletes urgentes de 16% a 24% antes da média. Nearest e Random não dão preferência (-3% a +2%). Os urgentes saem de 12% a 20% antes que com Nearest.
   - Sem ida e volta: Nearest voa de 0% a 14% menos e termina de 0% a 8% antes que o Hungarian. Hungarian ainda adianta os urgentes de 10% a 16%, mas o ganho no tempo ponderado em relação ao Nearest é pequeno ou nulo (melhor em S-12, pior em M-16 com 4 drones). Random fica de 45% a 60% pior em tudo.
   - Greedy fica a menos de 2% do Hungarian em todas as métricas. O ganho vem da função de custo (prioridade e bateria), não do solver ótimo.
+  - Por que Greedy ≈ Hungarian (medido em 3 runs, S/M, 4 e 8 drones). Os dois escolhem diferente em 25% a 60% das rodadas, mas por motivos diferentes isso não muda a missão:
+    - Com ida e volta, os drones recebem tarefa na base, em pads vizinhos, então as linhas da matriz de custo são quase iguais. O Hungarian economiza só 1 a 2% do custo da rodada (no máximo 7%).
+    - Sem ida e volta, o Hungarian economiza de 8% a 19% do custo da rodada (até 51%), mas a rodada seguinte reequilibra. Ótimo por rodada não é ótimo na missão.
+    - Com 1 a 4 drones ociosos por rodada, a matriz é pequena.
+    - Para o paper: a contribuição é a função de custo e a checagem de energia, não o solver ótimo. Planejamento que olhe várias rodadas à frente fica como trabalho futuro.
   - Para o paper: E1 com ida e volta mostra o efeito da prioridade com clareza. Dizer que o Hungarian ótimo e o greedy dão quase o mesmo resultado, e que sem ida e volta há um trade-off entre distância e prioridade.
 - [ ] Teste estatístico pareado no `bench/report.ts` (Wilcoxon signed-rank, já que os cenários são pareados por semente).
 - [ ] Script que gera as figuras a partir de `summary.csv` (matplotlib ou similar), salvo no repositório.
 
 ### 5.3 Experimentos (mínimo 10 repetições por célula, idealmente 20)
 
-- [ ] **E1. Alocação:** Hungarian vs greedy vs nearest vs random. S/M/L, 2/4/8 drones, cobertura total. Métricas: makespan, energia, soma de custos.
+- [ ] **E1. Alocação:** Hungarian vs greedy vs nearest vs random. S/M/L, 2/4/8 drones, cobertura total, com e sem ida e volta. Métricas: makespan, energia, soma de custos, `priorityScanTime` e `meanScanTime`.
 - [ ] **E2. Clusters:** 1-para-1 vs Cluster. Variar raio (3, 5, 7) e tamanho máximo (2, 3, 4, 6).
 - [ ] **E3. Recarga:** preset `charging` (1, 2, 3, 5 pontos de recarga). Métricas: makespan, energia, visitas e ticks nas estações.
-- [ ] **E4. Planejadores vs densidade:** Naive vs Cooperative vs Energy Saver vs CBS, 4 a 32 drones, teto de altitude alto vs baixo. Métricas: soma de custos, makespan, tempo de planejamento, nós do CBS, fallbacks, falhas. Teste preliminar de 2/11 (S-12, 3 repetições, teto alto): CBS ganha até 1,5% em soma de custos e é cerca de 1,5× mais lento, com zero fallbacks.
+- [ ] **E4. Planejadores vs densidade:** Naive vs Cooperative vs Energy Saver vs CBS, 4 a 32 drones (o teto não aumenta a densidade, ver achado acima). Métricas: soma de custos, makespan, tempo de planejamento, nós do CBS, fallbacks, falhas. Teste preliminar de 2/11 (S-12, 3 repetições, teto alto): CBS ganha até 1,5% em soma de custos e é cerca de 1,5× mais lento, com zero fallbacks.
 - [ ] **E5 (opcional). Escalabilidade:** tempo de planejamento vs número de drones e de paletes.
 - [ ] Confirmar zero colisões e zero baterias esgotadas em todos os cenários seguros. Se alguma aparecer, investigar antes de escrever.
 
@@ -141,6 +151,8 @@ Cada `\todo` vermelho no texto tem um item aqui. Tirar o `\todo` do texto e marc
 - [x] Formulação (tarefas): o scan não ocupava passos no caminho. Resolvido no código (3 passos), e o texto diz isso.
 - [ ] Método (recarga): "sem fila no ar" só vale se o trecho até a estação der certo. Se falhar, o drone paira e tenta de novo. Contar quantas vezes isso acontece nos benchmarks. Mesmo item da seção 2.
 - [x] Método (custo): o texto diz D_max = 2N. Resolvido, o código agora define `dMaxFor(N) = 2N`.
+- [ ] Setup: a frase dos racks ("With 12 or 16 levels, makespan and energy grow by about 10%") vem da amostra de 5 runs de 2/11. Confirmar o número na rodada final.
+- [ ] Resultados (E1): o `\todo` diz que o Greedy ficou a menos de 2% do Hungarian e que o ganho vem da função de custo. Confirmar na rodada final antes de escrever.
 - [ ] Seções V a VIII: ainda são só `\todo`.
 
 ### Regras de estilo (sempre)
