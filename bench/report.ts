@@ -21,6 +21,8 @@ export const SUMMARY_METRICS = [
   'distance',
   'legEnergyRatio',
   'legsAboveGamma',
+  'meanScanTime',
+  'priorityScanTime',
   'stationVisits',
   'stationTicks',
   'cbsNodesExpanded',
@@ -29,7 +31,7 @@ export const SUMMARY_METRICS = [
 
 type SummaryMetric = typeof SUMMARY_METRICS[number];
 
-const GROUP_KEYS = ['scale', 'gridSize', 'pallets', 'forklifts', 'drones', 'allocationMode', 'completionMode', 'chargingSites', 'chargeRate', 'drainMultiplier', 'algorithm'] as const;
+const GROUP_KEYS = ['scale', 'gridSize', 'pallets', 'forklifts', 'drones', 'allocationMode', 'completionMode', 'chargingSites', 'maxAltitude', 'chargeRate', 'drainMultiplier', 'algorithm'] as const;
 
 /** Aggregated statistics of one algorithm on one scenario configuration (across repetitions). */
 export interface GroupSummary {
@@ -66,6 +68,7 @@ export function summarizeRecords(records: RunRecord[]): GroupSummary[] {
         allocationMode: first.allocationMode,
         completionMode: first.completionMode,
         chargingSites: first.chargingSites,
+        maxAltitude: first.maxAltitude,
         chargeRate: first.chargeRate,
         drainMultiplier: first.drainMultiplier,
         algorithm: first.algorithm,
@@ -90,7 +93,7 @@ function toCsv(header: string[], rows: (string | number | boolean | undefined)[]
 
 const RUN_COLUMNS: (keyof RunRecord)[] = [
   'scale', 'gridSize', 'pallets', 'forklifts', 'drones', 'allocationMode', 'completionMode',
-  'chargingSites', 'chargeRate', 'drainMultiplier', 'repetition', 'seed', 'algorithm', 'ok', 'error', ...SUMMARY_METRICS,
+  'chargingSites', 'maxAltitude', 'chargeRate', 'drainMultiplier', 'repetition', 'seed', 'algorithm', 'ok', 'error', ...SUMMARY_METRICS,
 ];
 const STAT_FIELDS: (keyof Summary)[] = ['mean', 'std', 'ci95', 'median', 'min', 'max'];
 
@@ -135,7 +138,7 @@ export function printSummary(summaries: GroupSummary[]): void {
   const byConfig = new Map<string, GroupSummary[]>();
   for (const s of summaries) {
     const g = s.group;
-    const key = `${g.scale} (${g.gridSize}³, ~${g.pallets} pallets, ${g.forklifts} forklifts) · ${g.drones} drones · ${g.allocationMode} · ${g.completionMode} · ${g.chargingSites === 1 ? 'base only' : `base + ${g.chargingSites - 1} station(s)`} · charge ${Number.isFinite(g.chargeRate) ? `${g.chargeRate}%/tick` : 'instant'}${g.drainMultiplier !== 1 ? ` · drain ×${g.drainMultiplier}` : ''}`;
+    const key = `${g.scale} (${g.gridSize}³, ~${g.pallets} pallets, ${g.forklifts} forklifts) · ${g.drones} drones · ${g.allocationMode} · ${g.completionMode} · ${g.chargingSites === 1 ? 'base only' : `base + ${g.chargingSites - 1} station(s)`} · charge ${Number.isFinite(g.chargeRate) ? `${g.chargeRate}%/tick` : 'instant'}${g.maxAltitude < g.gridSize ? ` · ceiling y ≤ ${g.maxAltitude}` : ''}${g.drainMultiplier !== 1 ? ` · drain ×${g.drainMultiplier}` : ''}`;
     if (!byConfig.has(key)) byConfig.set(key, []);
     byConfig.get(key)!.push(s);
   }

@@ -1,4 +1,4 @@
-import { Agent, SimulationIncident, MATH_CONSTANTS, Position3D } from '../types';
+import { Agent, SimulationIncident, MATH_CONSTANTS, Position3D, Pallet } from '../types';
 import { SCAN_TICKS } from '../SimulationConfig';
 
 /** Outcome metrics of one planned mission, independent of how it was produced. */
@@ -34,6 +34,33 @@ export interface MissionMetrics {
   legEnergyRatio: number;
   /** Share of scan legs whose ratio exceeds γ, i.e. legs the allocation underestimated. */
   legsAboveGamma: number;
+  /** Mean tick at which a pallet is first scanned, over the scanned pallets. */
+  meanScanTime: number;
+  /**
+   * Priority-weighted mean scan tick, sum of π_k t_k over sum of π_k (π_k = weight / 100), over the
+   * scanned pallets. Below meanScanTime when urgent pallets are scanned earlier than the others.
+   */
+  priorityScanTime: number;
+}
+
+/** Mean and priority-weighted mean of the tick at which each pallet is first scanned. */
+export function scanTimes(agents: Agent[], pallets: Pallet[]): { mean: number; weighted: number } {
+  const firstScan = new Map<string, number>();
+  for (const agent of agents) {
+    for (const { palletId, tick } of agent.scanLog ?? []) {
+      if (!firstScan.has(palletId) || tick < firstScan.get(palletId)!) firstScan.set(palletId, tick);
+    }
+  }
+  if (firstScan.size === 0) return { mean: 0, weighted: 0 };
+  const priority = new Map(pallets.map(p => [p.id, p.weight / 100]));
+  let sum = 0, weightedSum = 0, weights = 0;
+  for (const [palletId, tick] of firstScan) {
+    const pi = priority.get(palletId) ?? 1;
+    sum += tick;
+    weightedSum += pi * tick;
+    weights += pi;
+  }
+  return { mean: sum / firstScan.size, weighted: weightedSum / weights };
 }
 
 /**
@@ -75,7 +102,8 @@ export function computeMissionMetrics(
   incidents: SimulationIncident[],
   makespan: number,
   palletCount: number,
-  chargeStations: Position3D[] = []
+  chargeStations: Position3D[] = [],
+  pallets: Pallet[] = []
 ): MissionMetrics {
   const stationCells = new Set(chargeStations.map(s => `${s.x},${s.y},${s.z}`));
   let stationVisits = 0;
@@ -86,6 +114,7 @@ export function computeMissionMetrics(
   );
   const scanned = new Set(agents.flatMap(a => (a.scanLog ?? []).map(entry => entry.palletId)));
   const legRatios = agents.flatMap(a => scanLegEnergyRatios(a, stationCells));
+  const times = scanTimes(agents, pallets);
 
   let sumOfCosts = 0;
   let energyConsumed = 0;
@@ -125,6 +154,8 @@ export function computeMissionMetrics(
     stationVisits,
     legEnergyRatio: legRatios.length > 0 ? legRatios.reduce((a, b) => a + b, 0) / legRatios.length : 0,
     legsAboveGamma: legRatios.length > 0 ? legRatios.filter(r => r > MATH_CONSTANTS.GAMMA).length / legRatios.length : 0,
+    meanScanTime: times.mean,
+    priorityScanTime: times.weighted,
     stationTicks,
   };
 }

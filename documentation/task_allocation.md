@@ -83,6 +83,14 @@ C_{ik} = \frac{w_1 c_{dist}(i,k) + w_2 c_{batt}(i)}{\max(0.01, \pi_k)}.
 
 This is implemented by `calculate_C_ik(...)`.
 
+## 3.4 Allocation Baselines
+
+For comparison, the one-to-one mode can replace the Hungarian matching with a baseline (`CostModel.executeOneToOneAllocation`, `allocationMode` = `Greedy`, `Nearest` or `Random`). All of them use the same cost matrix entries for feasibility, so no drone receives a task that fails Eq. 14, and they differ only in how pairs are chosen:
+
+- `Greedy` repeatedly takes the cheapest remaining (drone, task) pair by \(C_{ik}\);
+- `Nearest` lets the idle drones, in fleet order, each take the nearest remaining feasible task by grid distance (ignoring battery and priority);
+- `Random` lets them, in fleet order, each take a uniformly random remaining feasible task (seeded random source).
+
 ## 4. Cluster Allocation
 
 Cluster allocation uses the same Hungarian structure but replaces a single task with a `TaskCluster`.

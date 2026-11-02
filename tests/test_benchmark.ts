@@ -4,7 +4,8 @@ import { expandScenarios, PRESETS } from '../bench/scenarios';
 import { runScenario } from '../bench/runScenario';
 import { MissionController } from '../classes/MissionController';
 import { TaskCluster } from '../classes/TaskCluster';
-import { Task } from '../types';
+import { Task, Pallet } from '../types';
+import { scanTimes } from '../bench/metrics';
 import { Drone } from '../classes/Drone';
 import { describeDroneActivity } from '../classes/DroneActivity';
 
@@ -127,6 +128,25 @@ export async function runBenchmarkTests(): Promise<{ passed: number; failed: num
   assert(first.every(r => r.ok), 'Every strategy completes the scenario', first.map(r => r.error).join('; '));
   assert(strip(first) === strip(second), 'Same scenario seed reproduces identical mission metrics');
   assert(first[1].cbsFallbacks !== undefined && first[0].cbsFallbacks === undefined, 'CBS-only counters are reported for CBS only');
+
+  // Scan times: an urgent pallet scanned first pulls the weighted mean below the plain mean
+  const timed = new Drone('TIMED', 'TIMED', '#ffffff');
+  timed.scanLog = [{ tick: 10, palletId: 'URGENT' }, { tick: 30, palletId: 'LOW' }, { tick: 50, palletId: 'URGENT' }];
+  const timedPallets = [
+    { id: 'URGENT', position: { x: 0, y: 0, z: 0 }, weight: 90, payload_type: 'camera', contents: { part: 'BRK', quantity: 1 } },
+    { id: 'LOW', position: { x: 1, y: 0, z: 0 }, weight: 10, payload_type: 'camera', contents: { part: 'BRK', quantity: 1 } },
+  ] as Pallet[];
+  const times = scanTimes([timed], timedPallets);
+  assert(times.mean === 20 && Math.abs(times.weighted - 12) < 1e-9, 'Scan times count first scans, weighted by priority (mean 20, weighted 12)', JSON.stringify(times));
+
+  // Allocation methods and ceilings share the warehouse of a repetition, so they are compared paired
+  const paired = expandScenarios({ ...PRESETS.quick, droneCounts: [2], repetitions: 2, allocationModes: ['1-to-1', 'Greedy', 'Cluster'], maxAltitudes: [6, 12] });
+  const seedsOf = (rep: number) => new Set(paired.filter(s => s.repetition === rep).map(s => s.seed));
+  assert(paired.length === 12 && seedsOf(0).size === 1 && seedsOf(1).size === 1 && [...seedsOf(0)][0] !== [...seedsOf(1)][0],
+    'Every allocation method and ceiling of a repetition gets the same seed, repetitions get distinct seeds');
+  const lowCeiling = paired.find(s => s.allocationMode === 'Greedy' && s.maxAltitude === 6)!;
+  const [greedyRun] = await runScenario(lowCeiling, { ...plan, algorithms: ['Cooperative'] });
+  assert(greedyRun.ok && greedyRun.maxAltitude === 6 && greedyRun.collisionsDroneDrone === 0, 'A Greedy run under a low ceiling completes without collisions', greedyRun.error);
 
   return { passed, failed };
 }

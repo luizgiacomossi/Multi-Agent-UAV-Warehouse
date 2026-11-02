@@ -8,6 +8,13 @@ export interface Position3D {
 export type MissionState = 'IDLE' | 'OUTBOUND' | 'EXECUTING_TOUR' | 'RETURNING' | 'RECHARGING' | 'COMPLETED';
 export type MissionCompletionMode = 'count' | 'all-pallets';
 
+/**
+ * How idle drones are matched to pallets. '1-to-1' is the Hungarian assignment over C_ik, and
+ * 'Cluster' assigns pallet clusters with it. 'Greedy', 'Nearest' and 'Random' are one-to-one
+ * baselines that keep the same energy feasibility check (Eq. 14).
+ */
+export type AllocationMode = '1-to-1' | 'Cluster' | 'Greedy' | 'Nearest' | 'Random';
+
 export interface Agent {
   id: string;
   name: string;

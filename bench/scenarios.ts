@@ -1,7 +1,7 @@
-import { MissionCompletionMode } from '../types';
+import { MissionCompletionMode, AllocationMode } from '../types';
 import { INSTANT_CHARGE_RATE } from '../SimulationConfig';
 
-export type AllocationMode = '1-to-1' | 'Cluster';
+export type { AllocationMode };
 
 /** A warehouse size together with the workload that scales with it. */
 export interface WarehouseScale {
@@ -21,6 +21,12 @@ export interface BenchmarkPlan {
   completionModes: MissionCompletionMode[];
   /** Charging sites counting the base (1 = base only; each extra site is a one-drone station). */
   chargingSites: number[];
+  /**
+   * Flight ceilings (highest cell y a drone may use). Empty = the grid size, i.e. no ceiling. A low
+   * ceiling packs the drones into fewer layers (more conflicts). Below the top shelf, the pallets
+   * above it cannot be reached.
+   */
+  maxAltitudes: number[];
   repetitions: number;
   baseSeed: number;
   missionsPerDrone: number;
@@ -42,6 +48,7 @@ export interface ScenarioSpec {
   allocationMode: AllocationMode;
   completionMode: MissionCompletionMode;
   chargingSites: number;
+  maxAltitude: number;
   repetition: number;
   seed: number;
 }
@@ -61,6 +68,7 @@ const BASE_PLAN: Omit<BenchmarkPlan, 'name'> = {
   allocationModes: ['1-to-1'],
   completionModes: ['count'],
   chargingSites: [1],
+  maxAltitudes: [],
   repetitions: 5,
   baseSeed: 1,
   missionsPerDrone: 3,
@@ -126,11 +134,13 @@ export function expandScenarios(plan: BenchmarkPlan): ScenarioSpec[] {
       for (const allocationMode of plan.allocationModes) {
         for (const completionMode of plan.completionModes) {
           for (const chargingSites of plan.chargingSites) {
+            for (const maxAltitude of plan.maxAltitudes.length > 0 ? plan.maxAltitudes : [scale.gridSize]) {
             for (let repetition = 0; repetition < plan.repetitions; repetition++) {
-              // The site count is left out of the seed: station placement is deterministic, so every
-              // site count gets the same warehouse and the comparison is paired.
-              const seed = scenarioSeed(plan.baseSeed, scale.gridSize, drones, allocationMode, completionMode, repetition);
-              scenarios.push({ scale, drones, allocationMode, completionMode, chargingSites, repetition, seed });
+              // The allocation mode, site count and ceiling are left out of the seed: each of them gets the
+              // same warehouse, so their comparisons are paired.
+              const seed = scenarioSeed(plan.baseSeed, scale.gridSize, drones, completionMode, repetition);
+              scenarios.push({ scale, drones, allocationMode, completionMode, chargingSites, maxAltitude, repetition, seed });
+            }
             }
           }
         }

@@ -3,6 +3,7 @@ import { TaskCluster } from '../classes/TaskCluster';
 import { Drone } from '../classes/Drone';
 import { Agent, Task, Position3D, Pallet } from '../types';
 import { MATH_CONSTANTS } from '../SimulationConfig';
+import { createSeededRandom, setRandomSource, resetRandomSource } from '../utils/Random';
 import { BUS_PARTS, palletContentsAt, totalsByPart } from '../classes/PalletContents';
 import { buildInventoryReport, describeInventory } from '../classes/InventoryReport';
 import { SimulationToolRegistry, SimulationContext } from '../services/slm/SimulationToolRegistry';
@@ -146,6 +147,41 @@ export async function runAllocationTests(): Promise<{ passed: number; failed: nu
   };
   const rfidAssignments = CostModel.executeOptimalAllocation([droneA], [rfidTask], pBase, dMax);
   assert(rfidAssignments.length === 0, 'Camera-only drone rejected from RFID task (Feasibility Screening)');
+
+  // Allocation baselines. On a line, A at x=0 and B at x=4, with pallets at x=3 and x=8: the
+  // cheapest single pair is B->3, so Greedy is left with A->8 (11 cells in total), while the
+  // Hungarian assignment takes A->3 and B->8 (7 cells).
+  const lineDrone = (id: string, x: number) => {
+    const d = new Drone(id, id, '#ffffff');
+    d.start = { x, y: 2, z: 0 };
+    d.battery = 90;
+    d.payload = ['camera'];
+    return d;
+  };
+  const lineTask = (id: string, x: number): Task => ({ id, target: { x, y: 2, z: 0 }, req_payload: 'camera', pi_k: 0.5, t_hover: 3, status: 'PENDING' });
+  const lineDrones = [lineDrone('LA', 0), lineDrone('LB', 4)];
+  const lineTasks = [lineTask('L3', 3), lineTask('L8', 8)];
+  const pick = (method: Parameters<typeof CostModel.executeOneToOneAllocation>[0]) =>
+    Object.fromEntries(CostModel.executeOneToOneAllocation(method, lineDrones, lineTasks, pBase, dMax).map(a => [a.drone.id, a.task.id]));
+  const hungarian = pick('1-to-1');
+  assert(hungarian.LA === 'L3' && hungarian.LB === 'L8', 'Hungarian: minimum total cost (A->3, B->8)', JSON.stringify(hungarian));
+  const greedy = pick('Greedy');
+  assert(greedy.LB === 'L3' && greedy.LA === 'L8', 'Greedy: takes the cheapest pair first (B->3), then A->8', JSON.stringify(greedy));
+  const nearest = pick('Nearest');
+  assert(nearest.LA === 'L3' && nearest.LB === 'L8', 'Nearest: first drone takes its nearest pallet, the next one what is left', JSON.stringify(nearest));
+  const seededPick = () => {
+    setRandomSource(createSeededRandom(7));
+    try { return pick('Random'); } finally { resetRandomSource(); }
+  };
+  const randomPick = seededPick();
+  assert(Object.keys(randomPick).length === 2 && randomPick.LA !== randomPick.LB, 'Random: each drone gets a distinct task', JSON.stringify(randomPick));
+  assert(JSON.stringify(randomPick) === JSON.stringify(seededPick()), 'Random: same seed, same assignment');
+  for (const method of ['Greedy', 'Nearest', 'Random'] as const) {
+    assert(CostModel.executeOneToOneAllocation(method, [droneA], [rfidTask], pBase, dMax).length === 0, `${method}: keeps the payload feasibility check`);
+    const emptyDrone = lineDrone('LOW', 0);
+    emptyDrone.battery = 5;
+    assert(CostModel.executeOneToOneAllocation(method, [emptyDrone], lineTasks, pBase, dMax).length === 0, `${method}: keeps the energy feasibility check`);
+  }
 
   // ─────────────────────────────────────────────────────────────
   // 3. Clustered Task Allocation & mTSP Tour

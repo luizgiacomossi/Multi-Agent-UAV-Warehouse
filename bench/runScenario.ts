@@ -14,6 +14,8 @@ export interface RunRecord extends Partial<MissionMetrics> {
   allocationMode: string;
   completionMode: string;
   chargingSites: number;
+  /** Flight ceiling (highest cell y a drone may use). */
+  maxAltitude: number;
   /** % of capacity per tick; Infinity = instant. */
   chargeRate: number;
   drainMultiplier: number;
@@ -71,6 +73,7 @@ export async function runScenario(spec: ScenarioSpec, plan: BenchmarkPlan): Prom
       allocationMode: spec.allocationMode,
       completionMode: spec.completionMode,
       chargingSites: spec.chargingSites,
+      maxAltitude: spec.maxAltitude,
       chargeRate: plan.chargeRate,
       drainMultiplier: plan.drainMultiplier,
       repetition: spec.repetition,
@@ -86,7 +89,7 @@ export async function runScenario(spec: ScenarioSpec, plan: BenchmarkPlan): Prom
         algorithm,
         plan.roundTrip,
         plan.missionsPerDrone,
-        spec.scale.gridSize,
+        spec.maxAltitude,
         plan.batteryEnabled,
         spec.allocationMode,
         plan.clusterRadius,
@@ -99,7 +102,7 @@ export async function runScenario(spec: ScenarioSpec, plan: BenchmarkPlan): Prom
         ...base,
         ok: true,
         planningMs: performance.now() - started,
-        ...computeMissionMetrics(result.agents, result.incidents, result.maxTicks, manager.world.pallets.length, manager.world.chargeStations),
+        ...computeMissionMetrics(result.agents, result.incidents, result.maxTicks, manager.world.pallets.length, manager.world.chargeStations, manager.world.pallets),
         ...(cbs ? { cbsNodesExpanded: cbs.getStats().nodesExpanded, cbsFallbacks: cbs.getStats().fallbacks } : {}),
       });
     } catch (e: any) {

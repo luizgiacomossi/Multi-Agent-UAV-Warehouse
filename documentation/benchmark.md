@@ -21,10 +21,11 @@ npm run bench -- --help
 | `--algos` | comma-separated strategy names |
 | `--grids` | grid sizes to include: `12`, `16`, `24` |
 | `--drones` | swarm sizes |
-| `--alloc` | `1-to-1`, `Cluster` |
+| `--alloc` | `1-to-1` (Hungarian), `Cluster`, or the one-to-one baselines `Greedy` (cheapest pair first by \(C_{ik}\)), `Nearest` (each drone takes its nearest feasible pallet, in fleet order) and `Random` (a random feasible pallet). The baselines keep the energy feasibility check |
 | `--completion` | `count` (fixed missions per drone), `all-pallets` (full coverage) |
 | `--missions` | missions per drone in `count` mode |
 | `--sites` | charging sites including the base (1 = base only; each extra site is a one-drone station) |
+| `--altitude` | flight ceilings, the highest cell y a drone may use (default: the grid size). Pallets sit at y ≤ 6 (S-12, M-16) and y ≤ 7 (L-24), so a ceiling of 8 still reaches every pallet while packing the drones into fewer layers |
 | `--charge-rate` | charging speed in % of capacity per tick, or `instant` |
 | `--battery` | battery capacity per drone |
 | `--drain` | battery drain multiplier (scales `β_fly` and `β_hover`; 1 = nominal) |
@@ -77,7 +78,7 @@ With `--drain 3` the same 240 runs plan in about 40 s in total (at most 0.5 s pe
 
 All randomness in the simulation core goes through [`utils/Random.ts`](../utils/Random.ts). The app uses `Math.random`. The benchmark installs a seeded Mulberry32 generator.
 
-- **Scenario seed.** Each scenario's seed is a hash of the base seed and the scenario coordinates (scale, drones, allocation, completion, repetition). A scenario therefore keeps its seed when other dimensions are added or removed.
+- **Scenario seed.** Each scenario's seed is a hash of the base seed and the scenario coordinates (scale, drones, completion, repetition). A scenario therefore keeps its seed when other dimensions are added or removed. The allocation method, the number of charging sites and the flight ceiling are left out, so all of them run on the same warehouse and their comparisons are paired.
 - **Same scenario for every strategy.** The world and swarm are built once per scenario. Every strategy is then run on that same scenario, with the random source re-seeded before each run, so in-run randomness (e.g. cluster seeding) is identical too.
 - **What is reproducible.** Every mission metric is bit-for-bit reproducible for a given seed; this is covered by the tests. Planning time depends on the machine.
 
@@ -103,6 +104,8 @@ Each row of `runs.csv` is one strategy on one scenario. Besides the scenario coo
 | `stationVisits` | charging sessions at charging stations |
 | `stationTicks` | ticks drones spent waiting on charging stations |
 | `legEnergyRatio` | battery used on the leg into each scan (from the previous scan or the last wait on a charger) over β_fly times the leg's grid (Manhattan) distance, averaged over scans. The allocation's estimate assumes γ (1.1) |
+| `meanScanTime` | mean tick at which a pallet is first scanned, over the scanned pallets |
+| `priorityScanTime` | the same, weighted by priority: \(\sum \pi_k t_k / \sum \pi_k\). Below `meanScanTime` when urgent pallets are scanned earlier |
 | `legsAboveGamma` | share of those legs whose ratio exceeds γ, i.e. legs the allocation's estimate underestimated |
 | `cbsNodesExpanded`, `cbsFallbacks` | CBS only: constraint-tree nodes expanded, and legs handed to the fallback planner |
 

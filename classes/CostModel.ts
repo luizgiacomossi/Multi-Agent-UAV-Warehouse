@@ -1,4 +1,5 @@
-import { Agent, Task, MATH_CONSTANTS, Position3D } from '../types';
+import { Agent, Task, MATH_CONSTANTS, Position3D, AllocationMode } from '../types';
+import { random } from '../utils/Random';
 import { TaskCluster } from './TaskCluster';
 import Munkres from 'munkres-js';
 
@@ -222,6 +223,53 @@ export class CostModel {
       return assignments;
   }
   
+  /**
+   * One-to-one assignment by the given method. All methods use the same feasibility (Eq. 14), so a
+   * drone never receives a task it cannot afford, and they differ only in how pairs are chosen:
+   * - '1-to-1': Hungarian algorithm, minimum total C_ik;
+   * - 'Greedy': repeatedly the cheapest remaining pair by C_ik;
+   * - 'Nearest': drones in fleet order each take the nearest remaining feasible task (grid distance);
+   * - 'Random': drones in fleet order each take a random remaining feasible task.
+   */
+  static executeOneToOneAllocation(method: AllocationMode, drones: Agent[], tasks: Task[], p_base: Position3D, D_max: number, chargingStations: Position3D[] = []): { drone: Agent, task: Task, cost: number }[] {
+      if (method === '1-to-1' || method === 'Cluster') return this.executeOptimalAllocation(drones, tasks, p_base, D_max, chargingStations);
+      const matrix = this.buildCostMatrix(drones, tasks, p_base, D_max, chargingStations);
+      const feasible = (r: number, c: number) => matrix[r][c] < 1e8;
+      const takenTasks = new Set<number>();
+      const assignments: { drone: Agent, task: Task, cost: number }[] = [];
+      const assign = (r: number, c: number) => {
+          takenTasks.add(c);
+          assignments.push({ drone: drones[r], task: tasks[c], cost: matrix[r][c] });
+      };
+
+      if (method === 'Greedy') {
+          const pairs: [number, number][] = [];
+          drones.forEach((_, r) => tasks.forEach((_, c) => { if (feasible(r, c)) pairs.push([r, c]); }));
+          pairs.sort((a, b) => matrix[a[0]][a[1]] - matrix[b[0]][b[1]]);
+          const takenDrones = new Set<number>();
+          for (const [r, c] of pairs) {
+              if (takenDrones.has(r) || takenTasks.has(c)) continue;
+              takenDrones.add(r);
+              assign(r, c);
+          }
+          return assignments;
+      }
+
+      drones.forEach((drone, r) => {
+          const options = tasks.map((_, c) => c).filter(c => !takenTasks.has(c) && feasible(r, c));
+          if (options.length === 0) return;
+          if (method === 'Random') {
+              assign(r, options[Math.floor(random() * options.length)]);
+              return;
+          }
+          const from = this.getDroneCurrentPosition(drone);
+          const nearest = options.reduce((best, c) =>
+              this.distanceManhattan(from, tasks[c].target) < this.distanceManhattan(from, tasks[best].target) ? c : best);
+          assign(r, nearest);
+      });
+      return assignments;
+  }
+
   /**
    * Executed Linear Assignment for K-D Clusters using Munkres (Hungarian)
    */

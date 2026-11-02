@@ -28,10 +28,11 @@ const HELP = `Usage: npm run bench -- [options]
   --algos <a,b>       strategies, e.g. Naive,Cooperative,"Energy Saver",CBS
   --grids <n,n>       grid sizes, from: ${Object.values(SCALES).map(s => s.gridSize).join(', ')}
   --drones <n,n>      swarm sizes
-  --alloc <m,m>       1-to-1 | Cluster
+  --alloc <m,m>       1-to-1 (Hungarian) | Cluster | Greedy | Nearest | Random
   --completion <m,m>  count | all-pallets
   --missions <n>      missions per drone (count mode)
   --sites <n,n>       charging sites incl. the base (1 = base only; extra sites are one-drone stations)
+  --altitude <n,n>    flight ceilings, highest cell y a drone may use (default: the grid size)
   --charge-rate <r>   charging speed in % of capacity per tick, or "instant"
   --battery <n>       battery capacity per drone
   --drain <x>         battery drain multiplier (1 = nominal β_fly / β_hover)
@@ -62,6 +63,7 @@ function parseArgs(argv: string[]): CliOptions {
       case '--alloc': options.overrides.allocationModes = list(needValue()) as AllocationMode[]; break;
       case '--completion': options.overrides.completionModes = list(needValue()) as MissionCompletionMode[]; break;
       case '--sites': options.overrides.chargingSites = numbers(needValue()); break;
+      case '--altitude': options.overrides.maxAltitudes = numbers(needValue()); break;
       case '--charge-rate': {
         const rate = needValue();
         options.overrides.chargeRate = rate === 'instant' ? Infinity : Number(rate);

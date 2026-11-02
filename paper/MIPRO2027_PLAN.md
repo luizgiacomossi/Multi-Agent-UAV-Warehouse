@@ -77,14 +77,20 @@ Situação em 2/11: Introdução e Related Work juntos têm cerca de 900 palavra
 - [x] `D_MAX` não é usado. O código usa `world.size * 2`. Alinhar código e texto. Agora é `dMaxFor(N) = 2N` no `SimulationConfig.ts`, igual ao paper. Os números não mudam.
 - [x] Prioridade em modo `mixed` vai só de 0,10 a 0,59. Decidir se fica assim e descrever. Ampliada para 0,10 a 1,00 (decisão de 2/11). Muda os números.
 - [x] `t_hover = 5` só entra na estimativa de energia, e o scan não ocupa ticks no caminho. Corrigir ou declarar no texto. Corrigido: o drone paira `SCAN_TICKS` = 3 passos no palete, reservados na tabela, e o CBS segura o objetivo durante a leitura (decisão de 2/11). Muda os números.
-- [ ] Decidir sobre Naive e Energy Saver: entram nos experimentos ou saem do paper?
+- [x] Decidir sobre Naive e Energy Saver: entram nos experimentos ou saem do paper? Decisão de 2/11: Naive entra como baseline sem coordenação (mostra que sem o método os drones colidem). Energy Saver entra no E4. Ele só muda o custo do A* (energia, esperar custa metade de voar) e hoje gasta o mesmo que o Cooperative (diferença média de 0,03%, idêntico em 59 de 108 missões), porque quase não há conflitos. O E4 mostra se isso muda com densidade alta. Na discussão: a economia de energia vem da alocação e dos clusters (cerca de 52% menos energia), não do caminho. Ressalva: β_hover = β_fly/2 é suposição do modelo, e em multirotores reais pairar gasta perto de voar devagar. Precisa de referência (o Luiz busca: "multirotor hover power consumption model", "quadrotor energy model forward flight vs hover").
 - [ ] Não usar os experimentos "Exp 2 Monte Carlo" e "Exp 3 fault" da UI. O de falha é um stub.
 
 ### 5.2 Funcionalidades novas
 
-- [ ] **Baselines de alocação** (essencial, revisor vai pedir): greedy por custo, tarefa mais próxima, aleatório. Opcional: leilão simples (sequential single-item auction).
-- [ ] **Opção `--altitude` no benchmark** (hoje `runScenario` usa o tamanho do grid como teto). Necessária para o E4.
+- [x] **Baselines de alocação** (essencial, revisor vai pedir): greedy por custo, tarefa mais próxima, aleatório. Opcional: leilão simples (sequential single-item auction). Feito: `--alloc Greedy,Nearest,Random`, todos com a mesma checagem de energia. A seed não depende mais do modo de alocação, então todos os métodos (e 1-para-1 vs Cluster) rodam no mesmo armazém, pareados.
+- [x] **Opção `--altitude` no benchmark** (hoje `runScenario` usa o tamanho do grid como teto). Necessária para o E4. Feito: `--altitude 8,16` roda os tetos na mesma rodada, pareados. Os paletes vão até y = 6 (S, M) e y = 7 (L), então teto 8 alcança todos.
 - [ ] Opcional: corredores de 1 célula ou outro jeito de aumentar a densidade de conflitos.
+- [ ] **Achado de 2/11 sobre o teto:** os drones já voam em y ≤ 7 sem teto (os paletes vão até y = 6 ou 7), então teto 8 não muda nada, e teto abaixo de 7 deixa paletes de fora. O teto não serve para aumentar a densidade no E4. Usar número de drones (8 a 32) ou corredores estreitos.
+- [ ] **Achado de 2/11 sobre os baselines (amostra pequena, 3 runs):** com ida e volta à base, todos os métodos dão quase o mesmo resultado (diferença menor que 1%), porque todo drone está na base quando recebe tarefa. Sem ida e volta (`--no-return`), Random fica cerca de 50% pior, mas Nearest voa de 3% a 12% menos que o Hungarian. Provável causa: o Hungarian divide o custo por π_k e atende primeiro os paletes urgentes. Métricas `meanScanTime` e `priorityScanTime` adicionadas (tempo médio da primeira leitura, simples e ponderado por π_k). Amostra de 5 runs, S/M, 4 e 8 drones, Cooperative, todos os paletes:
+  - Com ida e volta: makespan e energia iguais entre os métodos (diferença de até 1%, mas Nearest chega a 6% pior em S-12 com 8 drones). Hungarian e Greedy leem os paletes urgentes de 16% a 24% antes da média. Nearest e Random não dão preferência (-3% a +2%). Os urgentes saem de 12% a 20% antes que com Nearest.
+  - Sem ida e volta: Nearest voa de 0% a 14% menos e termina de 0% a 8% antes que o Hungarian. Hungarian ainda adianta os urgentes de 10% a 16%, mas o ganho no tempo ponderado em relação ao Nearest é pequeno ou nulo (melhor em S-12, pior em M-16 com 4 drones). Random fica de 45% a 60% pior em tudo.
+  - Greedy fica a menos de 2% do Hungarian em todas as métricas. O ganho vem da função de custo (prioridade e bateria), não do solver ótimo.
+  - Para o paper: E1 com ida e volta mostra o efeito da prioridade com clareza. Dizer que o Hungarian ótimo e o greedy dão quase o mesmo resultado, e que sem ida e volta há um trade-off entre distância e prioridade.
 - [ ] Teste estatístico pareado no `bench/report.ts` (Wilcoxon signed-rank, já que os cenários são pareados por semente).
 - [ ] Script que gera as figuras a partir de `summary.csv` (matplotlib ou similar), salvo no repositório.
 
@@ -93,7 +99,7 @@ Situação em 2/11: Introdução e Related Work juntos têm cerca de 900 palavra
 - [ ] **E1. Alocação:** Hungarian vs greedy vs nearest vs random. S/M/L, 2/4/8 drones, cobertura total. Métricas: makespan, energia, soma de custos.
 - [ ] **E2. Clusters:** 1-para-1 vs Cluster. Variar raio (3, 5, 7) e tamanho máximo (2, 3, 4, 6).
 - [ ] **E3. Recarga:** preset `charging` (1, 2, 3, 5 pontos de recarga). Métricas: makespan, energia, visitas e ticks nas estações.
-- [ ] **E4. Planejadores vs densidade:** Cooperative vs CBS, 4 a 32 drones, teto de altitude alto vs baixo. Métricas: soma de custos, makespan, tempo de planejamento, nós do CBS, fallbacks, falhas. Teste preliminar de 2/11 (S-12, 3 repetições, teto alto): CBS ganha até 1,5% em soma de custos e é cerca de 1,5× mais lento, com zero fallbacks.
+- [ ] **E4. Planejadores vs densidade:** Naive vs Cooperative vs Energy Saver vs CBS, 4 a 32 drones, teto de altitude alto vs baixo. Métricas: soma de custos, makespan, tempo de planejamento, nós do CBS, fallbacks, falhas. Teste preliminar de 2/11 (S-12, 3 repetições, teto alto): CBS ganha até 1,5% em soma de custos e é cerca de 1,5× mais lento, com zero fallbacks.
 - [ ] **E5 (opcional). Escalabilidade:** tempo de planejamento vs número de drones e de paletes.
 - [ ] Confirmar zero colisões e zero baterias esgotadas em todos os cenários seguros. Se alguma aparecer, investigar antes de escrever.
 

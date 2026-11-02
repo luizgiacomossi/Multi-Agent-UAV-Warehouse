@@ -2,7 +2,7 @@
 import { World } from './World';
 import { Swarm, Drone } from './Drone';
 import { Warehouse } from './Warehouse';
-import { SimulationIncident, Position3D, Pallet, ClusterVisualization, TaskPriorityMode, MissionCompletionMode } from '../types';
+import { SimulationIncident, Position3D, Pallet, ClusterVisualization, TaskPriorityMode, MissionCompletionMode, AllocationMode } from '../types';
 import { ReservedZone } from './WorldGenerator';
 import { KDTree } from '../utils/KDTree';
 import { TaskCluster } from './TaskCluster';
@@ -364,7 +364,7 @@ export class SimulationManager {
         missionCount: number = 1,
         maxAltitude: number = 24,
         batteryEnabled: boolean = true,
-        allocationMode: '1-to-1' | 'Cluster' = '1-to-1',
+        allocationMode: AllocationMode = '1-to-1',
         clusterRadius: number = 5,
         maxClusterSize: number = 3,
         missionCompletionMode: MissionCompletionMode = 'count',
@@ -676,7 +676,7 @@ export class SimulationManager {
                         offeredTasks = pendingTasks;
 
                         if (pendingTasks.length > 0) {
-                            const assignments = CostModel.executeOptimalAllocation(idleDrones, pendingTasks, pBase, dMax, feasibilityChargers);
+                            const assignments = CostModel.executeOneToOneAllocation(allocationMode, idleDrones, pendingTasks, pBase, dMax, feasibilityChargers);
 
                             assignments.forEach(a => {
                                 const drone = idleDrones.find(d => d.id === a.drone.id);
