@@ -2,6 +2,7 @@ import { runAllocationTests } from './test_allocation';
 import { runPathPlanningTests } from './test_path_planning';
 import { runBenchmarkTests } from './test_benchmark';
 import { runChargingTests } from './test_charging';
+import { runForkliftTests } from './test_forklifts';
 
 const startTime = performance.now();
 
@@ -13,9 +14,10 @@ const allocationResults = await runAllocationTests();
 const planningResults = runPathPlanningTests();
 const benchmarkResults = await runBenchmarkTests();
 const chargingResults = await runChargingTests();
+const forkliftResults = runForkliftTests();
 
-const totalPassed = allocationResults.passed + planningResults.passed + benchmarkResults.passed + chargingResults.passed;
-const totalFailed = allocationResults.failed + planningResults.failed + benchmarkResults.failed + chargingResults.failed;
+const totalPassed = allocationResults.passed + planningResults.passed + benchmarkResults.passed + chargingResults.passed + forkliftResults.passed;
+const totalFailed = allocationResults.failed + planningResults.failed + benchmarkResults.failed + chargingResults.failed + forkliftResults.failed;
 const totalDuration = ((performance.now() - startTime) / 1000).toFixed(2);
 
 console.log('\n========================================');
