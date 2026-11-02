@@ -72,11 +72,11 @@ Situação em 2/11: Introdução e Related Work juntos têm cerca de 900 palavra
 ### 5.1 Correções e ajustes antes de rodar
 
 - [ ] Rodar de novo todos os benchmarks no commit atual. Os resultados em `bench-results/` são de antes da mudança nas faixas dos empilhadeiras (1/10, 18:33) e não podem ir para o paper.
-- [ ] Registrar o hash do commit e a versão do Node usados em cada experimento.
-- [ ] Inconsistência de distância: a alocação usa Euclidiana × γ, e o planejador usa passos Manhattan no grid. Corrigir ou justificar no texto.
-- [ ] `D_MAX` não é usado. O código usa `world.size * 2`. Alinhar código e texto.
-- [ ] Prioridade em modo `mixed` vai só de 0,10 a 0,59. Decidir se fica assim e descrever.
-- [ ] `t_hover = 5` só entra na estimativa de energia, e o scan não ocupa ticks no caminho. Corrigir ou declarar no texto.
+- [x] Registrar o hash do commit e a versão do Node usados em cada experimento. O `summary.json` agora tem `environment` (commit, se havia mudanças não commitadas, versão do Node).
+- [x] Inconsistência de distância: a alocação usava Euclidiana × γ = 1,3, e o planejador anda em passos no grid. Medido: o voo real era 1,48× a linha reta (mediana), e 87% dos trechos 1-para-1 passavam de γ. Corrigido (decisão de 2/11): a estimativa usa distância Manhattan com γ = 1,1. Agora a razão média é 1,005 (1-para-1) e 1,059 (Cluster), com 1,9% e 11,7% dos trechos acima de γ. Efeito colateral: no preset `charging`, L-24 só com a base cobre 98% dos paletes (a estimativa ficou mais conservadora com bateria 30). Muda os números.
+- [x] `D_MAX` não é usado. O código usa `world.size * 2`. Alinhar código e texto. Agora é `dMaxFor(N) = 2N` no `SimulationConfig.ts`, igual ao paper. Os números não mudam.
+- [x] Prioridade em modo `mixed` vai só de 0,10 a 0,59. Decidir se fica assim e descrever. Ampliada para 0,10 a 1,00 (decisão de 2/11). Muda os números.
+- [x] `t_hover = 5` só entra na estimativa de energia, e o scan não ocupa ticks no caminho. Corrigir ou declarar no texto. Corrigido: o drone paira `SCAN_TICKS` = 3 passos no palete, reservados na tabela, e o CBS segura o objetivo durante a leitura (decisão de 2/11). Muda os números.
 - [ ] Decidir sobre Naive e Energy Saver: entram nos experimentos ou saem do paper?
 - [ ] Não usar os experimentos "Exp 2 Monte Carlo" e "Exp 3 fault" da UI. O de falha é um stub.
 
@@ -132,9 +132,9 @@ Cada `\todo` vermelho no texto tem um item aqui. Tirar o `\todo` do texto e marc
 - [ ] Introdução: confirmar o "few" da lacuna depois do Related Work.
 - [ ] Introdução: link do código aberto na contribuição C5, se o simulador for liberado.
 - [ ] Related Work: checar se os trabalhos de drones em armazém modelam conflitos entre drones ou com veículos de chão.
-- [ ] Formulação (tarefas): no código, `t_hover = 5` só entra na estimativa de energia e o scan não ocupa passos no caminho. Corrigir o código ou dizer isso no texto. Mesmo item da seção 5.1.
+- [x] Formulação (tarefas): o scan não ocupava passos no caminho. Resolvido no código (3 passos), e o texto diz isso.
 - [ ] Método (recarga): "sem fila no ar" só vale se o trecho até a estação der certo. Se falhar, o drone paira e tenta de novo. Contar quantas vezes isso acontece nos benchmarks. Mesmo item da seção 2.
-- [ ] Método (custo): o texto diz D_max = 2N, que é o que o código usa. A constante `D_MAX` do `SimulationConfig.ts` não é usada. Mesmo item da seção 5.1.
+- [x] Método (custo): o texto diz D_max = 2N. Resolvido, o código agora define `dMaxFor(N) = 2N`.
 - [ ] Seções V a VIII: ainda são só `\todo`.
 
 ### Regras de estilo (sempre)

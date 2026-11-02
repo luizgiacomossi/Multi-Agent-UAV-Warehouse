@@ -10,6 +10,7 @@ import {
 } from '../classes/PathPlanner';
 import { CBSPlanner, ConflictDetector, ConstraintTable } from '../classes/CBSPlanner';
 import { Forklift, Position3D } from '../types';
+import { SCAN_TICKS } from '../SimulationConfig';
 
 let passed = 0;
 let failed = 0;
@@ -186,6 +187,49 @@ export function runPathPlanningTests(): { passed: number; failed: number } {
     "The other drone's later reservation is kept (tail stops before it)");
   assert(tailReservations.getVertexOwner(spaceTimeKey(parkCell, 19)) === 'TAIL', 'The parking tail covers the ticks before it');
 
+  // ─────────────────────────────────────────────────────────────
+  // 7. Scanning a pallet takes SCAN_TICKS hover ticks on the path
+  // ─────────────────────────────────────────────────────────────
+  console.log('\n--- 7. Pallet Scan Ticks ---');
+
+  const scanReservations = new SpaceTimeReservations();
+  const scanCell = { x: 6, y: 2, z: 2 };
+  const scanSwarm = new Swarm(0);
+  const scanner = makeDrone('SCAN', { x: 2, y: 2, z: 2 }, scanCell);
+  scanner.mission.assignNewMission(scanCell, 'P-SCAN', 'camera');
+  scanSwarm.drones = [scanner];
+  new CooperativePlanner().planLeg(scanSwarm, world, 0, scanReservations, 6, false);
+  const arrival = scanner.path.length - 1 - SCAN_TICKS;
+  assert(scanner.path.slice(arrival).every(p => samePosition(p, scanCell)), `Drone hovers ${SCAN_TICKS} ticks on the pallet cell`);
+  assert(scanner.scanLog[0]?.tick === scanner.path.length - 1, 'The scan is logged when it ends');
+  assert(scanner.path.slice(arrival).every((p, i) => scanReservations.getVertexOwner(spaceTimeKey(p, arrival + i)) === 'SCAN'),
+    'The scan ticks are reserved for the scanning drone');
+
+  // A drone may only arrive if the cell stays free for the whole scan
+  const blockedReservations = new SpaceTimeReservations();
+  blockedReservations.addVertex(spaceTimeKey(scanCell, 6), 'OTHER_DRONE'); // passes 2 ticks after the earliest arrival
+  const blockedSwarm = new Swarm(0);
+  const late = makeDrone('SCAN_LATE', { x: 2, y: 2, z: 2 }, scanCell);
+  blockedSwarm.drones = [late];
+  new CooperativePlanner().planLeg(blockedSwarm, world, 0, blockedReservations, 6, false);
+  const lateArrival = late.path.length - 1 - SCAN_TICKS;
+  assert(lateArrival > 6 && blockedReservations.getVertexOwner(spaceTimeKey(scanCell, 6)) === 'OTHER_DRONE',
+    'Drone arrives after the other drone has passed, so its scan is not interrupted');
+
+  // CBS holds the goal for the scan: a passer planned jointly never flies through it while it lasts.
+  // (After the scan the drone departs on its next leg, which this test does not plan.)
+  const cbsScanSwarm = new Swarm(0);
+  const cbsScanCell = { x: 5, y: 2, z: 5 };
+  const cbsScanner = makeDrone('CBS_SCAN', { x: 5, y: 2, z: 7 }, cbsScanCell);
+  const cbsPasser = makeDrone('CBS_SCAN_PASS', { x: 0, y: 2, z: 5 }, { x: 10, y: 2, z: 5 });
+  cbsScanSwarm.drones = [cbsPasser, cbsScanner];
+  new CBSPlanner(new CooperativePlanner()).planLeg(cbsScanSwarm, world, 0, new SpaceTimeReservations(), 6, false);
+  const cbsArrival = cbsScanner.path.length - 1 - SCAN_TICKS;
+  const passerAt = (t: number) => cbsPasser.path[Math.min(t, cbsPasser.path.length - 1)];
+  assert(cbsScanner.path.slice(cbsArrival).every(p => samePosition(p, cbsScanCell)) &&
+    [...Array(SCAN_TICKS + 1).keys()].every(i => !samePosition(passerAt(cbsArrival + i), cbsScanCell)),
+    'CBS: a passing drone never enters the cell while a drone scans there');
+
   return { passed, failed };
 }
 
@@ -209,8 +253,8 @@ function runCBSTests(world: World) {
   console.log('\n--- 5. Conflict-Based Search (CBS) ---');
 
   // 5a. Conflict detection and constraint indexing
-  const a = { drone: makeDrone('CA', { x: 0, y: 2, z: 0 }, { x: 2, y: 2, z: 0 }), leg: { target: { x: 2, y: 2, z: 0 }, startPos: { x: 0, y: 2, z: 0 }, startTime: 0, availableEnergy: undefined }, holdTicks: Infinity };
-  const b = { drone: makeDrone('CB', { x: 2, y: 2, z: 0 }, { x: 0, y: 2, z: 0 }), leg: { target: { x: 0, y: 2, z: 0 }, startPos: { x: 2, y: 2, z: 0 }, startTime: 0, availableEnergy: undefined }, holdTicks: Infinity };
+  const a = { drone: makeDrone('CA', { x: 0, y: 2, z: 0 }, { x: 2, y: 2, z: 0 }), leg: { target: { x: 2, y: 2, z: 0 }, startPos: { x: 0, y: 2, z: 0 }, startTime: 0, availableEnergy: undefined, scanTicks: 0 }, holdTicks: Infinity };
+  const b = { drone: makeDrone('CB', { x: 2, y: 2, z: 0 }, { x: 0, y: 2, z: 0 }), leg: { target: { x: 0, y: 2, z: 0 }, startPos: { x: 2, y: 2, z: 0 }, startTime: 0, availableEnergy: undefined, scanTicks: 0 }, holdTicks: Infinity };
   const swapPlans = new Map([
     ['CA', [{ x: 0, y: 2, z: 0 }, { x: 1, y: 2, z: 0 }, { x: 2, y: 2, z: 0 }]],
     ['CB', [{ x: 2, y: 2, z: 0 }, { x: 1, y: 2, z: 0 }, { x: 0, y: 2, z: 0 }]]

@@ -14,6 +14,11 @@ export class CostModel {
     return Math.sqrt(dx*dx + dy*dy + dz*dz);
   }
 
+  /** Grid (Manhattan) distance: the fewest moves between two cells, as drones fly along the six grid directions. */
+  static distanceManhattan(p1: Position3D, p2: Position3D): number {
+    return Math.abs(p1.x - p2.x) + Math.abs(p1.y - p2.y) + Math.abs(p1.z - p2.z);
+  }
+
   /**
    * Get the drone's current physical position (end of current path or start location)
    */
@@ -33,12 +38,12 @@ export class CostModel {
    * station when the drone is not required to return to the base.
    */
   static distanceToNearestCharger(from: Position3D, p_base: Position3D, chargingStations: Position3D[] = []): number {
-    return Math.min(this.distanceEuclidean(from, p_base), ...chargingStations.map(s => this.distanceEuclidean(from, s)));
+    return Math.min(this.distanceManhattan(from, p_base), ...chargingStations.map(s => this.distanceManhattan(from, s)));
   }
 
   /**
    * Equation 13: Required Energy
-   * e_req = \beta_{fly} \gamma (||p_i - p_k|| + ||p_k - p_{base}||) + \beta_{hover} t_{task}
+   * e_req = \beta_{fly} \gamma (||p_i - p_k||_1 + ||p_k - p_{base}||_1) + \beta_{hover} t_{task}, grid (Manhattan) distances
    */
   static calculate_e_req(drone: Agent, task: Task, p_base: Position3D, chargingStations: Position3D[] = []): number {
     return this.requiredEnergyFrom(this.getDroneCurrentPosition(drone), task, p_base, chargingStations, this.drainOf(drone));
@@ -46,7 +51,7 @@ export class CostModel {
 
   /** Equation 13 for a drone at `from` (e.g. a charger it could fly to first). */
   static requiredEnergyFrom(from: Position3D, task: Task, p_base: Position3D, chargingStations: Position3D[] = [], drain: number = 1): number {
-    const dist_to_task = this.distanceEuclidean(from, task.target);
+    const dist_to_task = this.distanceManhattan(from, task.target);
     // Afterwards the drone must still reach a charger (the base, or the nearest station)
     const dist_to_base = this.distanceToNearestCharger(task.target, p_base, chargingStations);
     
@@ -99,7 +104,7 @@ export class CostModel {
     const lastTask = tour.sequence[tour.sequence.length - 1];
     
     // Fly distance to the start of the tour, and return distance from the end of the tour
-    const dist_outbound = this.distanceEuclidean(currentPos, firstTask.target);
+    const dist_outbound = this.distanceManhattan(currentPos, firstTask.target);
     const dist_return = this.distanceToNearestCharger(lastTask.target, p_base, chargingStations);
     
     // The tour cost already contains the internal kinetic flight and structural hovering

@@ -57,10 +57,15 @@ export async function runAllocationTests(): Promise<{ passed: number; failed: nu
 
   // Eq 13: e_req = beta_fly * gamma * (dist_to_task + dist_to_base) + beta_hover * t_hover
   // dist_to_task = 10, dist_to_base = 10, total dist = 20
-  // e_req = 0.10 * 1.3 * 20 + 0.05 * 5 = 2.6 + 0.25 = 2.85
+  // e_req = 0.10 * 1.1 * 20 + 0.05 * 5 = 2.2 + 0.25 = 2.45 (grid distances 10 out and 10 back)
   const expectedEreq = MATH_CONSTANTS.BETA_FLY * MATH_CONSTANTS.GAMMA * 20 + MATH_CONSTANTS.BETA_HOVER * 5;
   const calculatedEreq = CostModel.calculate_e_req(dummyDrone, dummyTask, pBase);
   assert(Math.abs(calculatedEreq - expectedEreq) < 1e-4, 'Eq 13 Required Energy Calculation', `Expected ${expectedEreq}, got ${calculatedEreq}`);
+  // A diagonal pallet: 5 cells in a straight line, but 7 moves on the grid each way
+  const diagonalTask: Task = { ...dummyTask, target: { x: 3, y: 4, z: 0 } };
+  const diagonalEreq = CostModel.calculate_e_req(dummyDrone, diagonalTask, pBase);
+  const expectedDiagonal = MATH_CONSTANTS.BETA_FLY * MATH_CONSTANTS.GAMMA * 14 + MATH_CONSTANTS.BETA_HOVER * 5;
+  assert(Math.abs(diagonalEreq - expectedDiagonal) < 1e-4, 'Eq 13 counts grid (Manhattan) distance, not the straight line', `Expected ${expectedDiagonal}, got ${diagonalEreq}`);
 
   // Eq 14: Feasibility Set (Battery & Payload)
   assert(CostModel.is_feasible(dummyDrone, dummyTask, calculatedEreq), 'Eq 14 Drone with 100% battery and matching payload is feasible');

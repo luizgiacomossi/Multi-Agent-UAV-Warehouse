@@ -55,7 +55,7 @@ The status shown for each drone in the UI and in the voice assistant is derived 
 
 ## 3. Path Appending and Scan Registration
 
-When a new leg is planned, `Drone.appendPath(...)` appends all path states except the duplicated starting state. If the leg corresponds to a scan target, the arrival tick is stored in `scanLog`.
+When a new leg is planned, `Drone.appendPath(...)` appends all path states except the duplicated starting state. A leg that ends at a pallet is followed by the scan: the drone hovers on the cell for `SCAN_TICKS` (3) ticks, which are part of the path, reserved like any other cell and drained at `BETA_HOVER`. The tick at which the scan ends is stored in `scanLog`.
 
 This design is subtle:
 

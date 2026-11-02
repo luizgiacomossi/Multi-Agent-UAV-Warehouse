@@ -12,7 +12,7 @@ export interface ReservedZone {
 
 export class WorldGenerator {
   private static getPalletWeight(priorityMode: TaskPriorityMode): number {
-    return priorityMode === 'uniform' ? 100 : Math.floor(random() * 50) + 10;
+    return priorityMode === 'uniform' ? 100 : Math.floor(random() * 91) + 10;
   }
 
   static generate(world: World, theme: string, reservedZone?: ReservedZone, totalTasks: number = 50, numForklifts: number = 3, priorityMode: TaskPriorityMode = 'mixed') {

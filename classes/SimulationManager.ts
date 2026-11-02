@@ -21,7 +21,7 @@ import { ChargingPolicy, ChargingRound, isAtDock } from './ChargingPolicy';
 import { manhattanDistance } from '../utils/Position';
 import { CBSPlanner } from './CBSPlanner';
 import { Task } from '../types';
-import { MAX_TIMESTEPS, GRID_SIZE, DEFAULT_AGENT_COUNT, MATH_CONSTANTS, INSTANT_CHARGE_RATE, DEFAULT_DRAIN_MULTIPLIER } from '../SimulationConfig';
+import { MAX_TIMESTEPS, GRID_SIZE, DEFAULT_AGENT_COUNT, MATH_CONSTANTS, INSTANT_CHARGE_RATE, DEFAULT_DRAIN_MULTIPLIER, dMaxFor, SCAN_TICKS } from '../SimulationConfig';
 import { random } from '../utils/Random';
 
 type PalletReservation = {
@@ -138,7 +138,7 @@ export class SimulationManager {
                 req_payload: reqPayload,
                 palletId: palletId,
                 pi_k: plt.weight / 100,
-                t_hover: 5,
+                t_hover: SCAN_TICKS,
                 status: 'PENDING'
             };
         } else {
@@ -175,7 +175,7 @@ export class SimulationManager {
             req_payload: reqPayload,
             palletId: palletId,
             pi_k: random() * 0.9 + 0.1,
-            t_hover: 5,
+            t_hover: SCAN_TICKS,
             status: 'PENDING'
         };
     }
@@ -227,7 +227,7 @@ export class SimulationManager {
                 req_payload: plt.payload_type,
                 palletId: plt.id,
                 pi_k: plt.weight / 100,
-                t_hover: 5,
+                t_hover: SCAN_TICKS,
                 status: 'PENDING' as const
             }));
 
@@ -309,7 +309,7 @@ export class SimulationManager {
     private static palletTask(plt: Pallet): Task {
         return {
             id: plt.id, target: plt.position, req_payload: plt.payload_type, palletId: plt.id,
-            pi_k: plt.weight / 100, t_hover: 5, status: 'PENDING'
+            pi_k: plt.weight / 100, t_hover: SCAN_TICKS, status: 'PENDING'
         };
     }
 
@@ -600,7 +600,7 @@ export class SimulationManager {
                     this.charging.rechargeDocked(idleDrones);
                 }
 
-                const dMax = this.world.size * 2; // Approximate valid maximum structural traversal
+                const dMax = dMaxFor(this.world.size);
                 const pBase = this.world.warehouse?.position || { x: 0, y: 0, z: 0 };
 
                 if (allocationMode === 'Cluster' && this.world.pallets && this.world.pallets.length > 0) {
@@ -670,7 +670,7 @@ export class SimulationManager {
                             req_payload: plt.payload_type,
                             palletId: plt.id,
                             pi_k: plt.weight / 100,
-                            t_hover: 5,
+                            t_hover: SCAN_TICKS,
                             status: 'PENDING'
                         }));
                         offeredTasks = pendingTasks;

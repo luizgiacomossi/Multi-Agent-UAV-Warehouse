@@ -21,7 +21,7 @@ e_{req}(i,k)
 =
 \beta_{fly}\gamma
 \left(
-\lVert p_i(t) - g_k \rVert_2 + \lVert g_k - p_{base} \rVert_2
+\lVert p_i(t) - g_k \rVert_1 + \lVert g_k - p_{base} \rVert_1
 \right)
 
 + \beta_{hover} t_k^{hover},
@@ -32,6 +32,9 @@ where:
 - \(p_i(t)\) is the drone's current physical location (`getDroneCurrentPosition(drone)`: `drone.path[drone.path.length - 1] || drone.start`),
 - \(g_k\) is `task.target`,
 - \(p_{base}\) is the warehouse origin if present, otherwise \((0,0,0)\),
+- \(t_k^{hover}\) is the scan time, `SCAN_TICKS` = 3 hover ticks at the pallet,
+- distances are grid (Manhattan) distances, \(\lVert \cdot \rVert_1\), the fewest moves between two cells, since drones fly along the six grid directions,
+- \(\gamma = 1.1\) covers the detours and waits a planned leg adds on top of that. Measured on the standard benchmark (2 Nov 2026), 96% of one-to-one legs and 87% of cluster legs into a pallet fly exactly their grid distance. The estimate used the straight-line distance with \(\gamma = 1.3\) before, but grid legs need a median of 1.48 times the straight line, so it fell short on most legs,
 - \(\beta_{fly}\), \(\beta_{hover}\), and \(\gamma\) come from [`SimulationConfig.ts`](/Users/lgr03/Documents/MDU_PhD/dev/Multi-Drone-Path-Planner-Visualizer-/SimulationConfig.ts).
 
 This is implemented by `calculate_e_req(...)`.
@@ -59,10 +62,8 @@ c_{dist}(i,k)=\frac{\lVert p_i(t) - g_k \rVert_2}{D_{max}}.
 
 In `CostModel` this evaluates Euclidean distance from the drone's current location \(p_i(t)\) divided by a normalisation constant \(D_{max}\) supplied by the caller:
 
-- the main mission loop (`SimulationManager.runPathfinding`) uses \(D_{max} = 2S\), where \(S\) is the grid side length;
+- the main mission loop (`SimulationManager.runPathfinding`) uses \(D_{max} = 2S\) (`dMaxFor` in `SimulationConfig.ts`), where \(S\) is the grid side length;
 - the Monte Carlo and fault-tolerance experiments use \(D_{max} = \sqrt{3}\,S\) (the grid diagonal).
-
-The `D_MAX` constant in `SimulationConfig.ts` (the diagonal of the default grid) is currently not used by either path.
 
 ### 3.2 Battery term
 
@@ -104,8 +105,8 @@ e_{req}^{cluster}(i,\kappa)
 =
 \beta_{fly}\gamma
 \left(
-\lVert p_i(t) - g_{\kappa}^{first} \rVert_2 +
-\lVert g_{\kappa}^{last} - p_{base} \rVert_2
+\lVert p_i(t) - g_{\kappa}^{first} \rVert_1 +
+\lVert g_{\kappa}^{last} - p_{base} \rVert_1
 \right)
  + c_{\kappa}^{tour}.
 \]
@@ -124,7 +125,7 @@ The average priority of the cluster's tasks is used in \(C_{ik}\).
 **Feasibility with stations.** In the energy check of Sections 2–4, the return term is the distance to the nearest charger, the base or a charging station, instead of the base (`CostModel.distanceToNearestCharger`):
 
 \[
-e_{req}(i,k) = \beta_{fly}\gamma\left(\lVert p_i - g_k \rVert_2 + \min_{c \in \{p_{base}\} \cup S} \lVert g_k - c \rVert_2\right) + \beta_{hover} t_k^{hover}.
+e_{req}(i,k) = \beta_{fly}\gamma\left(\lVert p_i - g_k \rVert_1 + \min_{c \in \{p_{base}\} \cup S} \lVert g_k - c \rVert_1\right) + \beta_{hover} t_k^{hover}.
 \]
 
 Stations \(S\) are only counted when "Return" is off. With "Return" on, every task ends at the base anyway.

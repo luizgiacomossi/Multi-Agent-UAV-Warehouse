@@ -1,4 +1,5 @@
 import { Agent, SimulationIncident, MATH_CONSTANTS, Position3D } from '../types';
+import { SCAN_TICKS } from '../SimulationConfig';
 
 /** Outcome metrics of one planned mission, independent of how it was produced. */
 export interface MissionMetrics {
@@ -25,6 +26,47 @@ export interface MissionMetrics {
   stationVisits: number;
   /** Ticks drones spent waiting on charging stations. */
   stationTicks: number;
+  /**
+   * Flight to a pallet against the allocation's estimate: battery used on the leg into each scan
+   * (moves at β_fly, waits at β_hover) over β_fly times the grid (Manhattan) distance of the leg,
+   * averaged over all scans. The allocation assumes γ.
+   */
+  legEnergyRatio: number;
+  /** Share of scan legs whose ratio exceeds γ, i.e. legs the allocation underestimated. */
+  legsAboveGamma: number;
+}
+
+/**
+ * Energy ratio of every leg into a pallet scan (see MissionMetrics.legEnergyRatio). A leg starts
+ * where the drone last ended a scan or last waited on a charger (its dock or a station), and ends
+ * when it arrives at the pallet. Legs that cover no distance are skipped.
+ */
+export function scanLegEnergyRatios(agent: Agent, chargerCells: Set<string>): number[] {
+  const key = (p: Position3D) => `${p.x},${p.y},${p.z}`;
+  const dock = (agent as { mission?: { warehouseLocation?: Position3D } }).mission?.warehouseLocation ?? agent.start;
+  const isCharger = (p: Position3D) => chargerCells.has(key(p)) || key(p) === key(dock);
+  const ratios: number[] = [];
+  let previousScanEnd = 0;
+  for (const scan of [...(agent.scanLog ?? [])].sort((a, b) => a.tick - b.tick)) {
+    const arrival = scan.tick - SCAN_TICKS;
+    let start = previousScanEnd;
+    for (let t = arrival - 1; t > start; t--) {
+      if (isCharger(agent.path[t]) && key(agent.path[t]) === key(agent.path[t - 1])) { start = t; break; }
+    }
+    previousScanEnd = scan.tick;
+    const from = agent.path[start];
+    const to = agent.path[arrival];
+    if (!from || !to) continue;
+    const grid = Math.abs(to.x - from.x) + Math.abs(to.y - from.y) + Math.abs(to.z - from.z);
+    if (grid === 0) continue;
+    let used = 0;
+    for (let t = start + 1; t <= arrival; t++) {
+      const moved = key(agent.path[t]) !== key(agent.path[t - 1]);
+      used += moved ? MATH_CONSTANTS.BETA_FLY : MATH_CONSTANTS.BETA_HOVER;
+    }
+    ratios.push(used / (MATH_CONSTANTS.BETA_FLY * grid));
+  }
+  return ratios;
 }
 
 /** Computes mission metrics from a planned result. */
@@ -43,6 +85,7 @@ export function computeMissionMetrics(
     incidents.filter(i => i.type === 'battery_dead').flatMap(i => i.agentIds)
   );
   const scanned = new Set(agents.flatMap(a => (a.scanLog ?? []).map(entry => entry.palletId)));
+  const legRatios = agents.flatMap(a => scanLegEnergyRatios(a, stationCells));
 
   let sumOfCosts = 0;
   let energyConsumed = 0;
@@ -80,6 +123,8 @@ export function computeMissionMetrics(
     energyConsumed,
     distance,
     stationVisits,
+    legEnergyRatio: legRatios.length > 0 ? legRatios.reduce((a, b) => a + b, 0) / legRatios.length : 0,
+    legsAboveGamma: legRatios.length > 0 ? legRatios.filter(r => r > MATH_CONSTANTS.GAMMA).length / legRatios.length : 0,
     stationTicks,
   };
 }

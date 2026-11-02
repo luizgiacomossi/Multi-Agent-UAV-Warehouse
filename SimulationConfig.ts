@@ -38,19 +38,12 @@ export const WAREHOUSE = {
 };
 
 /**
- * $D_{max}$ — Maximum Euclidean distance reachable inside the warehouse.
- * For a 50 × 30 × 10 m physical space this equals Math.sqrt(50²+30²+10²).
- * In voxel space we approximate with the diagonal of the default grid.
+ * $D_{max}$ — Normalisation denominator of $c_{dist}$ for a grid of side $N$: $D_{max} = 2N$.
  *
- * Equation reference: normalisation denominator of $c_{dist}$.
- *
- * NOTE: currently unused. SimulationManager.runPathfinding passes
- * `world.size * 2`, and the Monte Carlo / fault-tolerance experiments pass
- * `world.size * 1.732` (the grid diagonal of the *current* world size).
+ * Used by the allocation in SimulationManager.runPathfinding. The in-app Monte Carlo and
+ * fault-tolerance experiments still pass the grid diagonal (`world.size * 1.732`).
  */
-export const D_MAX = Math.sqrt(
-  GRID_SIZE ** 2 + GRID_SIZE ** 2 + GRID_SIZE ** 2
-); // ≈ 41.57 for 24³, or override for 50×30×10 → 59.16
+export const dMaxFor = (gridSize: number): number => 2 * gridSize;
 
 
 // ─── Battery Model Parameters ─────────────────────────────────────────────────
@@ -75,15 +68,18 @@ export const BETA_FLY = 0.10;
 export const BETA_HOVER = 0.05;
 
 /**
- * $\gamma$ — Path-complexity factor applied to the straight-line Euclidean
- * distance to obtain a realistic energy estimate given rack-induced detours.
+ * $\gamma$ — Factor applied to the grid (Manhattan) distance in the energy estimate, for the
+ * detours and waits a planned leg adds on top of the shortest grid route.
  *
- * A value of 1.3 means that actual traversal paths are on average 30% longer
- * than the straight-line distance due to aisle geometry.
+ * Drones move along the six grid directions, so a leg is never shorter than its Manhattan
+ * distance. Measured on the standard benchmark (Cooperative, 2 Nov 2026), 96% of one-to-one legs
+ * and 87% of cluster legs into a pallet fly exactly their Manhattan distance, and 1% and 11% use
+ * more than 1.2 times it. (Against the straight-line distance the same legs needed a median of 1.48,
+ * which is why the earlier Euclidean estimate with 1.3 fell short.)
  *
- * Equation reference: Eq. 13  $E_{req} = \beta_{fly} \cdot \gamma \cdot d_{Eucl}$
+ * Equation reference: Eq. 13  $E_{req} = \beta_{fly} \cdot \gamma \cdot d_{Manh}$
  */
-export const GAMMA = 1.3;
+export const GAMMA = 1.1;
 
 /**
  * $\delta_{safe}$ — Critical battery safety margin (%).
@@ -133,6 +129,12 @@ export const WEIGHT_BATT = 0.5;   // w₂
 
 
 // ─── Planner / Solver Settings ────────────────────────────────────────────────
+
+/**
+ * $t^{scan}$ — Ticks a drone hovers at a pallet to read it. They are part of the drone's path and
+ * reserved like any other cell, and the energy estimate counts them as hover ticks.
+ */
+export const SCAN_TICKS = 3;
 
 /** A* / CBS per-drone search timeout in milliseconds. */
 export const PATHFINDER_TIMEOUT_MS = 10_000;

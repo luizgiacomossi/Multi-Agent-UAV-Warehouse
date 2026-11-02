@@ -1,3 +1,4 @@
+import { execSync } from 'child_process';
 import { mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { RunRecord } from './runScenario';
@@ -18,6 +19,8 @@ export const SUMMARY_METRICS = [
   'strandedDrones',
   'energyConsumed',
   'distance',
+  'legEnergyRatio',
+  'legsAboveGamma',
   'stationVisits',
   'stationTicks',
   'cbsNodesExpanded',
@@ -107,7 +110,19 @@ export function writeReports(outDir: string, plan: BenchmarkPlan, records: RunRe
   ]);
   writeFileSync(join(outDir, 'summary.csv'), toCsv(summaryHeader, summaryRows));
 
-  writeFileSync(join(outDir, 'summary.json'), JSON.stringify({ plan, generatedAt: new Date().toISOString(), summaries }, null, 2));
+  writeFileSync(join(outDir, 'summary.json'), JSON.stringify({ plan, generatedAt: new Date().toISOString(), environment: runEnvironment(), summaries }, null, 2));
+}
+
+/** Code version and runtime of a benchmark run, so every result can be traced back to a commit. */
+export function runEnvironment(): { commit: string; dirty: boolean; node: string } {
+  const git = (args: string) => {
+    try {
+      return execSync(`git ${args}`, { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+    } catch {
+      return '';
+    }
+  };
+  return { commit: git('rev-parse HEAD') || 'unknown', dirty: git('status --porcelain --untracked-files=no') !== '', node: process.version };
 }
 
 // ─── Console ──────────────────────────────────────────────────────────────────

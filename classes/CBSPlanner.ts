@@ -312,7 +312,8 @@ export class CBSPlanner extends PathFindingStrategy {
     for (const drone of swarm.drones) {
       const leg = this.getLegContext(drone, world, batteryEnabled);
       if (!leg) continue;
-      const holdTicks = drone.mission.continuesAfterCurrentLeg() ? TRANSIT_HOLD_TICKS : Infinity;
+      // A scan keeps the drone on its goal for the scan ticks before it departs
+      const holdTicks = drone.mission.continuesAfterCurrentLeg() ? leg.scanTicks + TRANSIT_HOLD_TICKS : Infinity;
       agents.push({ drone, leg, holdTicks });
     }
     return agents;
@@ -347,7 +348,8 @@ export class CBSPlanner extends PathFindingStrategy {
       deadline,
       maxAltitude,
       maxLegDepth,
-      agent.drone.id
+      agent.drone.id,
+      agent.leg.scanTicks
     );
     return result ? result.path : null;
   }

@@ -50,7 +50,7 @@ A plan is the cartesian product of its dimensions, repeated `runs` times. The pr
 | `full` | S, M, L | 2, 4, 8 | 1-to-1, Cluster | count, all-pallets | 10 |
 | `charging` | M, L | 2, 4, 8 | 1-to-1 | all-pallets | 5 |
 
-Fixed parameters are: 3 missions per drone, round trips, 100% battery with constraints enabled, instant charging at the base only (so results stay comparable with earlier runs), mixed task priorities, deployment from the warehouse dock, a flight ceiling equal to the grid size, and a cluster radius of 5 with at most 3 pallets per cluster.
+Fixed parameters are: 3 missions per drone, round trips, 100% battery with constraints enabled, instant charging at the base only (so results stay comparable with earlier runs), mixed task priorities (\(\pi_k\) drawn uniformly from 0.10 to 1.00), deployment from the warehouse dock, a flight ceiling equal to the grid size, and a cluster radius of 5 with at most 3 pallets per cluster.
 
 ### 2.1 Charging Preset
 
@@ -102,6 +102,8 @@ Each row of `runs.csv` is one strategy on one scenario. Besides the scenario coo
 | `distance` | grid cells travelled, summed over drones |
 | `stationVisits` | charging sessions at charging stations |
 | `stationTicks` | ticks drones spent waiting on charging stations |
+| `legEnergyRatio` | battery used on the leg into each scan (from the previous scan or the last wait on a charger) over β_fly times the leg's grid (Manhattan) distance, averaged over scans. The allocation's estimate assumes γ (1.1) |
+| `legsAboveGamma` | share of those legs whose ratio exceeds γ, i.e. legs the allocation's estimate underestimated |
 | `cbsNodesExpanded`, `cbsFallbacks` | CBS only: constraint-tree nodes expanded, and legs handed to the fallback planner |
 
 Collisions are detected after planning. A drone destroyed in a collision stops at that point, so `Naive` can show a *shorter* makespan and *lower* energy than the collision-free planners. Read those columns together with `collisions`, `lostDrones` and `palletCoverage`.
@@ -112,7 +114,7 @@ Collisions are detected after planning. A drone destroyed in a collision stops a
 |---|---|
 | `runs.csv` | one row per strategy and scenario, with every field in Section 4 |
 | `summary.csv` | one row per configuration and strategy: `runs`, `successRate`, and for each metric `_mean`, `_std` (sample, n − 1), `_ci95` (normal-approximation half-width 1.96·s/√n), `_median`, `_min`, `_max` |
-| `summary.json` | the resolved plan and the same summaries, for scripted analysis |
+| `summary.json` | the resolved plan, the code version (`environment`: commit hash, whether the tree had uncommitted changes, Node version) and the same summaries, for scripted analysis |
 
 The console prints one table per configuration, with the mean ± 95% CI for collisions, stranded drones, coverage, makespan, energy and planning time.
 

@@ -1,7 +1,7 @@
 import { Position3D, PathNode, SimulationIncident, MATH_CONSTANTS } from '../types';
 import { World } from './World';
 import { Swarm, Drone } from './Drone';
-import { PATHFINDER_TIMEOUT_MS, MAX_TIMESTEPS } from '../SimulationConfig';
+import { PATHFINDER_TIMEOUT_MS, MAX_TIMESTEPS, SCAN_TICKS } from '../SimulationConfig';
 
 const TIMEOUT_MS = PATHFINDER_TIMEOUT_MS;
 
@@ -130,6 +130,8 @@ export interface LegContext {
   startPos: Position3D;
   startTime: number;
   availableEnergy: number | undefined;
+  /** Ticks the drone hovers on the goal after arriving to scan a pallet (0 if the leg is no scan). */
+  scanTicks: number;
 }
 
 /**
@@ -345,10 +347,33 @@ export abstract class PathFindingStrategy {
     const startPos = drone.path[drone.path.length - 1] || drone.start;
     const startTime = drone.path.length > 0 ? drone.path.length - 1 : 0;
     // Search energy is counted in nominal β units, so the budget is the battery over the drain multiplier
+    const scanTicks = this.isScanLeg(drone) ? SCAN_TICKS : 0;
+    // The scan's hover ticks come out of the same budget as the flight
     const availableEnergy = batteryEnabled
       ? drone.calculateStateAt(startTime, world.chargeStations, batteryEnabled).battery / drone.drainMultiplier
+        - scanTicks * MATH_CONSTANTS.BETA_HOVER
       : undefined;
-    return { target, startPos, startTime, availableEnergy };
+    return { target, startPos, startTime, availableEnergy, scanTicks };
+  }
+
+  /** True if the drone's current leg ends at a pallet it scans (a single task or a tour stop). */
+  protected isScanLeg(drone: Drone): boolean {
+    return drone.mission.state === 'OUTBOUND' || drone.mission.state === 'EXECUTING_TOUR';
+  }
+
+  /** The leg followed by the scan: the drone hovers on its goal for the leg's scan ticks. */
+  protected withScan(drone: Drone, path: Position3D[]): Position3D[] {
+    if (!this.isScanLeg(drone) || path.length === 0) return path;
+    const goal = path[path.length - 1];
+    return [...path, ...Array.from({ length: SCAN_TICKS }, () => ({ ...goal }))];
+  }
+
+  /** True if no one holds the goal cell during the `holdTicks` ticks after arrival. */
+  protected isGoalFreeFor(reserved: ReservationSource, pos: Position3D, arrivalTime: number, holdTicks: number, requesterId?: string): boolean {
+    for (let t = arrivalTime + 1; t <= arrivalTime + holdTicks; t++) {
+      if (t > this.maxTimeSteps || this.isCellReserved(reserved, this.key(pos, t), requesterId)) return false;
+    }
+    return true;
   }
 
   /**
@@ -361,7 +386,8 @@ export abstract class PathFindingStrategy {
     startTime: number,
     reserved: SpaceTimeReservations | Set<number>
   ): void {
-    drone.appendPath(path, drone.mission.state === 'OUTBOUND' || drone.mission.state === 'EXECUTING_TOUR');
+    path = this.withScan(drone, path);
+    drone.appendPath(path, this.isScanLeg(drone));
     this.markLegPlanned(drone);
 
     const lastPos = path[path.length - 1];
@@ -486,7 +512,8 @@ export abstract class PathFindingStrategy {
     deadline?: number,
     maxAltitude?: number,
     maxSearchDepth?: number,
-    requesterId?: string
+    requesterId?: string,
+    holdTicks: number = 0
   ): { path: Position3D[], finalEnergy: number } | null {
 
     const effectiveGoal = this.resolveGoal(goal, world, maxAltitude, reserved, startTime, maxSearchDepth, requesterId);
@@ -513,6 +540,7 @@ export abstract class PathFindingStrategy {
       const current = openHeap.pop()!;
 
       if (current.x === effectiveGoal.x && current.y === effectiveGoal.y && current.z === effectiveGoal.z &&
+          this.isGoalFreeFor(reserved, current, current.time, holdTicks, requesterId) &&
           this.canHoldGoal(reserved, current, current.time, requesterId)) {
         return { path: this.reconstructPath(current), finalEnergy: current.energy };
       }
@@ -588,7 +616,7 @@ export class NaivePlanner extends PathFindingStrategy {
     for (const drone of swarm.drones) {
       const leg = this.getLegContext(drone, world, batteryEnabled);
       if (!leg) continue;
-      const { target, startPos, startTime, availableEnergy } = leg;
+      const { target, startPos, startTime, availableEnergy, scanTicks } = leg;
 
       const result = this.findPath(
         startPos,
@@ -600,11 +628,12 @@ export class NaivePlanner extends PathFindingStrategy {
         deadline,
         maxAltitude,
         maxLegDepth,
-        drone.id
+        drone.id,
+        scanTicks
       );
 
       if (result) {
-        drone.appendPath(result.path, drone.mission.state === 'OUTBOUND' || drone.mission.state === 'EXECUTING_TOUR');
+        drone.appendPath(this.withScan(drone, result.path), this.isScanLeg(drone));
         this.markLegPlanned(drone);
       } else {
         // Wait cells go to the shared table; other Naive drones never read them
@@ -633,7 +662,7 @@ export class CooperativePlanner extends PathFindingStrategy {
     for (const drone of swarm.drones) {
       const leg = this.getLegContext(drone, world, batteryEnabled);
       if (!leg) continue;
-      const { target, startPos, startTime, availableEnergy } = leg;
+      const { target, startPos, startTime, availableEnergy, scanTicks } = leg;
 
       const result = this.findPath(
         startPos,
@@ -645,7 +674,8 @@ export class CooperativePlanner extends PathFindingStrategy {
         deadline,
         maxAltitude,
         maxLegDepth,
-        drone.id
+        drone.id,
+        scanTicks
       );
 
       if (result) {
@@ -672,7 +702,8 @@ export class EnergySaverPlanner extends PathFindingStrategy {
     deadline: number,
     maxAltitude?: number,
     maxSearchDepth?: number,
-    requesterId?: string
+    requesterId?: string,
+    holdTicks: number = 0
   ): { path: Position3D[], finalEnergy: number } | null {
 
     // Resolve blocked goal to the nearest free neighbor so A* can reach pallets
@@ -699,6 +730,7 @@ export class EnergySaverPlanner extends PathFindingStrategy {
       const current = openHeap.pop()!;
 
       if (current.x === effectiveGoal.x && current.y === effectiveGoal.y && current.z === effectiveGoal.z &&
+          this.isGoalFreeFor(reserved, current, current.time, holdTicks, requesterId) &&
           this.canHoldGoal(reserved, current, current.time, requesterId)) {
         return { path: this.reconstructPath(current), finalEnergy: current.energy };
       }
@@ -761,7 +793,7 @@ export class EnergySaverPlanner extends PathFindingStrategy {
     for (const drone of swarm.drones) {
       const leg = this.getLegContext(drone, world, batteryEnabled);
       if (!leg) continue;
-      const { target, startPos, startTime, availableEnergy } = leg;
+      const { target, startPos, startTime, availableEnergy, scanTicks } = leg;
 
       const result = this.findPathEnergy(
         startPos,
@@ -773,7 +805,8 @@ export class EnergySaverPlanner extends PathFindingStrategy {
         deadline,
         maxAltitude,
         maxLegDepth,
-        drone.id
+        drone.id,
+        scanTicks
       );
 
       if (result) {

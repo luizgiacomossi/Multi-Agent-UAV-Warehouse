@@ -75,6 +75,8 @@ For each previously planned trajectory \(\pi_i\), the planner registers:
 - every directed edge transition \((p_i(t-1) \to p_i(t))\),
 - the arrival voxel for an idle tail duration (up to 500 ticks), preventing other drones from colliding into resting or scanning agents.
 
+A leg that ends at a pallet only reaches its goal if the cell is also free for the `SCAN_TICKS` ticks after arrival (`isGoalFreeFor`), and the scan's hover energy is taken from the leg's energy budget. `commitLeg` then appends the scan ticks to the path before reserving it. CBS holds the goal for the scan ticks plus one transit tick.
+
 ### 4.3 `EnergySaverPlanner`
 
 `EnergySaverPlanner` minimizes total flight and hover energy.
