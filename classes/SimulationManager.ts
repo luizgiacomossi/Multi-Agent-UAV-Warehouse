@@ -21,7 +21,7 @@ import { ChargingPolicy, ChargingRound, isAtDock } from './ChargingPolicy';
 import { manhattanDistance } from '../utils/Position';
 import { CBSPlanner } from './CBSPlanner';
 import { Task } from '../types';
-import { MAX_TIMESTEPS, GRID_SIZE, DEFAULT_AGENT_COUNT, MATH_CONSTANTS, INSTANT_CHARGE_RATE, DEFAULT_DRAIN_MULTIPLIER, dMaxFor, SCAN_TICKS } from '../SimulationConfig';
+import { MAX_TIMESTEPS, FORKLIFT_LOOKAHEAD_TICKS, GRID_SIZE, DEFAULT_AGENT_COUNT, MATH_CONSTANTS, INSTANT_CHARGE_RATE, DEFAULT_DRAIN_MULTIPLIER, dMaxFor, SCAN_TICKS } from '../SimulationConfig';
 import { random } from '../utils/Random';
 
 type PalletReservation = {
@@ -428,10 +428,16 @@ export class SimulationManager {
         const MAX_GLOBAL_TIME = MAX_TIMESTEPS;
         strategy.setMaxTimeSteps(MAX_GLOBAL_TIME);
 
-        // Pre-allocate Forklift space-time to force drones to avoid them dynamically across the full simulation
-        this.world.forklifts.forEach(fl => {
+        // Reserve the forklifts' space-time so drones avoid them. Reserving the whole horizon up front costs
+        // more than planning a small mission, so the reservations are extended before each cycle, a fixed
+        // look-ahead past the longest drone path. A leg is far shorter than the look-ahead.
+        let forkliftReservedUntil = 0;
+        const reserveForkliftsUntil = (end: number) => {
+            end = Math.min(end, MAX_GLOBAL_TIME);
+            if (end <= forkliftReservedUntil) return;
+            this.world.forklifts.forEach(fl => {
             if (!fl.path || fl.path.length === 0) return;
-            for (let t = 0; t < MAX_GLOBAL_TIME; t++) {
+            for (let t = forkliftReservedUntil; t < end; t++) {
                 const pos = fl.path[t % fl.path.length];
                 const h1 = (pos.x) + (pos.y * 64) + (pos.z * 4096) + (t * 262144);
                 const h2 = (pos.x) + ((pos.y + 1) * 64) + (pos.z * 4096) + (t * 262144);
@@ -456,7 +462,11 @@ export class SimulationManager {
                     );
                 }
             }
-        });
+            });
+            forkliftReservedUntil = end;
+        };
+        const longestPath = () => Math.max(0, ...this.swarm.drones.map(d => d.path.length));
+        reserveForkliftsUntil(FORKLIFT_LOOKAHEAD_TICKS);
 
         // Maximum theoretical legs = missionCount * clusterCapacity * 2 (Outbound/Inbound padding)
         const maxLegTries = Math.max(effectiveMissionCount, this.world.pallets.length, 1) * 15;
@@ -464,6 +474,7 @@ export class SimulationManager {
         const feasibilityChargers = isRoundTrip ? [] : this.world.chargeStations;
 
         for (let cycle = 0; cycle < maxLegTries; cycle++) {
+            reserveForkliftsUntil(longestPath() + FORKLIFT_LOOKAHEAD_TICKS);
             this.charging.releaseBookings(this.swarm.drones);
 
             // 0. Register active assignment segments at the START of the physical leg

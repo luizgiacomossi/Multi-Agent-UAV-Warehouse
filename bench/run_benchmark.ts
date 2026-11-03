@@ -37,6 +37,8 @@ const HELP = `Usage: npm run bench -- [options]
   --sites <n,n>       charging sites incl. the base (1 = base only; extra sites are one-drone stations)
   --altitude <n,n>    flight ceilings, highest cell y a drone may use (default: the grid size)
   --rack-levels <n,n> maximum pallets per rack column (default: 8)
+  --cluster-radius <n,n>  cluster radii (Cluster allocation only, default 5)
+  --cluster-size <n,n>    maximum pallets per cluster (Cluster allocation only, default 3)
   --charge-rate <r>   charging speed in % of capacity per tick, or "instant"
   --battery <n>       battery capacity per drone
   --drain <x>         battery drain multiplier (1 = nominal β_fly / β_hover)
@@ -71,6 +73,8 @@ function parseArgs(argv: string[]): CliOptions {
       case '--sites': options.overrides.chargingSites = numbers(needValue()); break;
       case '--altitude': options.overrides.maxAltitudes = numbers(needValue()); break;
       case '--rack-levels': options.overrides.rackLevels = numbers(needValue()); break;
+      case '--cluster-radius': options.overrides.clusterRadii = numbers(needValue()); break;
+      case '--cluster-size': options.overrides.clusterSizes = numbers(needValue()); break;
       case '--charge-rate': {
         const rate = needValue();
         options.overrides.chargeRate = rate === 'instant' ? Infinity : Number(rate);

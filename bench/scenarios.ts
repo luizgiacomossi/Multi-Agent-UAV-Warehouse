@@ -39,8 +39,9 @@ export interface BenchmarkPlan {
   chargeRate: number;
   /** Scales battery consumption per move and per hover tick (1 = nominal). */
   drainMultiplier: number;
-  clusterRadius: number;
-  maxClusterSize: number;
+  /** Cluster radii and maximum cluster sizes. Varied only for the Cluster allocation, the other modes run once with the first value. */
+  clusterRadii: number[];
+  clusterSizes: number[];
 }
 
 /** One concrete scenario. Every algorithm is run on the same scenario (same seed). */
@@ -52,6 +53,8 @@ export interface ScenarioSpec {
   chargingSites: number;
   maxAltitude: number;
   rackLevels: number;
+  clusterRadius: number;
+  maxClusterSize: number;
   repetition: number;
   seed: number;
 }
@@ -60,7 +63,15 @@ export const SCALES: Record<string, WarehouseScale> = {
   small: { label: 'S-12', gridSize: 12, pallets: 50, forklifts: 3 },
   medium: { label: 'M-16', gridSize: 16, pallets: 90, forklifts: 4 },
   large: { label: 'L-24', gridSize: 24, pallets: 200, forklifts: 6 },
+  // Paper scales (16, 32, 64): the side doubles, pallets keep the density of the scales above (0.35 per
+  // floor cell). The generator caps the forklifts at one per four aisles, so fewer are generated.
+  xl: { label: 'XL-32', gridSize: 32, pallets: 358, forklifts: 8 },
+  xxl: { label: 'XXL-64', gridSize: 64, pallets: 1434, forklifts: 16 },
 };
+
+/** The warehouses of the paper's experiments. 64 is the largest grid the space-time keys can encode. */
+export const PAPER_SCALES = [SCALES.medium, SCALES.xl, SCALES.xxl];
+const PAPER_DRONES = [2, 4, 8, 16, 32];
 
 const ALL_ALGORITHMS = ['Naive', 'Cooperative', 'Energy Saver', 'CBS'];
 
@@ -81,8 +92,18 @@ const BASE_PLAN: Omit<BenchmarkPlan, 'name'> = {
   roundTrip: true,
   chargeRate: INSTANT_CHARGE_RATE,
   drainMultiplier: 1,
-  clusterRadius: 5,
-  maxClusterSize: 3,
+  clusterRadii: [5],
+  clusterSizes: [3],
+};
+
+/** Shared by the paper's experiments E1 to E5: every scale crossed with every swarm size, full coverage. */
+const PAPER_PLAN: Omit<BenchmarkPlan, 'name'> = {
+  ...BASE_PLAN,
+  algorithms: ['Cooperative'],
+  scales: PAPER_SCALES,
+  droneCounts: PAPER_DRONES,
+  completionModes: ['all-pallets'],
+  repetitions: 20,
 };
 
 export const PRESETS: Record<string, BenchmarkPlan> = {
@@ -125,6 +146,16 @@ export const PRESETS: Record<string, BenchmarkPlan> = {
     batteryCapacity: 30,
     repetitions: 5,
   },
+  /** E1. Allocation: Hungarian vs the baselines. Run it again with --no-return for the other mission mode. */
+  e1: { ...PAPER_PLAN, name: 'e1', allocationModes: ['1-to-1', 'Greedy', 'Nearest', 'Random'] },
+  /** E2. Clusters: one-to-one vs clusters of several radii and sizes. The defaults come first, so 1-to-1 pairs with them. */
+  e2: { ...PAPER_PLAN, name: 'e2', allocationModes: ['1-to-1', 'Cluster'], clusterRadii: [5, 3, 7], clusterSizes: [3, 2, 4, 6] },
+  /** E3. Charging: base only vs base plus 1, 2 or 4 one-drone stations, without returning between tasks. */
+  e3: { ...PAPER_PLAN, name: 'e3', chargingSites: [1, 2, 3, 5], roundTrip: false, chargeRate: 2, batteryCapacity: 30 },
+  /** E4. Planners vs swarm density. Planning time is a metric here, so run it with one worker. */
+  e4: { ...PAPER_PLAN, name: 'e4', algorithms: ALL_ALGORITHMS },
+  /** E5. Planning time vs warehouse size, for the two safe planners of interest. One worker. */
+  e5: { ...PAPER_PLAN, name: 'e5', algorithms: ['Cooperative', 'CBS'], droneCounts: [8, 16, 32], repetitions: 10 },
 };
 
 /**
@@ -140,12 +171,16 @@ export function expandScenarios(plan: BenchmarkPlan): ScenarioSpec[] {
           for (const chargingSites of plan.chargingSites) {
             for (const maxAltitude of plan.maxAltitudes.length > 0 ? plan.maxAltitudes : [scale.gridSize]) {
             for (const rackLevels of plan.rackLevels.length > 0 ? plan.rackLevels : [WAREHOUSE.RACK_LEVELS]) {
+            for (const clusterRadius of allocationMode === 'Cluster' ? plan.clusterRadii : plan.clusterRadii.slice(0, 1)) {
+            for (const maxClusterSize of allocationMode === 'Cluster' ? plan.clusterSizes : plan.clusterSizes.slice(0, 1)) {
             for (let repetition = 0; repetition < plan.repetitions; repetition++) {
-              // The allocation mode, site count and ceiling are left out of the seed: each of them gets the
-              // same warehouse, so their comparisons are paired. Rack levels are left out too, so every
-              // height uses the same random draws (the same rack layout, with taller or shorter columns).
+              // The allocation mode, site count, ceiling and cluster settings are left out of the seed: each of
+              // them gets the same warehouse, so their comparisons are paired. Rack levels are left out too, so
+              // every height uses the same random draws (the same rack layout, with taller or shorter columns).
               const seed = scenarioSeed(plan.baseSeed, scale.gridSize, drones, completionMode, repetition);
-              scenarios.push({ scale, drones, allocationMode, completionMode, chargingSites, maxAltitude, rackLevels, repetition, seed });
+              scenarios.push({ scale, drones, allocationMode, completionMode, chargingSites, maxAltitude, rackLevels, clusterRadius, maxClusterSize, repetition, seed });
+            }
+            }
             }
             }
             }

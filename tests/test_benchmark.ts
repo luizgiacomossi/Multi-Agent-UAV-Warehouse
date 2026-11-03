@@ -155,7 +155,7 @@ export async function runBenchmarkTests(): Promise<{ passed: number; failed: num
   // Paired tests match runs by seed within the same configuration
   const record = (algorithm: string, seed: number, makespan: number) => ({
     scale: 'S-12', gridSize: 12, pallets: 50, forklifts: 1, drones: 4, allocationMode: '1-to-1', completionMode: 'count',
-    chargingSites: 1, maxAltitude: 12, rackLevels: 8, chargeRate: Infinity, drainMultiplier: 1, repetition: seed, seed,
+    chargingSites: 1, maxAltitude: 12, rackLevels: 8, clusterRadius: 5, maxClusterSize: 3, chargeRate: Infinity, drainMultiplier: 1, repetition: seed, seed,
     algorithm, ok: true, planningMs: 1, makespan,
   });
   const tests = pairedTests([1, 2, 3, 4, 5, 6].flatMap(seed => [record('Cooperative', seed, 100 + seed), record('CBS', seed, 90 + seed)]));
@@ -171,6 +171,21 @@ export async function runBenchmarkTests(): Promise<{ passed: number; failed: num
   const lowCeiling = paired.find(s => s.allocationMode === 'Greedy' && s.maxAltitude === 6)!;
   const [greedyRun] = await runScenario(lowCeiling, { ...plan, algorithms: ['Cooperative'] });
   assert(greedyRun.ok && greedyRun.maxAltitude === 6 && greedyRun.collisionsDroneDrone === 0, 'A Greedy run under a low ceiling completes without collisions', greedyRun.error);
+
+  // Cluster radius and size vary only for the Cluster allocation, on the same warehouse
+  const clusterSweep = expandScenarios({ ...PRESETS.quick, droneCounts: [4], repetitions: 1, allocationModes: ['1-to-1', 'Cluster'], clusterRadii: [5, 3], clusterSizes: [3, 6] });
+  const oneToOne = clusterSweep.filter(s => s.allocationMode === '1-to-1');
+  assert(clusterSweep.length === 5 && oneToOne.length === 1 && oneToOne[0].clusterRadius === 5 && oneToOne[0].maxClusterSize === 3
+    && new Set(clusterSweep.map(s => s.seed)).size === 1,
+    'Cluster settings expand for Cluster only (4 runs), 1-to-1 runs once with the first values, all on one seed');
+  const clusterRun = async (radius: number, size: number) => (await runScenario(
+    clusterSweep.find(s => s.allocationMode === 'Cluster' && s.clusterRadius === radius && s.maxClusterSize === size)!,
+    { ...plan, algorithms: ['Cooperative'] }))[0];
+  const wide = await clusterRun(5, 6);
+  const narrow = await clusterRun(3, 3);
+  assert(wide.ok && narrow.ok && wide.clusterRadius === 5 && wide.maxClusterSize === 6 && narrow.clusterRadius === 3
+    && wide.energyConsumed !== narrow.energyConsumed,
+    'The cluster settings reach the planner and are recorded per run', `${wide.energyConsumed} vs ${narrow.energyConsumed}`);
 
   // Spreading scenarios over child processes changes nothing but the planning time
   const parallelPlan = { ...PRESETS.quick, algorithms: ['Cooperative', 'CBS'], droneCounts: [2, 4], repetitions: 2 };

@@ -139,16 +139,51 @@ export interface LegContext {
  */
 export class SpaceTimeReservations implements ReservationView {
   private vertexOwners = new Map<number, string>();
-  private edgeOwners = new Map<string, string>();
+  /** Moves between neighbouring cells, keyed by edgeKey. */
+  private edgeOwners = new Map<number, string>();
+  /** Any other move (never made by the planners), keyed by text. */
+  private farEdgeOwners = new Map<string, string>();
+  /**
+   * Keys each owner has reserved, so clearOwnerFromTime visits only that owner's entries. A key may
+   * outlive its reservation here (e.g. after another owner took the cell), so clearing checks the owner.
+   */
+  private vertexKeysByOwner = new Map<string, Set<number>>();
+  private edgeKeysByOwner = new Map<string, Set<number>>();
+
+  private static index(byOwner: Map<string, Set<number>>, ownerId: string, key: number): void {
+    let keys = byOwner.get(ownerId);
+    if (!keys) byOwner.set(ownerId, keys = new Set());
+    keys.add(key);
+  }
+
+  /**
+   * Packs a move from `from` to a neighbouring (or the same) cell at `time` into a number: the
+   * space-time key of the start times 8, plus the direction (0 to 5, or 6 for a wait). Undefined
+   * when the cells are not neighbours. Stays below 2^53 for every time under 2^32 ticks.
+   */
+  private static edgeKey(from: Position3D, to: Position3D, time: number): number | undefined {
+    const dx = to.x - from.x, dy = to.y - from.y, dz = to.z - from.z;
+    let dir: number;
+    if (dy === 0 && dz === 0) dir = dx === 1 ? 0 : dx === -1 ? 1 : dx === 0 ? 6 : -1;
+    else if (dx === 0 && dz === 0) dir = dy === 1 ? 2 : dy === -1 ? 3 : -1;
+    else if (dx === 0 && dy === 0) dir = dz === 1 ? 4 : dz === -1 ? 5 : -1;
+    else dir = -1;
+    return dir < 0 ? undefined : spaceTimeKey(from, time) * 8 + dir;
+  }
 
   public addVertex(key: number, ownerId: string): void {
     this.vertexOwners.set(key, ownerId);
+    SpaceTimeReservations.index(this.vertexKeysByOwner, ownerId, key);
   }
 
   public addEdge(fromPos: Position3D, toPos: Position3D, time: number, ownerId: string): void {
-    const fromKey = (fromPos.x) + (fromPos.y * 64) + (fromPos.z * 4096);
-    const toKey = (toPos.x) + (toPos.y * 64) + (toPos.z * 4096);
-    this.edgeOwners.set(`${time}:${fromKey}->${toKey}`, ownerId);
+    const key = SpaceTimeReservations.edgeKey(fromPos, toPos, time);
+    if (key === undefined) {
+      this.farEdgeOwners.set(`${time}:${cellKey(fromPos)}->${cellKey(toPos)}`, ownerId);
+      return;
+    }
+    this.edgeOwners.set(key, ownerId);
+    SpaceTimeReservations.index(this.edgeKeysByOwner, ownerId, key);
   }
 
   public isVertexReserved(key: number, requesterId?: string): boolean {
@@ -172,28 +207,39 @@ export class SpaceTimeReservations implements ReservationView {
 
   /** Owner of a move from `toPos` to `fromPos` in the same step, i.e. a head-on swap partner. */
   public getOpposingEdgeOwner(fromPos: Position3D, toPos: Position3D, time: number): string | undefined {
-    return this.edgeOwners.get(`${time}:${cellKey(toPos)}->${cellKey(fromPos)}`);
+    const key = SpaceTimeReservations.edgeKey(toPos, fromPos, time);
+    if (key === undefined) {
+      return this.farEdgeOwners.size === 0 ? undefined : this.farEdgeOwners.get(`${time}:${cellKey(toPos)}->${cellKey(fromPos)}`);
+    }
+    return this.edgeOwners.get(key);
   }
 
   public clearOwnerFromTime(ownerId: string, fromTime: number): void {
-    for (const [key, owner] of this.vertexOwners.entries()) {
-      if (owner === ownerId) {
-        const t = Math.floor(key / 262144);
-        if (t >= fromTime) {
+    const vertexKeys = this.vertexKeysByOwner.get(ownerId);
+    if (vertexKeys) {
+      for (const key of vertexKeys) {
+        if (this.vertexOwners.get(key) !== ownerId) vertexKeys.delete(key);
+        else if (Math.floor(key / 262144) >= fromTime) {
           this.vertexOwners.delete(key);
+          vertexKeys.delete(key);
         }
       }
     }
 
-    for (const [edgeKey, owner] of this.edgeOwners.entries()) {
-      if (owner === ownerId) {
-        const colonIdx = edgeKey.indexOf(':');
-        if (colonIdx !== -1) {
-          const t = parseInt(edgeKey.substring(0, colonIdx), 10);
-          if (t >= fromTime) {
-            this.edgeOwners.delete(edgeKey);
-          }
+    const edgeKeys = this.edgeKeysByOwner.get(ownerId);
+    if (edgeKeys) {
+      for (const key of edgeKeys) {
+        if (this.edgeOwners.get(key) !== ownerId) edgeKeys.delete(key);
+        else if (Math.floor(Math.floor(key / 8) / 262144) >= fromTime) {
+          this.edgeOwners.delete(key);
+          edgeKeys.delete(key);
         }
+      }
+    }
+
+    for (const [edgeKey, owner] of this.farEdgeOwners.entries()) {
+      if (owner === ownerId && parseInt(edgeKey.substring(0, edgeKey.indexOf(':')), 10) >= fromTime) {
+        this.farEdgeOwners.delete(edgeKey);
       }
     }
   }
@@ -204,7 +250,7 @@ export class SpaceTimeReservations implements ReservationView {
   }
 
   public add(key: number): this {
-    this.vertexOwners.set(key, 'RESERVED');
+    this.addVertex(key, 'RESERVED');
     return this;
   }
 

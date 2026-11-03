@@ -18,6 +18,9 @@ export interface RunRecord extends Partial<MissionMetrics> {
   maxAltitude: number;
   /** Maximum pallets per rack column. */
   rackLevels: number;
+  /** Cluster radius and maximum cluster size (used by the Cluster allocation only). */
+  clusterRadius: number;
+  maxClusterSize: number;
   /** % of capacity per tick; Infinity = instant. */
   chargeRate: number;
   drainMultiplier: number;
@@ -77,6 +80,8 @@ export async function runScenario(spec: ScenarioSpec, plan: BenchmarkPlan): Prom
       chargingSites: spec.chargingSites,
       maxAltitude: spec.maxAltitude,
       rackLevels: spec.rackLevels,
+      clusterRadius: spec.clusterRadius,
+      maxClusterSize: spec.maxClusterSize,
       chargeRate: plan.chargeRate,
       drainMultiplier: plan.drainMultiplier,
       repetition: spec.repetition,
@@ -95,8 +100,8 @@ export async function runScenario(spec: ScenarioSpec, plan: BenchmarkPlan): Prom
         spec.maxAltitude,
         plan.batteryEnabled,
         spec.allocationMode,
-        plan.clusterRadius,
-        plan.maxClusterSize,
+        spec.clusterRadius,
+        spec.maxClusterSize,
         spec.completionMode,
         plan.chargeRate,
         plan.drainMultiplier

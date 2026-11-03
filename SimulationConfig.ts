@@ -144,8 +144,14 @@ export const SCAN_TICKS = 3;
 /** A* / CBS per-drone search timeout in milliseconds. */
 export const PATHFINDER_TIMEOUT_MS = 10_000;
 
-/** Maximum path length (in ticks) before the planner gives up on a leg. */
-export const MAX_TIMESTEPS = 10_000;
+/**
+ * Planning horizon in ticks: no path may run past it. Two drones need about 98 000 ticks to cover the
+ * 64 × 64 warehouse (1434 pallets), so the horizon leaves room for slower charging.
+ */
+export const MAX_TIMESTEPS = 150_000;
+
+/** How far past the longest drone path the forklifts are reserved before each planning cycle. */
+export const FORKLIFT_LOOKAHEAD_TICKS = 5_000;
 
 /** Playback at 1×: wall-clock milliseconds per simulation tick. */
 export const PLAYBACK_TICK_MS = 150;

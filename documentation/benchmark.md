@@ -20,13 +20,14 @@ npm run bench -- --help
 | `--runs` | repetitions (distinct seeded scenarios) per configuration |
 | `--seed` | base seed; scenario seeds are derived from it |
 | `--algos` | comma-separated strategy names |
-| `--grids` | grid sizes to include: `12`, `16`, `24` |
+| `--grids` | grid sizes to include: `12`, `16`, `24`, `32`, `64` |
 | `--drones` | swarm sizes |
 | `--alloc` | `1-to-1` (Hungarian), `Cluster`, or the one-to-one baselines `Greedy` (cheapest pair first by \(C_{ik}\)), `Nearest` (each drone takes its nearest feasible pallet, in fleet order) and `Random` (a random feasible pallet). The baselines keep the energy feasibility check |
 | `--completion` | `count` (fixed missions per drone), `all-pallets` (full coverage) |
 | `--missions` | missions per drone in `count` mode |
 | `--sites` | charging sites including the base (1 = base only; each extra site is a one-drone station) |
 | `--rack-levels` | maximum pallets per rack column (default 8, `WAREHOUSE.RACK_LEVELS`). Each column gets 1 to this many levels at random. Left out of the scenario seed, so every height uses the same rack layout |
+| `--cluster-radius`, `--cluster-size` | cluster radii and maximum pallets per cluster (defaults 5 and 3). Varied only for the `Cluster` allocation, the other modes run once with the first value, so list the default first to pair them with it. Left out of the scenario seed |
 | `--altitude` | flight ceilings, the highest cell y a drone may use (default: the grid size). Pallets sit at y ≤ 6 (S-12, M-16) and y ≤ 7 (L-24), so a ceiling of 8 still reaches every pallet while packing the drones into fewer layers |
 | `--charge-rate` | charging speed in % of capacity per tick, or `instant` |
 | `--battery` | battery capacity per drone |
@@ -46,6 +47,10 @@ A plan is the cartesian product of its dimensions, repeated `runs` times. The pr
 | `S-12` | 12³ | 50 | 3 |
 | `M-16` | 16³ | 90 | 4 |
 | `L-24` | 24³ | 200 | 6 |
+| `XL-32` | 32³ | 358 | 8 |
+| `XXL-64` | 64³ | 1434 | 16 |
+
+The paper's experiments use 16, 32 and 64 (`PAPER_SCALES`): the side doubles and the pallets keep the density of the smaller scales, 0.35 per floor cell. 64 is the largest grid the space-time keys encode (coordinates 0 to 63).
 
 | Preset | Scales | Drones | Allocation | Completion | Runs |
 |---|---|---|---|---|---|
@@ -53,6 +58,19 @@ A plan is the cartesian product of its dimensions, repeated `runs` times. The pr
 | `standard` | S, M, L | 2, 4, 8 | 1-to-1, Cluster | count | 10 |
 | `full` | S, M, L | 2, 4, 8 | 1-to-1, Cluster | count, all-pallets | 10 |
 | `charging` | M, L | 2, 4, 8 | 1-to-1 | all-pallets | 5 |
+| `e1` to `e5` | M-16, XL-32, XXL-64 | 2, 4, 8, 16, 32 (E5: 8, 16, 32) | see below | all-pallets | 20 (E5: 10) |
+
+The paper presets cross every scale with every swarm size and keep Cooperative as the planner unless the experiment is about planners:
+
+| Preset | Varies | Notes |
+|---|---|---|
+| `e1` | allocation: 1-to-1, Greedy, Nearest, Random | run twice, the second time with `--no-return` |
+| `e2` | 1-to-1 vs Cluster with radius 5, 3, 7 and size 3, 2, 4, 6 | 1-to-1 pairs with radius 5, size 3 |
+| `e3` | 1, 2, 3, 5 charging sites | no return, 2%/tick, battery 30 |
+| `e4` | Naive, Cooperative, Energy Saver, CBS | one worker (planning time is a metric) |
+| `e5` | Cooperative, CBS | one worker, 10 repetitions |
+
+**Planning horizon.** No path may run past `MAX_TIMESTEPS` (150 000 ticks). Two drones need about 98 000 ticks to cover the 64-grid warehouse. The forklifts' space-time is reserved before each planning cycle up to 5000 ticks past the longest drone path (`FORKLIFT_LOOKAHEAD_TICKS`), so a short mission does not pay for the whole horizon. The collision check uses the forklift routes directly, so a drone that met an unreserved forklift would show up as a drone–forklift collision.
 
 Fixed parameters are: 3 missions per drone, round trips, 100% battery with constraints enabled, instant charging at the base only (so results stay comparable with earlier runs), mixed task priorities (\(\pi_k\) drawn uniformly from 0.10 to 1.00), deployment from the warehouse dock, a flight ceiling equal to the grid size, and a cluster radius of 5 with at most 3 pallets per cluster.
 
@@ -81,7 +99,7 @@ With `--drain 3` the same 240 runs plan in about 40 s in total (at most 0.5 s pe
 
 All randomness in the simulation core goes through [`utils/Random.ts`](../utils/Random.ts). The app uses `Math.random`. The benchmark installs a seeded Mulberry32 generator.
 
-- **Scenario seed.** Each scenario's seed is a hash of the base seed and the scenario coordinates (scale, drones, completion, repetition). A scenario therefore keeps its seed when other dimensions are added or removed. The allocation method, the number of charging sites and the flight ceiling are left out, so all of them run on the same warehouse and their comparisons are paired.
+- **Scenario seed.** Each scenario's seed is a hash of the base seed and the scenario coordinates (scale, drones, completion, repetition). A scenario therefore keeps its seed when other dimensions are added or removed. The allocation method, the number of charging sites, the flight ceiling and the cluster settings are left out, so all of them run on the same warehouse and their comparisons are paired.
 - **Same scenario for every strategy.** The world and swarm are built once per scenario. Every strategy is then run on that same scenario, with the random source re-seeded before each run, so in-run randomness (e.g. cluster seeding) is identical too.
 - **What is reproducible.** Every mission metric is bit-for-bit reproducible for a given seed; this is covered by the tests. Planning time depends on the machine.
 - **Parallel runs.** With `--workers n` each child process runs whole scenarios with its own random source, and the records are put back in scenario order, so `runs.csv` matches a one-worker run except for `planningMs` (covered by the tests). On the M4 Pro the `full` preset with Cooperative only took 42 s with one worker and 9 s with 13, and the mean planning time per run went from 112 ms to 273 ms (2.45×). Report planning times from one-worker runs only. `summary.json` records the worker count.
