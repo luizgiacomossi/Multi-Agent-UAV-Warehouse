@@ -30,10 +30,10 @@ Fontes: mipro.hr, páginas "Instructions for Authors MIPRO", "Call for papers" e
 199 palavras (limite do portal: 200). Autores, na ordem: Luiz Giacomossi, Afshin Ameri, Ivan Tomasic, Baran Çürüklü, Håkan Forsberg (todos da Mälardalen University). Keywords: drone swarm, multi-robot task allocation, multi-agent path finding, energy-aware planning, warehouse inventory. O abstract do paper final pode mudar. Atualizar a versão no portal se os números mudarem depois de rodar os experimentos de novo.
 
 Afirmações do abstract que o paper precisa sustentar:
-- [ ] "swarms of up to 24 drones": hoje só existe no S-12 (50 paletes, 3 repetições). Rodar 24 drones no M-16 e no L-24 ou deixar claro no texto em qual escala isso foi testado.
+- [x] "swarms of up to 24 drones": superado (3/11). Os experimentos rodam até 32 drones em todas as escalas, e o abstract do `paper.tex` já diz 32 drones e 1434 paletes. O abstract submetido continua com 24 e 200.
 - [ ] "windowed Conflict-Based Search": descrever a janela de cerca de 10 ticks, o planejamento por trecho e o fallback para Cooperative A*.
 - [ ] "booked in time to avoid queueing in the air": é a intenção da política, não uma garantia. Se o caminho até a estação falha, o drone paira no lugar e tenta de novo (até 5 vezes, 3 ticks cada) antes de voltar à base. Medir quantas vezes isso acontece ou descrever como objetivo de projeto.
-- [ ] "safety-margin energy estimate": a estimativa usa distância Euclidiana × γ, e o voo real segue o grid. Mortes de bateria são detectadas e contadas, não impossíveis por construção.
+- [ ] "safety-margin energy estimate": a parte da distância foi resolvida (Manhattan × 1,1 desde 2/11). Falta dizer no texto que mortes de bateria são detectadas e contadas, e não impossíveis por construção (zero no E3).
 
 ## 3. Mensagem do paper
 
@@ -131,7 +131,7 @@ Situação em 2/11: Introdução e Related Work juntos têm cerca de 900 palavra
 
 ### 5.3 Experimentos (mínimo 10 repetições por célula, idealmente 20)
 
-- [ ] **E1. Alocação:** Hungarian vs greedy vs nearest vs random. S/M/L, 2/4/8 drones, cobertura total, com e sem ida e volta. Métricas: makespan, energia, soma de custos, `priorityScanTime` e `meanScanTime`.
+- [ ] **E1. Alocação:** Hungarian vs greedy vs nearest vs random. 16/32/64, 2 a 32 drones, cobertura total, com e sem ida e volta. Métricas: makespan, energia, soma de custos, `priorityScanTime` e `meanScanTime`.
 - [ ] **E2. Clusters:** 1-para-1 vs Cluster. Variar raio (3, 5, 7) e tamanho máximo (2, 3, 4, 6).
 - [x] **E3. Recarga:** preset `e3` (1 a 7 pontos de recarga, posicionamento por cobertura, bateria 30). Rodado em 3/11: 2100 runs (3 escalas × 5 enxames × 7 sites × 20 repetições, Cooperative), 241 s com 13 workers, resultados em `bench-results/e3-2026-11-03/`. Zero falhas, colisões, baterias esgotadas e drones presos.
   - Mínimo de sites: 1 no 16 (100 de 100 cenários), 2 no 32 (100), 4 no 64 (91, e 5 nos outros 9). Cobertura só com a base: 100% no 16, 84% a 89% no 32, 23% a 27% no 64. No 64: 90% com 2 sites, 96% com 3, 99,9% a 100% com 4.
@@ -150,10 +150,11 @@ Plano revisto em 2/11: uma figura do problema e um diagrama da solução, e os r
 - [x] Fig. 1: problema. Vista isométrica do cenário S-12 (seed 42), com os três desafios numerados. Na Introdução, depois do primeiro parágrafo.
 - [x] Fig. 2: diagrama da solução (loop por eventos: alocação, recarga, planejamento por trecho, atualização, com a tabela de reservas espaço-tempo). Na Seção IV.
 - [x] Figura dos cenários (largura total, Seção V): renders do simulador dos três armazéns com todas as prateleiras cheias, mais close-ups do drone, da empilhadeira e do rack renderizados sozinhos. Captura em `figures/scenarios_capture.mjs` (repo do paper) e `paper/figure-renders/` (aqui). É a 4ª figura, então o texto precisa encolher.
+  - Refeita em 3/11 (ideia do autor): (a) exemplo 10 × 10 com os close-ups do palete, da empilhadeira e do drone, (b) a (d) os armazéns dos experimentos, 16, 32 e 64, numa linha só (painéis com cerca de 86 pt de altura, antes 112). Os renders mostram todas as prateleiras cheias (111, 482 e 1986 paletes na UI, contra cerca de 90, 358 e 1434 no benchmark), e a legenda diz isso. Empilhadeiras geradas: 1, 2, 5 e 10. O slider de grid da UI agora vai até 64, e a captura ganhou `SIM_URL` e `TILT` (arrasta a câmera para cima nos grids grandes, cuja vista padrão é rasa).
 - [ ] Fig. de resultados: dois painéis, (a) makespan vs número de drones (1-para-1 vs Cluster) com barras de erro, (b) makespan e energia vs número de pontos de recarga.
 - [ ] CBS vs Cooperative em densidade crescente: entra na Tabela II.
-- [ ] Tabela I: parâmetros do modelo (β_fly, β_hover, γ, δ_safe, λ, w1, w2, escalas S/M/L).
-- [ ] Tabela II: comparação entre métodos de alocação (E1), mais CBS vs Cooperative (E4).
+- [x] Tabela I: virou a tabela dos experimentos E1 a E5 (`tab:experiments`, 3/11). Os parâmetros do modelo ficam no texto do Método e do Setup, para poupar espaço.
+- [ ] Tabela II: resultados (E1 alocação, mais CBS vs Cooperative do E4).
 
 ## 6. Escrita
 
@@ -164,7 +165,7 @@ Plano revisto em 2/11: uma figura do problema e um diagrama da solução, e os r
 - [x] III. Formulação: rascunho em sete parágrafos (grid, drones, tarefas, empilhadeiras, energia e recarga, conflitos, objetivo), com a notação do `SimulationConfig.ts`. Falta resolver o tempo de leitura (ver abaixo).
 - [x] IV. Método: rascunho com abertura que percorre a Fig. 2 e as quatro subseções (custo e viabilidade com as equações de energia, viabilidade e custo, clusters, planejadores, recarga). Tem cerca de 920 palavras, uns 0,5 página acima do orçamento. Cortar depois.
 - [ ] IV. Pseudocódigo do loop por eventos (`SimulationManager.runPathfinding`): ficou de fora por espaço. Decidir se entra.
-- [ ] V. Setup: semente, repetições, hardware, versão do código.
+- [x] V. Setup: escrito em 3/11 (ver seção 4). Falta o link e a versão do código.
 - [ ] VI. Resultados: só números do commit atual, com média ± IC95 e resultado dos testes estatísticos.
 - [ ] VII. Limitações, ditas abertamente: modelo em grid sem dinâmica nem unidades físicas, empilhadeiras com rotas conhecidas, planejamento offline sem replanejamento durante a execução, CBS por janela de trechos (não ótimo para a missão inteira), escala até 24³ células.
 - [ ] Conclusão por último.
@@ -183,7 +184,7 @@ Cada `\todo` vermelho no texto tem um item aqui. Tirar o `\todo` do texto e marc
 - [x] Método (custo): o texto diz D_max = 2N. Resolvido, o código agora define `dMaxFor(N) = 2N`.
 - [ ] Setup: a frase dos racks ("With 12 or 16 levels, makespan and energy grow by about 10%") vem da amostra de 5 runs de 2/11. Confirmar o número na rodada final.
 - [ ] Resultados (E1): o `\todo` diz que o Greedy ficou a menos de 2% do Hungarian e que o ganho vem da função de custo. Confirmar na rodada final antes de escrever.
-- [ ] Seções V a VIII: ainda são só `\todo`.
+- [ ] Seções VI a VIII: ainda são só `\todo` (a V foi escrita em 3/11).
 
 ### Regras de estilo (sempre)
 

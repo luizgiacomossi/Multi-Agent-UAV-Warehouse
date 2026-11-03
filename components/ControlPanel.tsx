@@ -265,7 +265,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
              <input 
                 type="range" 
                 min="8" 
-                max="40" 
+                max="64" 
                 step="2"
                 value={gridSizeValue} 
                 onChange={(e) => setGridSizeValue(Number(e.target.value))}
