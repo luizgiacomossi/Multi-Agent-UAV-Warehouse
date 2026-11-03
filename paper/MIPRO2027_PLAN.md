@@ -103,6 +103,14 @@ Situação em 2/11: Introdução e Related Work juntos têm cerca de 900 palavra
   - Para o paper: E1 com ida e volta mostra o efeito da prioridade com clareza. Dizer que o Hungarian ótimo e o greedy dão quase o mesmo resultado, e que sem ida e volta há um trade-off entre distância e prioridade.
 - [x] Teste estatístico pareado no `bench/report.ts` (Wilcoxon signed-rank, já que os cenários são pareados por semente). Feito: o benchmark grava `tests.csv` com o teste de cada par de níveis de cada fator, pareado por seed. p exato até 50 pares (com empates também), conferido com o scipy. Amostra de 2/11 (S-12, 4 drones, todos os paletes, 10 runs): Hungarian vs Greedy p = 0,63 a 0,80 (empate), Hungarian vs Nearest p = 0,002 no tempo ponderado por prioridade (30 ticks a menos), Cluster vs 1-para-1 p = 0,002 em energia, CBS vs Cooperative p = 0,03 a 0,13 com diferenças de 0,1%.
   - Atenção: com n runs o menor p possível é 2/2ⁿ (0,002 com 10, 2e-6 com 20). Com muitas comparações, considerar a correção de Holm. Diferença significativa não é diferença relevante: o CBS ganha 0,2 ticks com p = 0,03.
+- [ ] **Escalas 16, 28 e 40 (ideia de 3/11, em decisão).** Teste rápido (1 run, todos os paletes, densidade de 0,35 palete por célula do chão, Cooperative e CBS):
+  - 16: 90 paletes, 2 empilhadeiras, cerca de 0,5 s por cenário.
+  - 28: 274 paletes, 4 empilhadeiras, cerca de 3 s por cenário (4 drones: makespan 4431, 8 drones: 2136).
+  - 40: 560 paletes, 6 empilhadeiras, 11 a 17 s por cenário. Com 8 drones cobre tudo (makespan 5941). Com 2 drones para em `MAX_TIMESTEPS = 10 000` com 40% de cobertura, e com 4 drones também passaria do limite (cerca de 12 000 ticks).
+  - Zero colisões e zero fallbacks do CBS em todos.
+  - 64 (para o E5, medido com `MAX_TIMESTEPS` temporariamente em 60 000): 1434 paletes, 10 empilhadeiras, cerca de 3 min por cenário com os dois planejadores. Makespan 24 279 (8 drones), 12 008 (16), 5947 (32). Planejamento de 60 a 66 s no Cooperative e de 106 a 112 s no CBS, quase sem depender do número de drones. Cobertura 100%, zero colisões e fallbacks, e CBS a menos de 0,2% do Cooperative.
+  - Tamanho da célula não está definido em lugar nenhum. Se uma célula for uma posição de palete (cerca de 1,2 a 1,5 m), 40 dá uns 60 × 60 m e 64 uns 96 × 96 m, com racks de cerca de 12 m. Definir no Setup e procurar referência para o tamanho típico de um armazém (o usuário decide).
+  - Se adotar: subir `MAX_TIMESTEPS` (cerca de 30 000), trocar `SCALES`, refazer os renders da figura dos cenários, refazer a sensibilidade dos racks e conferir o preset `charging` (bateria 30 com δ_safe 20 pode não alcançar o fundo de um armazém 40).
 - [ ] Script que gera as figuras a partir de `summary.csv` (matplotlib ou similar), salvo no repositório.
 
 ### 5.3 Experimentos (mínimo 10 repetições por célula, idealmente 20)
