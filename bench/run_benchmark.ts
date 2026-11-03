@@ -6,12 +6,14 @@
  *   npm run bench -- --preset standard
  *   npm run bench -- --preset full --runs 20 --seed 7
  *   npm run bench -- --algos Cooperative,CBS --grids 12,24 --drones 4,8 --alloc Cluster
+ *   npm run bench -- --preset full --workers auto   # scenarios spread over child processes
  *
  * Output: bench-results/<preset>-<timestamp>/{runs.csv, summary.csv, tests.csv, summary.json}
  */
 import { join } from 'path';
 import { BenchmarkPlan, PRESETS, SCALES, AllocationMode, expandScenarios } from './scenarios';
-import { RunRecord, runScenario } from './runScenario';
+import { RunRecord } from './runScenario';
+import { defaultWorkers, runScenarios } from './parallel';
 import { printSummary, summarizeRecords, writeReports } from './report';
 import { MissionCompletionMode } from '../types';
 
@@ -19,6 +21,7 @@ interface CliOptions {
   preset: string;
   overrides: Partial<BenchmarkPlan>;
   outDir?: string;
+  workers: number;
 }
 
 const HELP = `Usage: npm run bench -- [options]
@@ -38,10 +41,12 @@ const HELP = `Usage: npm run bench -- [options]
   --battery <n>       battery capacity per drone
   --drain <x>         battery drain multiplier (1 = nominal β_fly / β_hover)
   --no-return         do not return to the base between tasks (lets drones use charging stations)
+  --workers <n|auto>  scenarios run in parallel child processes (default 1; auto = cores - 1).
+                      Mission metrics are identical for any count, planning time is not
   --out <dir>         output directory`;
 
 function parseArgs(argv: string[]): CliOptions {
-  const options: CliOptions = { preset: 'quick', overrides: {} };
+  const options: CliOptions = { preset: 'quick', overrides: {}, workers: 1 };
   const list = (v: string) => v.split(',').map(s => s.trim()).filter(Boolean);
   const numbers = (v: string) => list(v).map(Number);
 
@@ -83,6 +88,12 @@ function parseArgs(argv: string[]): CliOptions {
         break;
       }
       case '--out': options.outDir = needValue(); break;
+      case '--workers': {
+        const workers = needValue();
+        options.workers = workers === 'auto' ? defaultWorkers() : Number(workers);
+        if (!Number.isInteger(options.workers) || options.workers < 1) throw new Error(`--workers needs a positive integer or "auto", got ${workers}`);
+        break;
+      }
       case '--help': case '-h': console.log(HELP); process.exit(0);
       default: throw new Error(`Unknown option ${flag}\n\n${HELP}`);
     }
@@ -106,15 +117,14 @@ async function main() {
 
   console.log(`Benchmark "${plan.name}": ${scenarios.length} scenarios × ${plan.algorithms.length} strategies = ${totalRuns} runs`);
   console.log(`Strategies: ${plan.algorithms.join(', ')} · scales: ${plan.scales.map(s => s.label).join(', ')} · drones: ${plan.droneCounts.join(', ')}`);
+  if (options.workers > 1) console.log(`Workers: ${options.workers} (planning times share the machine, use 1 worker to measure them)`);
 
-  const records: RunRecord[] = [];
   const started = performance.now();
-  for (const [index, scenario] of scenarios.entries()) {
-    records.push(...await runScenario(scenario, plan));
-    const done = (index + 1) * plan.algorithms.length;
+  const records: RunRecord[] = await runScenarios(scenarios, plan, options.workers, scenariosDone => {
+    const done = scenariosDone * plan.algorithms.length;
     const elapsed = (performance.now() - started) / 1000;
     process.stdout.write(`\r  ${done}/${totalRuns} runs · ${elapsed.toFixed(0)}s elapsed · ETA ${(elapsed / done * (totalRuns - done)).toFixed(0)}s   `);
-  }
+  });
   process.stdout.write('\n');
 
   const failures = records.filter(r => !r.ok);
@@ -124,7 +134,7 @@ async function main() {
 
   const summaries = summarizeRecords(records);
   printSummary(summaries);
-  writeReports(outDir, plan, records, summaries);
+  writeReports(outDir, plan, records, summaries, options.workers);
   console.log(`\nResults written to ${outDir}/ (runs.csv, summary.csv, tests.csv, summary.json)`);
 }
 

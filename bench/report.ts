@@ -180,7 +180,7 @@ export function pairedTests(records: RunRecord[]): PairedTest[] {
 }
 
 /** Writes runs.csv, summary.csv, tests.csv and summary.json into `outDir`. */
-export function writeReports(outDir: string, plan: BenchmarkPlan, records: RunRecord[], summaries: GroupSummary[]): void {
+export function writeReports(outDir: string, plan: BenchmarkPlan, records: RunRecord[], summaries: GroupSummary[], workers = 1): void {
   mkdirSync(outDir, { recursive: true });
 
   writeFileSync(join(outDir, 'runs.csv'), toCsv(RUN_COLUMNS, records.map(r => RUN_COLUMNS.map(c => r[c]))));
@@ -203,7 +203,7 @@ export function writeReports(outDir: string, plan: BenchmarkPlan, records: RunRe
     Number.isNaN(t.p) ? undefined : t.p < 1e-4 ? t.p.toExponential(2) : t.p.toFixed(4),
   ])));
 
-  writeFileSync(join(outDir, 'summary.json'), JSON.stringify({ plan, generatedAt: new Date().toISOString(), environment: runEnvironment(), summaries }, null, 2));
+  writeFileSync(join(outDir, 'summary.json'), JSON.stringify({ plan, generatedAt: new Date().toISOString(), environment: { ...runEnvironment(), workers }, summaries }, null, 2));
 }
 
 /** Code version and runtime of a benchmark run, so every result can be traced back to a commit. */

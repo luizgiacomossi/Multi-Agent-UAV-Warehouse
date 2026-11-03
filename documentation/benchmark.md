@@ -10,6 +10,7 @@ npm run bench -- --preset standard              # scales x swarm sizes x allocat
 npm run bench -- --preset full                  # standard + full-coverage missions (~3 min)
 npm run bench -- --preset charging              # base only vs. charging stations (see Section 2.1)
 npm run bench -- --algos Cooperative,CBS --grids 16,24 --drones 4,8 --alloc Cluster --runs 20 --seed 7
+npm run bench -- --preset full --workers auto      # scenarios spread over child processes
 npm run bench -- --help
 ```
 
@@ -31,6 +32,7 @@ npm run bench -- --help
 | `--battery` | battery capacity per drone |
 | `--drain` | battery drain multiplier (scales `β_fly` and `β_hover`; 1 = nominal) |
 | `--no-return` | do not return to the base between tasks (needed for drones to use stations) |
+| `--workers` | scenarios run in parallel child processes (default 1, `auto` = cores − 1). Mission metrics and the order of the records are identical for any count. Planning time is not, since the processes share the machine (see Section 3) |
 | `--out` | output directory (default `bench-results/<preset>-<timestamp>/`) |
 
 Runtimes above were measured on an Apple M4 Pro with the default 10 repetitions.
@@ -82,6 +84,7 @@ All randomness in the simulation core goes through [`utils/Random.ts`](../utils/
 - **Scenario seed.** Each scenario's seed is a hash of the base seed and the scenario coordinates (scale, drones, completion, repetition). A scenario therefore keeps its seed when other dimensions are added or removed. The allocation method, the number of charging sites and the flight ceiling are left out, so all of them run on the same warehouse and their comparisons are paired.
 - **Same scenario for every strategy.** The world and swarm are built once per scenario. Every strategy is then run on that same scenario, with the random source re-seeded before each run, so in-run randomness (e.g. cluster seeding) is identical too.
 - **What is reproducible.** Every mission metric is bit-for-bit reproducible for a given seed; this is covered by the tests. Planning time depends on the machine.
+- **Parallel runs.** With `--workers n` each child process runs whole scenarios with its own random source, and the records are put back in scenario order, so `runs.csv` matches a one-worker run except for `planningMs` (covered by the tests). On the M4 Pro the `full` preset with Cooperative only took 42 s with one worker and 9 s with 13, and the mean planning time per run went from 112 ms to 273 ms (2.45×). Report planning times from one-worker runs only. `summary.json` records the worker count.
 
 ## 4. Metrics
 
@@ -132,6 +135,7 @@ The console prints one table per configuration, with the mean ± 95% CI for coll
 | `bench/metrics.ts` | computes mission metrics from a planned result |
 | `bench/stats.ts` | descriptive statistics |
 | `bench/report.ts` | grouping, CSV/JSON output, console tables |
+| `bench/parallel.ts`, `bench/worker.ts` | runs the scenarios in order, or over child processes with `--workers` |
 | `bench/run_benchmark.ts` | command-line entry point |
 
 To add a metric: compute it in `metrics.ts` and list it in `SUMMARY_METRICS` in `report.ts`. To add a strategy: register it in `SimulationManager` and add its name to a preset or pass it with `--algos`.

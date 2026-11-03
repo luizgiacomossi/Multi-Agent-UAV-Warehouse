@@ -2,6 +2,7 @@ import { createSeededRandom, random, withSeed } from '../utils/Random';
 import { summarize } from '../bench/stats';
 import { expandScenarios, PRESETS } from '../bench/scenarios';
 import { runScenario } from '../bench/runScenario';
+import { runScenarios } from '../bench/parallel';
 import { MissionController } from '../classes/MissionController';
 import { TaskCluster } from '../classes/TaskCluster';
 import { Task, Pallet } from '../types';
@@ -170,6 +171,15 @@ export async function runBenchmarkTests(): Promise<{ passed: number; failed: num
   const lowCeiling = paired.find(s => s.allocationMode === 'Greedy' && s.maxAltitude === 6)!;
   const [greedyRun] = await runScenario(lowCeiling, { ...plan, algorithms: ['Cooperative'] });
   assert(greedyRun.ok && greedyRun.maxAltitude === 6 && greedyRun.collisionsDroneDrone === 0, 'A Greedy run under a low ceiling completes without collisions', greedyRun.error);
+
+  // Spreading scenarios over child processes changes nothing but the planning time
+  const parallelPlan = { ...PRESETS.quick, algorithms: ['Cooperative', 'CBS'], droneCounts: [2, 4], repetitions: 2 };
+  const parallelScenarios = expandScenarios(parallelPlan);
+  const withoutTime = (records: Awaited<ReturnType<typeof runScenarios>>) => JSON.stringify(records.map(({ planningMs, ...rest }) => rest));
+  const serial = await runScenarios(parallelScenarios, parallelPlan, 1);
+  const parallel = await runScenarios(parallelScenarios, parallelPlan, 3);
+  assert(serial.length === 8 && withoutTime(serial) === withoutTime(parallel),
+    'Three workers give the same records, in the same order, as one worker (planning time aside)');
 
   return { passed, failed };
 }
