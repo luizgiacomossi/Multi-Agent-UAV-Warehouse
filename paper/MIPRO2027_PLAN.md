@@ -58,6 +58,8 @@ Afirmações do abstract que o paper precisa sustentar:
 | III. Problem formulation | 0,8 | Grid 3D, tarefas, energia, restrições de conflito, objetivo |
 | IV. Method | 1,2 | Custo e viabilidade, clusters e tour, planejadores, recarga. 1 figura de arquitetura |
 | V. Experimental setup | 0,4 | Cenários, parâmetros, métricas, hardware |
+
+- [x] **Seção V escrita (3/11)**: armazéns (16/32/64, cerca de 90/358/1434 paletes, 2/5/10 empilhadeiras geradas, sensores meio a meio, π uniforme em [0,1; 1]), configurações de energia, os 5 experimentos com a Tabela I (`tab:experiments`), métricas, teste de Wilcoxon pareado e hardware. Bateria agora em unidades em todo o paper (B = 100, δ_safe = 20 unidades, E3 com B = 30 e a mesma margem), igual ao código. Abstract e contribuições atualizados (até 1434 paletes e 32 drones). TODOs no texto: refazer a Fig. 3 e a sensibilidade dos racks nas novas escalas, citação do Wilcoxon (palavras-chave: Wilcoxon 1945 "Individual comparisons by ranking methods"), link do código. A seção ficou maior que o orçamento de 0,4 página (cerca de 0,7 com a tabela).
 | VI. Results | 1,3 | 2 a 3 figuras, 1 tabela |
 | VII. Discussion and limitations | 0,3 | |
 | VIII. Conclusion | 0,2 | |
