@@ -13,7 +13,7 @@ const obj = new URLSearchParams(location.search).get('obj') ?? 'drone';
 const VIEWS: Record<string, { position: [number, number, number]; target: [number, number, number]; fov: number }> = {
   drone: { position: [1.05, 0.75, 1.15], target: [0, 0, 0], fov: 32 },
   forklift: { position: [1.9, 1.45, 2.3], target: [0, 0.55, 0], fov: 32 },
-  pallet: { position: [2.9, 2.4, 3.3], target: [0, 0.5, 0], fov: 32 },
+  pallet: { position: [3.4, 2.8, 3.85], target: [0, 0.45, 0], fov: 32 },
 };
 
 const Forklift: React.FC = () => {
