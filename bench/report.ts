@@ -25,6 +25,7 @@ export const SUMMARY_METRICS = [
   'priorityScanTime',
   'stationVisits',
   'stationTicks',
+  'minChargingSites',
   'cbsNodesExpanded',
   'cbsFallbacks',
 ] as const satisfies readonly (keyof RunRecord)[];
@@ -96,7 +97,7 @@ function toCsv(header: string[], rows: (string | number | boolean | undefined)[]
 
 const RUN_COLUMNS: (keyof RunRecord)[] = [
   'scale', 'gridSize', 'pallets', 'forklifts', 'drones', 'allocationMode', 'completionMode',
-  'chargingSites', 'maxAltitude', 'rackLevels', 'clusterRadius', 'maxClusterSize', 'chargeRate', 'drainMultiplier', 'repetition', 'seed', 'algorithm', 'ok', 'error', ...SUMMARY_METRICS,
+  'chargingSites', 'stationPlacement', 'maxAltitude', 'rackLevels', 'clusterRadius', 'maxClusterSize', 'chargeRate', 'drainMultiplier', 'repetition', 'seed', 'algorithm', 'ok', 'error', ...SUMMARY_METRICS,
 ];
 const STAT_FIELDS: (keyof Summary)[] = ['mean', 'std', 'ci95', 'median', 'min', 'max'];
 

@@ -102,6 +102,24 @@ export async function runChargingTests(): Promise<{ passed: number; failed: numb
   const spread = Math.min(...placed.flatMap((a, i) => placed.slice(i + 1).map(b => Math.abs(a.x - b.x) + Math.abs(a.z - b.z))));
   assert(spread >= 8, 'Stations are spread over the map', `closest pair ${spread} cells apart`);
 
+  // Coverage placement: with battery 30 a round trip of about 89 cells is affordable, so the far pallet needs a station
+  const coverage = { capacity: 30, drainMultiplier: 1 };
+  const farPallet = { x: 40, y: 2, z: 40 };
+  const covering = new World(48);
+  covering.pallets = [{ position: { x: 4, y: 1, z: 4 } }, { position: farPallet }] as any;
+  covering.generateStations(0, baseZone, coverage);
+  assert(covering.chargeStations.length === 0 && covering.minChargingSites === 2, 'Coverage placement reports the sites needed even when none are placed', `min ${covering.minChargingSites}`);
+  covering.generateStations(1, baseZone, coverage);
+  const [coveringStation] = covering.chargeStations;
+  const farScan: Task = { id: 'far', target: farPallet, req_payload: 'camera', pi_k: 0.5, t_hover: 3, status: 'PENDING' };
+  assert(CostModel.isAffordable(30, CostModel.requiredEnergyFrom(coveringStation, farScan, { x: 0, y: 0, z: 0 }, covering.chargeStations)),
+    'The placed station makes the far pallet affordable on a full battery');
+  covering.generateStations(3, baseZone, coverage);
+  assert(covering.chargeStations.length === 3 && samePos(covering.chargeStations[0], coveringStation), 'More stations extend the same placement');
+  covering.pallets = [{ position: { x: 4, y: 1, z: 4 } }] as any;
+  covering.generateStations(0, baseZone, coverage);
+  assert(covering.minChargingSites === 1, 'Pallets in reach of the base need no station');
+
   // ─────────────────────────────────────────────────────────────
   // 4. Energy feasibility counts on the nearest charger
   // ─────────────────────────────────────────────────────────────

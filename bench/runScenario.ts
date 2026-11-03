@@ -14,6 +14,9 @@ export interface RunRecord extends Partial<MissionMetrics> {
   allocationMode: string;
   completionMode: string;
   chargingSites: number;
+  stationPlacement: string;
+  /** Sites the coverage placement needs for every pallet to be affordable from some charger (coverage placement only). */
+  minChargingSites?: number;
   /** Flight ceiling (highest cell y a drone may use). */
   maxAltitude: number;
   /** Maximum pallets per rack column. */
@@ -50,7 +53,8 @@ async function buildScenario(spec: ScenarioSpec, plan: BenchmarkPlan): Promise<S
   return withSeed(spec.seed, () => {
     const { gridSize, pallets, forklifts } = spec.scale;
     const manager = new SimulationManager(gridSize, spec.drones);
-    manager.generateWorld('Warehouse', gridSize, spec.chargingSites - 1, true, spec.drones, pallets, forklifts, 'mixed', spec.rackLevels);
+    const coverage = plan.stationPlacement === 'coverage' ? { capacity: plan.batteryCapacity, drainMultiplier: plan.drainMultiplier } : undefined;
+    manager.generateWorld('Warehouse', gridSize, spec.chargingSites - 1, true, spec.drones, pallets, forklifts, 'mixed', spec.rackLevels, coverage);
     manager.initializeAgents(spec.drones, plan.batteryCapacity, true, gridSize);
     return manager;
   });
@@ -78,6 +82,8 @@ export async function runScenario(spec: ScenarioSpec, plan: BenchmarkPlan): Prom
       allocationMode: spec.allocationMode,
       completionMode: spec.completionMode,
       chargingSites: spec.chargingSites,
+      stationPlacement: plan.stationPlacement,
+      ...(manager.world.minChargingSites !== null ? { minChargingSites: manager.world.minChargingSites } : {}),
       maxAltitude: spec.maxAltitude,
       rackLevels: spec.rackLevels,
       clusterRadius: spec.clusterRadius,

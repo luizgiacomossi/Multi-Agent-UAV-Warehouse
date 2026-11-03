@@ -26,6 +26,7 @@ npm run bench -- --help
 | `--completion` | `count` (fixed missions per drone), `all-pallets` (full coverage) |
 | `--missions` | missions per drone in `count` mode |
 | `--sites` | charging sites including the base (1 = base only; each extra site is a one-drone station) |
+| `--stations` | station placement: `spread` over the map (default) or `coverage` for the battery (Section 2.2) |
 | `--rack-levels` | maximum pallets per rack column (default 8, `WAREHOUSE.RACK_LEVELS`). Each column gets 1 to this many levels at random. Left out of the scenario seed, so every height uses the same rack layout |
 | `--cluster-radius`, `--cluster-size` | cluster radii and maximum pallets per cluster (defaults 5 and 3). Varied only for the `Cluster` allocation, the other modes run once with the first value, so list the default first to pair them with it. Left out of the scenario seed |
 | `--altitude` | flight ceilings, the highest cell y a drone may use (default: the grid size). Pallets sit at y ≤ 6 (S-12, M-16) and y ≤ 7 (L-24), so a ceiling of 8 still reaches every pallet while packing the drones into fewer layers |
@@ -66,7 +67,7 @@ The paper presets cross every scale with every swarm size and keep Cooperative a
 |---|---|---|
 | `e1` | allocation: 1-to-1, Greedy, Nearest, Random | run twice, the second time with `--no-return` |
 | `e2` | 1-to-1 vs Cluster with radius 5, 3, 7 and size 3, 2, 4, 6 | 1-to-1 pairs with radius 5, size 3 |
-| `e3` | 1, 2, 3, 5 charging sites | no return, 2%/tick, battery 30 |
+| `e3` | 1 to 7 charging sites, coverage placement | no return, 2%/tick, battery 30 |
 | `e4` | Naive, Cooperative, Energy Saver, CBS | one worker (planning time is a metric) |
 | `e5` | Cooperative, CBS | one worker, 10 repetitions |
 
@@ -93,6 +94,26 @@ Stations shorten full-coverage missions by 14–28% with four stations, more in 
 
 With `--drain 3` the same 240 runs plan in about 40 s in total (at most 0.5 s per run), with no incidents. Mean coverage is 70%, limited by reach: with a capacity of 30, the triple drain and the absolute 20-unit safety margin, many pallets cannot be reached from any charger (in the scenario we traced, none of the pallets left over could).
 
+### 2.2 Station Placement for Coverage
+
+By default (`spread`) the stations are spread over the map by farthest-point sampling: the first goes to the free floor cell farthest from the base, each next one to the cell farthest from the base and the stations already placed. This ignores the battery. With battery 30 the stations go to the corners of the 32 and 64 warehouses, and the pallets between them stay out of reach: base plus one spread station covered 49% of the 64 warehouse in the E3 smoke run (8 drones), and base plus two 66%.
+
+With `--stations coverage` (preset `e3`) the stations are placed for the battery. A pallet counts as covered when a drone leaving some charger on a full battery can scan it and still reach the nearest charger with the safety margin left, the same energy check as the allocation (Eq. 13 and 14, from the nearest dock of the base). Each station goes to the free floor cell that covers the most pallets not yet covered (greedy maximum coverage). Once every pallet is covered, each further station goes to the cell that most shortens the pallets' distance to their nearest charger. Stations must be reachable from the base on one full battery. The placement for n stations is the prefix of the same sequence, so a scenario's stations only grow with the site count, and the comparison stays paired.
+
+`minChargingSites` records the sites (base included) after which every pallet is covered. With battery 30 (25 scenarios per scale, 2 to 32 drones) it is 1 for M-16, 2 for XL-32, and 4 for XXL-64 (5 in 2 scenarios). Smoke run (3 Nov 2026, Cooperative, 1 repetition, 2, 8 and 32 drones): coverage was 100% exactly from `minChargingSites` on, and below it at most 98%. There were no collisions, battery deaths or stranded drones. Makespan beyond the minimum, XXL-64 with 8 drones: 6299 ticks with 4 sites, 5498 with 5 and 5058 with 6 (5 spread sites: 6091). With 32 drones: 4119, 2493, 2203.
+
+**E3 results** (3 Nov 2026, preset `e3`, 2100 runs, Cooperative, 20 repetitions, 241 s with 13 workers). No failures, collisions, battery deaths or stranded drones. `minChargingSites` was 1 for all M-16 scenarios, 2 for all XL-32, and 4 for 91 of 100 XXL-64 (5 for the rest). Base-only coverage: 100%, 84–89% and 23–27%. Paired makespan change with three stations beyond the minimum (mean, 95% interval within ±4%):
+
+| Drones | M-16 | XL-32 | XXL-64 |
+|---|---|---|---|
+| 2 | -17% | -7% | -4% |
+| 4 | -7% | -15% | -7% |
+| 8 | -2% | -15% | -17% |
+| 16 | 0% | -9% | -28% |
+| 32 | 0% | -9% | -46% |
+
+In the small warehouse the gain falls with the swarm size (with 16 and 32 drones the stations are almost unused), in the large one it grows with it. Energy follows makespan, by up to -16% in XL-32 and XXL-64.
+
 **Forklifts.** Each forklift drives up and down one aisle along z, over the whole length of the warehouse (an aisle beside the dock starts after it), so it passes every rack row. Its path is exactly one round trip and is replayed with `t % length`. The generator places forklifts only in aisles where `x % 4 === 0`, which caps them at 1 (12³), 2 (16³) and 3 (24³), regardless of the requested count. The benchmark records the counts actually generated.
 
 ## 3. Reproducibility
@@ -106,7 +127,7 @@ All randomness in the simulation core goes through [`utils/Random.ts`](../utils/
 
 ## 4. Metrics
 
-Each row of `runs.csv` is one strategy on one scenario. Besides the scenario coordinates it records `chargingSites`, `chargeRate` (`Infinity` = instant) and `drainMultiplier`.
+Each row of `runs.csv` is one strategy on one scenario. Besides the scenario coordinates it records `chargingSites`, `stationPlacement`, `chargeRate` (`Infinity` = instant) and `drainMultiplier`.
 
 | Field | Definition |
 |---|---|
@@ -125,6 +146,7 @@ Each row of `runs.csv` is one strategy on one scenario. Besides the scenario coo
 | `distance` | grid cells travelled, summed over drones |
 | `stationVisits` | charging sessions at charging stations |
 | `stationTicks` | ticks drones spent waiting on charging stations |
+| `minChargingSites` | coverage placement only: sites, base included, from which every pallet is affordable from some charger (empty if no count covers all) |
 | `legEnergyRatio` | battery used on the leg into each scan (from the previous scan or the last wait on a charger) over β_fly times the leg's grid (Manhattan) distance, averaged over scans. The allocation's estimate assumes γ (1.1) |
 | `meanScanTime` | mean tick at which a pallet is first scanned, over the scanned pallets |
 | `priorityScanTime` | the same, weighted by priority: \(\sum \pi_k t_k / \sum \pi_k\). Below `meanScanTime` when urgent pallets are scanned earlier |

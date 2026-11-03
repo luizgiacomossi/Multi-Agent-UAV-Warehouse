@@ -1,5 +1,5 @@
 
-import { World } from './World';
+import { World, StationCoverage } from './World';
 import { Swarm, Drone } from './Drone';
 import { Warehouse } from './Warehouse';
 import { SimulationIncident, Position3D, Pallet, ClusterVisualization, TaskPriorityMode, MissionCompletionMode, AllocationMode } from '../types';
@@ -79,8 +79,11 @@ export class SimulationManager {
         return this.algorithms[name]?.description || "";
     }
 
-    /** `stationCount` charging stations are placed in addition to the base (0 = base only). */
-    public generateWorld(theme: string, size: number, stationCount: number, deployFromBase: boolean, agentCount: number, totalTasks: number = 50, numForklifts: number = 3, priorityMode: TaskPriorityMode = 'mixed', rackLevels?: number) {
+    /**
+     * `stationCount` charging stations are placed in addition to the base (0 = base only), spread
+     * over the map, or placed for the given battery with `stationCoverage` (see World.generateStations).
+     */
+    public generateWorld(theme: string, size: number, stationCount: number, deployFromBase: boolean, agentCount: number, totalTasks: number = 50, numForklifts: number = 3, priorityMode: TaskPriorityMode = 'mixed', rackLevels?: number, stationCoverage?: StationCoverage) {
         this.world.setSize(size);
 
         let reservedZone: ReservedZone | undefined = undefined;
@@ -97,7 +100,7 @@ export class SimulationManager {
 
         this.world.generate(theme, reservedZone, totalTasks, numForklifts, priorityMode, rackLevels);
 
-        this.world.generateStations(stationCount, reservedZone);
+        this.world.generateStations(stationCount, reservedZone, stationCoverage);
     }
 
     public initializeAgents(count: number, battery: number, deployFromBase: boolean, maxAltitude: number) {

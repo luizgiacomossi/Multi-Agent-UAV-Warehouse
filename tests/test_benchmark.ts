@@ -155,7 +155,7 @@ export async function runBenchmarkTests(): Promise<{ passed: number; failed: num
   // Paired tests match runs by seed within the same configuration
   const record = (algorithm: string, seed: number, makespan: number) => ({
     scale: 'S-12', gridSize: 12, pallets: 50, forklifts: 1, drones: 4, allocationMode: '1-to-1', completionMode: 'count',
-    chargingSites: 1, maxAltitude: 12, rackLevels: 8, clusterRadius: 5, maxClusterSize: 3, chargeRate: Infinity, drainMultiplier: 1, repetition: seed, seed,
+    chargingSites: 1, stationPlacement: 'spread', maxAltitude: 12, rackLevels: 8, clusterRadius: 5, maxClusterSize: 3, chargeRate: Infinity, drainMultiplier: 1, repetition: seed, seed,
     algorithm, ok: true, planningMs: 1, makespan,
   });
   const tests = pairedTests([1, 2, 3, 4, 5, 6].flatMap(seed => [record('Cooperative', seed, 100 + seed), record('CBS', seed, 90 + seed)]));

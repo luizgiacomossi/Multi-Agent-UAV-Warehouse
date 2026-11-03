@@ -35,6 +35,7 @@ const HELP = `Usage: npm run bench -- [options]
   --completion <m,m>  count | all-pallets
   --missions <n>      missions per drone (count mode)
   --sites <n,n>       charging sites incl. the base (1 = base only; extra sites are one-drone stations)
+  --stations <p>      station placement: spread (over the map) | coverage (for the battery)
   --altitude <n,n>    flight ceilings, highest cell y a drone may use (default: the grid size)
   --rack-levels <n,n> maximum pallets per rack column (default: 8)
   --cluster-radius <n,n>  cluster radii (Cluster allocation only, default 5)
@@ -71,6 +72,12 @@ function parseArgs(argv: string[]): CliOptions {
       case '--alloc': options.overrides.allocationModes = list(needValue()) as AllocationMode[]; break;
       case '--completion': options.overrides.completionModes = list(needValue()) as MissionCompletionMode[]; break;
       case '--sites': options.overrides.chargingSites = numbers(needValue()); break;
+      case '--stations': {
+        const placement = needValue();
+        if (placement !== 'spread' && placement !== 'coverage') throw new Error(`--stations needs spread or coverage, got ${placement}`);
+        options.overrides.stationPlacement = placement;
+        break;
+      }
       case '--altitude': options.overrides.maxAltitudes = numbers(needValue()); break;
       case '--rack-levels': options.overrides.rackLevels = numbers(needValue()); break;
       case '--cluster-radius': options.overrides.clusterRadii = numbers(needValue()); break;

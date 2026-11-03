@@ -48,3 +48,7 @@ Cluster mode uses local grouping plus greedy touring because it is fast and easy
 The system performs strong analysis after planning rather than enforcing every physically relevant constraint during planning.
 
 That choice is defensible for an exploratory simulator, but it should not be conflated with formal safety guarantees.
+
+## 7. Charging Stations Placed For The Battery
+
+Spreading stations over the map ignores the battery: in large warehouses they end up in the corners and the pallets between them stay out of reach, so experiments with and without stations compare different amounts of work. The benchmark therefore places stations by greedy maximum coverage under the allocation's own energy check, and reports the minimum number of sites for full coverage. The battery stays fixed across warehouse sizes, so the station count, not a tuned battery, absorbs the larger distances. Greedy coverage is not guaranteed to be minimal (set cover is NP-hard), so `minChargingSites` is an upper bound on the true minimum.

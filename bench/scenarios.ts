@@ -3,6 +3,9 @@ import { INSTANT_CHARGE_RATE, WAREHOUSE } from '../SimulationConfig';
 
 export type { AllocationMode };
 
+/** How a benchmark places its charging stations (see World.generateStations). */
+export type StationPlacement = 'spread' | 'coverage';
+
 /** A warehouse size together with the workload that scales with it. */
 export interface WarehouseScale {
   label: string;
@@ -21,6 +24,11 @@ export interface BenchmarkPlan {
   completionModes: MissionCompletionMode[];
   /** Charging sites counting the base (1 = base only; each extra site is a one-drone station). */
   chargingSites: number[];
+  /**
+   * Where the stations go: 'spread' over the map (farthest-point sampling), or 'coverage' for the
+   * battery, so the first stations make every pallet affordable from some charger.
+   */
+  stationPlacement: StationPlacement;
   /**
    * Flight ceilings (highest cell y a drone may use). Empty = the grid size, i.e. no ceiling. A low
    * ceiling packs the drones into fewer layers (more conflicts). Below the top shelf, the pallets
@@ -82,6 +90,7 @@ const BASE_PLAN: Omit<BenchmarkPlan, 'name'> = {
   allocationModes: ['1-to-1'],
   completionModes: ['count'],
   chargingSites: [1],
+  stationPlacement: 'spread',
   maxAltitudes: [],
   rackLevels: [],
   repetitions: 5,
@@ -150,8 +159,11 @@ export const PRESETS: Record<string, BenchmarkPlan> = {
   e1: { ...PAPER_PLAN, name: 'e1', allocationModes: ['1-to-1', 'Greedy', 'Nearest', 'Random'] },
   /** E2. Clusters: one-to-one vs clusters of several radii and sizes. The defaults come first, so 1-to-1 pairs with them. */
   e2: { ...PAPER_PLAN, name: 'e2', allocationModes: ['1-to-1', 'Cluster'], clusterRadii: [5, 3, 7], clusterSizes: [3, 2, 4, 6] },
-  /** E3. Charging: base only vs base plus 1, 2 or 4 one-drone stations, without returning between tasks. */
-  e3: { ...PAPER_PLAN, name: 'e3', chargingSites: [1, 2, 3, 5], roundTrip: false, chargeRate: 2, batteryCapacity: 30 },
+  /**
+   * E3. Charging: base only vs base plus 1 to 7 one-drone stations placed for the battery, without
+   * returning between tasks. The records give the sites each warehouse needs for full coverage.
+   */
+  e3: { ...PAPER_PLAN, name: 'e3', chargingSites: [1, 2, 3, 4, 5, 6, 7], stationPlacement: 'coverage', roundTrip: false, chargeRate: 2, batteryCapacity: 30 },
   /** E4. Planners vs swarm density. Planning time is a metric here, so run it with one worker. */
   e4: { ...PAPER_PLAN, name: 'e4', algorithms: ALL_ALGORITHMS },
   /** E5. Planning time vs warehouse size, for the two safe planners of interest. One worker. */

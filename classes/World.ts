@@ -1,6 +1,32 @@
-import { Position3D, Pallet, Forklift, TaskPriorityMode } from '../types';
+import { Position3D, Pallet, Forklift, TaskPriorityMode, MATH_CONSTANTS } from '../types';
 import { WorldGenerator, ReservedZone } from './WorldGenerator';
 import { Warehouse } from './Warehouse';
+import { BatteryModel } from './BatteryModel';
+import { CostModel } from './CostModel';
+import { INSTANT_CHARGE_RATE, SCAN_TICKS } from '../SimulationConfig';
+
+/** Drone battery the coverage placement of charging stations is computed for. */
+export interface StationCoverage {
+  capacity: number;
+  drainMultiplier: number;
+}
+
+const flatDistance = (a: Position3D, b: Position3D) => Math.abs(a.x - b.x) + Math.abs(a.z - b.z);
+/** Index of the cell farthest from its nearest anchor (first on ties), or -1 if none is away from all. */
+function farthest(cells: Position3D[], anchors: Position3D[]): number {
+  let best = -1;
+  let bestDistance = 0;
+  cells.forEach((cell, i) => {
+      const distance = Math.min(...anchors.map(a => flatDistance(cell, a)));
+      if (distance > bestDistance) {
+          best = i;
+          bestDistance = distance;
+      }
+  });
+  return best;
+}
+
+const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
 export class World {
   size: number;
@@ -76,15 +102,41 @@ export class World {
     }
 
   /**
-   * Places `count` charging stations on floor cells, spread over the map: each one is the free cell
-   * farthest from the base and from the stations already placed (farthest-point sampling, so the
-   * layout is deterministic). Cells inside the base zone, under forklift lanes, or not reachable
-   * from the base are skipped.
+   * Sites (base + stations) the coverage placement needs so every pallet is affordable from some
+   * charger, or null when the stations were spread instead or no number of stations covers them all.
    */
-  public generateStations(count: number, baseZone?: ReservedZone) {
-      this.chargeStations = [];
-      if (count <= 0) return;
+  minChargingSites: number | null = null;
 
+  /**
+   * Places `count` charging stations on floor cells. Cells inside the base zone, under forklift
+   * lanes, or not reachable from the base are skipped, and the layout is deterministic.
+   *
+   * Without `coverage` the stations are spread over the map: each one is the free cell farthest
+   * from the base and from the stations already placed (farthest-point sampling). With `coverage`
+   * they are placed for the drones' battery (see placeForCoverage).
+   */
+  public generateStations(count: number, baseZone?: ReservedZone, coverage?: StationCoverage) {
+      this.chargeStations = [];
+      this.minChargingSites = null;
+      if (count <= 0 && !coverage) return;
+
+      const { base, candidates } = this.stationCandidates(baseZone);
+      if (coverage) {
+          this.placeForCoverage(count, base, baseZone, candidates, coverage);
+          return;
+      }
+
+      const anchors: Position3D[] = [base];
+      while (this.chargeStations.length < count) {
+          const best = farthest(candidates, anchors);
+          if (best < 0) break; // no free floor cell left
+          this.chargeStations.push(candidates[best]);
+          anchors.push(candidates[best]);
+      }
+  }
+
+  /** The base centre and the free floor cells a station may use. */
+  private stationCandidates(baseZone?: ReservedZone): { base: Position3D; candidates: Position3D[] } {
       const forkliftColumns = new Set(this.forklifts.flatMap(fl => (fl.path || []).map(p => `${p.x},${p.z}`)));
       const inBaseZone = (x: number, z: number) =>
           !!baseZone && x >= baseZone.minX && x <= baseZone.maxX && z >= baseZone.minZ && z <= baseZone.maxZ;
@@ -102,23 +154,86 @@ export class World {
               candidates.push({ x, y: 0, z });
           }
       }
+      return { base, candidates };
+  }
 
-      const flatDistance = (a: Position3D, b: Position3D) => Math.abs(a.x - b.x) + Math.abs(a.z - b.z);
-      const anchors: Position3D[] = [base];
-      while (this.chargeStations.length < count) {
-          let best: Position3D | null = null;
-          let bestDistance = 0;
-          for (const cell of candidates) {
-              const distance = Math.min(...anchors.map(a => flatDistance(cell, a)));
-              if (distance > bestDistance) {
-                  best = cell;
-                  bestDistance = distance;
+  /**
+   * Greedy station placement for the battery. A pallet is covered when a drone leaving some
+   * charger on a full battery can scan it and still reach the nearest charger with the safety
+   * margin left (the allocation's energy check, Eq. 13 and 14). Each station goes to the cell
+   * that covers the most pallets not yet covered (maximum coverage). Once all are covered, or no
+   * cell covers more, each further station goes to the cell that most shortens the pallets' trips
+   * to their nearest charger. Stations must be reachable from the base on one full battery.
+   *
+   * The placement is a prefix of the same greedy sequence for any `count`, so the first
+   * `minChargingSites - 1` stations are the ones that cover every pallet.
+   */
+  private placeForCoverage(count: number, base: Position3D, baseZone: ReservedZone | undefined, candidates: Position3D[], coverage: StationCoverage) {
+      const { capacity, drainMultiplier } = coverage;
+      const battery = new BatteryModel(capacity, INSTANT_CHARGE_RATE, drainMultiplier);
+      // Allocation's base position (the dock corner, see SimulationManager.runPathfinding)
+      const pBase: Position3D = baseZone ? { x: baseZone.minX, y: baseZone.minY, z: baseZone.minZ } : { x: 0, y: 0, z: 0 };
+      // Distance from the nearest dock of the base (drones leave from their own dock)
+      const fromBase = (p: Position3D) => baseZone
+          ? Math.abs(p.x - clamp(p.x, baseZone.minX, baseZone.maxX)) + Math.abs(p.y - baseZone.minY) + Math.abs(p.z - clamp(p.z, baseZone.minZ, baseZone.maxZ))
+          : CostModel.distanceManhattan(p, pBase);
+      const affordable = (outbound: number, back: number) =>
+          CostModel.isAffordable(capacity, drainMultiplier * (MATH_CONSTANTS.BETA_FLY * MATH_CONSTANTS.GAMMA * (outbound + back) + MATH_CONSTANTS.BETA_HOVER * SCAN_TICKS));
+
+      const targets = this.pallets.map(p => p.position);
+      // Shortest leg to each pallet from a charger, and from each pallet to the nearest charger
+      const outbound = targets.map(fromBase);
+      const back = targets.map(t => CostModel.distanceManhattan(t, pBase));
+      const covered = targets.map((_, i) => affordable(outbound[i], back[i]));
+      let uncovered = covered.filter(c => !c).length;
+      const sites = candidates.filter(c => battery.flightEnergy(fromBase(c)) < capacity);
+
+      const placed: Position3D[] = [];
+      if (uncovered === 0) this.minChargingSites = 1;
+      let coverable = uncovered > 0; // false once no cell covers any of the remaining pallets
+      while (placed.length < count || coverable) {
+          let best = -1;
+          let bestRank = [0, 0]; // [pallets newly covered, total trip shortening]
+          for (let c = 0; c < sites.length; c++) {
+              let gain = 0;
+              let shortening = 0;
+              for (let i = 0; i < targets.length; i++) {
+                  const d = CostModel.distanceManhattan(sites[c], targets[i]);
+                  if (d < back[i]) shortening += back[i] - d;
+                  if (!covered[i] && affordable(Math.min(outbound[i], d), Math.min(back[i], d))) gain++;
+              }
+              if (gain > bestRank[0] || (gain === bestRank[0] && shortening > bestRank[1])) {
+                  best = c;
+                  bestRank = [gain, shortening];
               }
           }
-          if (!best) break; // no free floor cell left
-          this.chargeStations.push(best);
-          anchors.push(best);
+          if (best < 0) {
+              // No cell shortens any trip: spread the rest as without coverage
+              const anchors = [base, ...placed];
+              best = farthest(sites, anchors);
+              if (best < 0) break; // no cell left
+          }
+          if (bestRank[0] === 0 && coverable) {
+              coverable = false; // the rest cannot be covered
+              if (placed.length >= count) break;
+          }
+          const [site] = sites.splice(best, 1);
+          placed.push(site);
+          for (let i = 0; i < targets.length; i++) {
+              const d = CostModel.distanceManhattan(site, targets[i]);
+              outbound[i] = Math.min(outbound[i], d);
+              back[i] = Math.min(back[i], d);
+              if (!covered[i] && affordable(outbound[i], back[i])) {
+                  covered[i] = true;
+                  uncovered--;
+              }
+          }
+          if (uncovered === 0 && coverable) {
+              this.minChargingSites = placed.length + 1;
+              coverable = false;
+          }
       }
+      this.chargeStations = placed.slice(0, Math.max(0, count));
   }
 
   /** Free cells connected to `start` (flood fill), or null if `start` itself is blocked. */
