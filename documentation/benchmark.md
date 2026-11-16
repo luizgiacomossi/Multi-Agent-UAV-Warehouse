@@ -146,6 +146,8 @@ Each row of `runs.csv` is one strategy on one scenario. Besides the scenario coo
 | `distance` | grid cells travelled, summed over drones |
 | `stationVisits` | charging sessions at charging stations |
 | `stationTicks` | ticks drones spent waiting on charging stations |
+| `stationLegFailures` | failed plans of legs to a charging station, summed over drones (each is a 3-tick hover and a retry) |
+| `stationFallbacks` | recharge jobs given up after 5 failed plans, the drone charging on its dock instead |
 | `minChargingSites` | coverage placement only: sites, base included, from which every pallet is affordable from some charger (empty if no count covers all) |
 | `legEnergyRatio` | battery used on the leg into each scan (from the previous scan or the last wait on a charger) over β_fly times the leg's grid (Manhattan) distance, averaged over scans. The allocation's estimate assumes γ (1.1) |
 | `meanScanTime` | mean tick at which a pallet is first scanned, over the scanned pallets |

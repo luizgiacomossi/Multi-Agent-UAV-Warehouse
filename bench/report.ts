@@ -25,6 +25,8 @@ export const SUMMARY_METRICS = [
   'priorityScanTime',
   'stationVisits',
   'stationTicks',
+  'stationLegFailures',
+  'stationFallbacks',
   'minChargingSites',
   'cbsNodesExpanded',
   'cbsFallbacks',

@@ -35,6 +35,10 @@ export interface RunRecord extends Partial<MissionMetrics> {
   planningMs: number;
   cbsNodesExpanded?: number;
   cbsFallbacks?: number;
+  /** Failed plans of legs to a charging station, summed over drones (each one is a hover and a retry). */
+  stationLegFailures?: number;
+  /** Recharge jobs given up after repeated failed plans, the drone charging on its dock instead. */
+  stationFallbacks?: number;
 }
 
 /** Runs `fn` with console output suppressed (the engine logs every allocation). */
@@ -117,6 +121,8 @@ export async function runScenario(spec: ScenarioSpec, plan: BenchmarkPlan): Prom
         ok: true,
         planningMs: performance.now() - started,
         ...computeMissionMetrics(result.agents, result.incidents, result.maxTicks, manager.world.pallets.length, manager.world.chargeStations, manager.world.pallets),
+        stationLegFailures: result.agents.reduce((n, d) => n + d.stationLegFailures, 0),
+        stationFallbacks: result.agents.reduce((n, d) => n + d.stationFallbacks, 0),
         ...(cbs ? { cbsNodesExpanded: cbs.getStats().nodesExpanded, cbsFallbacks: cbs.getStats().fallbacks } : {}),
       });
     } catch (e: any) {

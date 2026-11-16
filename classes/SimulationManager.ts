@@ -535,8 +535,10 @@ export class SimulationManager {
                 // No path this cycle: the drone hovered in place and keeps its leg for a retry.
                 if (drone.lastLegFailed) {
                     drone.lastLegFailed = false;
+                    if (drone.mission.state === 'RECHARGING') drone.stationLegFailures++;
                     if (drone.mission.state === 'RECHARGING' && drone.legFailures >= MAX_LEG_RETRIES) {
                         // Station stayed unreachable: charge on the dock instead
+                        drone.stationFallbacks++;
                         drone.mission.cancelRecharge();
                         drone.legFailures = 0;
                         drone.goal = { ...drone.mission.warehouseLocation };

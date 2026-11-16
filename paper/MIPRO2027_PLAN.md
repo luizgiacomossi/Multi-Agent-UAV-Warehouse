@@ -203,15 +203,17 @@ Plano revisto em 2/11: uma figura do problema e um diagrama da solução, e os r
 
 ### TODOs abertos no `paper.tex`
 
+16/11: Wilcoxon citado (Wilcoxon 1945, Biometrics Bulletin 1(6):80–83, a pedido do autor). Metrics ganhou a frase de que o simulador refaz a bateria de cada drone ao longo do caminho e conta as que chegam a zero (item do checklist sobre mortes de bateria). Sobra só o TODO da L89 (Related Work).
+
 Cada `\todo` vermelho no texto tem um item aqui. Tirar o `\todo` do texto e marcar aqui quando resolver.
 
-- [ ] Introdução: confirmar o "few" da lacuna depois do Related Work.
-- [ ] Introdução: link do código aberto na contribuição C5, se o simulador for liberado.
-- [ ] Related Work: checar se os trabalhos de drones em armazém modelam conflitos entre drones ou com veículos de chão.
+- [x] Introdução: "few" confirmado (16/11). Busca na literatura não achou trabalho que junte alocação com energia, carregadores de um drone só e empilhadeiras com drones em 3D. Mais próximos: Choudhury et al. (entrega com drones, MAPF com bateria, ao ar livre), Electronics 2026 (MAPF com energia e disputa de carregadores, robôs de chão), IEEE 10445457 (multi-UAV, mTSP + RL sem conflitos), review MDPI Drones 2026 (empilhadeiras e agendamento de carga como problemas em aberto). Citar Choudhury junto ao Bavaro é opcional (o autor decide). TODO tirado do texto.
+- [x] Código aberto (16/11): o autor decidiu liberar em https://github.com/luizgiacomossi/Multi-Agent-UAV-Warehouse. C5 diz "open-source simulator" e o link está em Implementation (Seção V).
+- [x] Related Work (16/11): respostas do Gemini conferidas nas fontes. Thomaidis 2024: um drone, laboratório. Kwon 2020: um quadricóptero, armazém real. Han 2022 (Remote Sensing, o citado; o Gemini respondeu sobre outro Han, Sensors and Materials): até 10 UAVs em simulação, "The aisle is wide enough to prevent collisions between UAVs", sem veículos de chão, bateria só via distância. Malang 2023 é revisão. Frase nova: "These studies fly a single drone [thomaidis, kwon] or assume aisles wide enough for the drones never to meet [han]. None of them models moving ground vehicles or plans recharging." Achado: Zhao et al. 2024 (IEEE IoT Journal, doi 10.1109/JIOT.2024.3370152) faz alocação (mTSP) e caminhos sem conflito (MARL) para UAVs heterogêneos em inspeção de carga em armazém, simulação. É o trabalho mais próximo do nosso. O resumo não fala de bateria. Citado no Related Work a pedido do autor (16/11), sem afirmar nada sobre bateria (o resumo não fala). Todos os TODOs do paper.tex resolvidos.
 - [x] Formulação (tarefas): o scan não ocupava passos no caminho. Resolvido no código (3 passos), e o texto diz isso.
-- [ ] Método (recarga): "sem fila no ar" só vale se o trecho até a estação der certo. Se falhar, o drone paira e tenta de novo. Contar quantas vezes isso acontece nos benchmarks. Mesmo item da seção 2.
+- [x] Método (recarga): contadores `stationLegFailures` e `stationFallbacks` adicionados (16/11). E3 rodado de novo (`bench-results/e3-legs-2026-11-16/`, 2700 runs, makespans idênticos ao e3-fix): 192 162 idas a estações, 0 trechos com falha, 0 recargas desviadas para a base. Texto diz isso e explica o retry (paira 3 passos, depois de 5 falhas carrega na base).
 - [x] Método (custo): o texto diz D_max = 2N. Resolvido, o código agora define `dMaxFor(N) = 2N`.
-- [ ] Setup: a frase dos racks ("With 12 or 16 levels, makespan and energy grow by about 10%") vem da amostra de 5 runs de 2/11. Confirmar o número na rodada final.
+- [x] Setup: sensibilidade dos racks refeita (16/11, `bench-results/racks-2026-11-16/`, 180 runs, 16/32/64, 8 drones, 10 repetições, 1-para-1 e Cluster r=5 m=3, níveis 8/12/16, α=0,5). Mudança média contra 8 níveis: makespan +0,9 a +13,7%, energia +0,9 a +16,4% (maior no Cluster e no 16 níveis). Cluster economiza 50,5/54,3/56,2% de energia com 8 níveis e 48,4 a 53,7% com 12 ou 16. Zero incidentes, cobertura 100%. Texto: "raise the makespan and the energy by 1 to 16% on average, and the cluster allocation still saves 48 to 56% of the energy".
 - [ ] Resultados (E1): o `\todo` diz que o Greedy ficou a menos de 2% do Hungarian e que o ganho vem da função de custo. Confirmar na rodada final antes de escrever.
 - [ ] Seções VI a VIII: ainda são só `\todo` (a V foi escrita em 3/11).
 

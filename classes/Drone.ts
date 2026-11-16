@@ -40,6 +40,10 @@ export class Drone implements Agent {
     initialAssignment: { goal: Position3D; palletId?: string; scanType?: string } | null = null;
     legFailures: number = 0;        // consecutive failed plan attempts for the current leg
     lastLegFailed: boolean = false; // set by the planner when the latest planLeg found no path
+    /** Failed plans of a leg to a charging station (each one costs a hover and a retry), over the mission. */
+    stationLegFailures: number = 0;
+    /** Recharge jobs given up after MAX_LEG_RETRIES failed plans (the drone then charges on its dock). */
+    stationFallbacks: number = 0;
     /** Battery gained per waiting tick on a charger, in % of capacity (Infinity = instant full charge). */
     chargeRatePercent: number = INSTANT_CHARGE_RATE;
     /** Scales battery consumption per move and per hover tick (1 = nominal β_fly / β_hover). */
@@ -120,6 +124,8 @@ export class Drone implements Agent {
         this.battery = this.maxBattery;
         this.legFailures = 0;
         this.lastLegFailed = false;
+        this.stationLegFailures = 0;
+        this.stationFallbacks = 0;
 
         // Configure Controller
         this.mission.warehouseLocation = baseLocation ? { ...baseLocation } : { ...start };
