@@ -75,13 +75,24 @@ This is an exponential barrier term representing battery scarcity, evaluated usi
 
 ### 3.3 Final task cost
 
-Because the Hungarian algorithm (Munkres) minimizes total assignment cost, higher-priority tasks (higher \(\pi_k \in (0, 1]\)) must produce lower assignment cost so that they are matched first. The implemented cost formula divides by priority:
+Because the Hungarian algorithm (Munkres) minimizes total assignment cost, higher-priority tasks (higher \(\pi_k \in (0, 1]\)) must produce lower assignment cost so that they are matched first. The implemented cost formula divides by the priority raised to \(\alpha\) (`PRIORITY_EXPONENT` = 0.5):
 
 \[
-C_{ik} = \frac{w_1 c_{dist}(i,k) + w_2 c_{batt}(i)}{\max(0.01, \pi_k)}.
+C_{ik} = \frac{w_1 c_{dist}(i,k) + w_2 c_{batt}(i)}{\max(0.01, \pi_k)^{\alpha}}.
 \]
 
 This is implemented by `calculate_C_ik(...)`.
+
+**Why \(\alpha = 0.5\).** Until 16 Nov 2026 the cost divided by \(\pi_k\) itself (\(\alpha = 1\)). E1 then showed that without return to the dock the nearest-pallet baseline beat the Hungarian assignment on every metric (makespan −27.7%, energy −29.8% and priority-weighted scan time −23.4% at 64 cells). With \(\alpha = 1\) an urgent pallet costs as much as one with \(\pi = 0.2\) five times nearer, so drones crossed the warehouse for urgent pallets and their neighbours waited. A sweep on 16 and 64 cells (4 and 16 drones, 5 runs, Cooperative), against \(\alpha = 1\):
+
+| \(\alpha\) | No return, 64: makespan (4 / 16 drones) | Return, 16: priority-weighted scan time (4 / 16 drones) |
+|---|---|---|
+| 0 (priority ignored) | −28.8% / −23.7% | +13.4% / +13.4% |
+| 0.25 | −26.2% / −20.8% | +3.6% / +4.8% |
+| 0.5 | −20.0% / −14.6% | +0.8% / +1.8% |
+| 0.75 | −12.2% / −6.4% | +0.2% / −0.2% |
+
+Without return the priority-weighted scan time follows the makespan (−19.8% / −15.7% with 0.5). With return makespan and energy barely change. \(\alpha = 0.5\) keeps most of the priority effect when drones return and recovers about two thirds of the nearest-pallet gain when they do not.
 
 ## 3.4 Allocation Baselines
 

@@ -150,12 +150,13 @@ export class CostModel {
 
   /**
    * Equation 15: Final Cost Score
-   * C_ik = (w_1 * c_dist + w_2 * c_batt) / pi_k
+   * C_ik = (w_1 * c_dist + w_2 * c_batt) / pi_k^alpha
    * Note: Hungarian algorithm minimizes total cost. Higher priority tasks (higher pi_k)
-   * must yield a lower assignment cost to be matched first.
+   * must yield a lower assignment cost to be matched first. alpha < 1 softens this, so a drone
+   * does not cross the warehouse for an urgent pallet while its neighbours wait (see PRIORITY_EXPONENT).
    */
   static calculate_C_ik(c_dist: number, c_batt: number, pi_k: number): number {
-    return (MATH_CONSTANTS.W1 * c_dist + MATH_CONSTANTS.W2 * c_batt) / Math.max(0.01, pi_k);
+    return (MATH_CONSTANTS.W1 * c_dist + MATH_CONSTANTS.W2 * c_batt) / Math.pow(Math.max(0.01, pi_k), MATH_CONSTANTS.PRIORITY_EXPONENT);
   }
 
   /**

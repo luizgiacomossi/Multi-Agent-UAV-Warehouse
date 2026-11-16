@@ -120,7 +120,7 @@ export const LAMBDA_PEN = 0.15;
  * $w_1 + w_2 = 1$ keeps the numerator a convex combination of the two terms;
  * the final cost is not bounded to [0,1] because it is divided by $\pi_k$.
  *
- * Equation reference: $C_{ik} = (w_1 c_{dist,ik} + w_2 c_{batt,i}) / \max(0.01, \pi_k)$
+ * Equation reference: $C_{ik} = (w_1 c_{dist,ik} + w_2 c_{batt,i}) / \max(0.01, \pi_k)^{\alpha}$
  * (see CostModel.calculate_C_ik)
  */
 export const WEIGHT_DIST = 0.5;   // w₁
@@ -128,9 +128,22 @@ export const WEIGHT_DIST = 0.5;   // w₁
 /**
  * $w_2$ — Weight for the battery degradation cost term.
  *
- * Equation reference: $C_{ik} = (w_1 c_{dist,ik} + w_2 c_{batt,i}) / \max(0.01, \pi_k)$
+ * Equation reference: $C_{ik} = (w_1 c_{dist,ik} + w_2 c_{batt,i}) / \max(0.01, \pi_k)^{\alpha}$
  */
 export const WEIGHT_BATT = 0.5;   // w₂
+
+/**
+ * $\alpha$ — Exponent of the priority in the cost: $C_{ik} = (w_1 c_{dist} + w_2 c_{batt}) / \pi_k^{\alpha}$.
+ *
+ * With $\alpha = 1$ an urgent pallet (π = 1) costs the same as one with π = 0.2 five times nearer, so
+ * drones that do not return to the dock crossed the warehouse for urgent pallets and left their
+ * neighbours for later. Measured on E1 (16 Nov 2026, Cooperative, 16 and 64, 4 and 16 drones, 5
+ * runs), against α = 1: without return, makespan −20.0/−14.6% at 64 with α = 0.5 (−28.8/−23.7% with
+ * α = 0, i.e. no priority, close to nearest-pallet), and the priority-weighted scan time improves with
+ * it. With return to the dock, α = 0 makes urgent pallets 13% later at 16, α = 0.5 only 0.8–1.8%.
+ * 0.5 keeps most of the priority effect in both modes.
+ */
+export const PRIORITY_EXPONENT = 0.5;   // α
 
 
 // ─── Planner / Solver Settings ────────────────────────────────────────────────
@@ -209,4 +222,5 @@ export const MATH_CONSTANTS = {
   LAMBDA_PEN,
   W1: WEIGHT_DIST,
   W2: WEIGHT_BATT,
+  PRIORITY_EXPONENT,
 } as const;
