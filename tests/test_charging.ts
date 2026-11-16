@@ -119,6 +119,10 @@ export async function runChargingTests(): Promise<{ passed: number; failed: numb
   covering.pallets = [{ position: { x: 4, y: 1, z: 4 } }] as any;
   covering.generateStations(0, baseZone, coverage);
   assert(covering.minChargingSites === 1, 'Pallets in reach of the base need no station');
+  // 45 cells out and 45 back is just over the budget from the dock, though the padded base zone reaches 4 cells nearer
+  covering.pallets = [{ position: { x: 42, y: 1, z: 2 } }] as any;
+  covering.generateStations(0, baseZone, { ...coverage, docks: [{ x: 0, y: 0, z: 0 }] });
+  assert(covering.minChargingSites === 2, 'Coverage is measured from the docks, not from the padded base zone', `min ${covering.minChargingSites}`);
 
   // ─────────────────────────────────────────────────────────────
   // 4. Energy feasibility counts on the nearest charger

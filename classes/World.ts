@@ -9,6 +9,8 @@ import { INSTANT_CHARGE_RATE, SCAN_TICKS } from '../SimulationConfig';
 export interface StationCoverage {
   capacity: number;
   drainMultiplier: number;
+  /** Dock cells the drones take off from and charge on (default: the base corner). */
+  docks?: Position3D[];
 }
 
 const flatDistance = (a: Position3D, b: Position3D) => Math.abs(a.x - b.x) + Math.abs(a.z - b.z);
@@ -26,7 +28,6 @@ function farthest(cells: Position3D[], anchors: Position3D[]): number {
   return best;
 }
 
-const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
 export class World {
   size: number;
@@ -173,10 +174,10 @@ export class World {
       const battery = new BatteryModel(capacity, INSTANT_CHARGE_RATE, drainMultiplier);
       // Allocation's base position (the dock corner, see SimulationManager.runPathfinding)
       const pBase: Position3D = baseZone ? { x: baseZone.minX, y: baseZone.minY, z: baseZone.minZ } : { x: 0, y: 0, z: 0 };
-      // Distance from the nearest dock of the base (drones leave from their own dock)
-      const fromBase = (p: Position3D) => baseZone
-          ? Math.abs(p.x - clamp(p.x, baseZone.minX, baseZone.maxX)) + Math.abs(p.y - baseZone.minY) + Math.abs(p.z - clamp(p.z, baseZone.minZ, baseZone.maxZ))
-          : CostModel.distanceManhattan(p, pBase);
+      // Distance from the nearest dock (drones leave from their own dock). The reserved base zone is
+      // padded around the docks, so measuring from its edge overestimated the coverage by up to 4 cells.
+      const docks = coverage.docks?.length ? coverage.docks : [pBase];
+      const fromBase = (p: Position3D) => Math.min(...docks.map(d => CostModel.distanceManhattan(p, d)));
       const affordable = (outbound: number, back: number) =>
           CostModel.isAffordable(capacity, drainMultiplier * (MATH_CONSTANTS.BETA_FLY * MATH_CONSTANTS.GAMMA * (outbound + back) + MATH_CONSTANTS.BETA_HOVER * SCAN_TICKS));
 

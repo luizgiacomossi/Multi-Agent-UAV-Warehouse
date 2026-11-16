@@ -160,10 +160,11 @@ export const PRESETS: Record<string, BenchmarkPlan> = {
   /** E2. Clusters: one-to-one vs clusters of several radii and sizes. The defaults come first, so 1-to-1 pairs with them. */
   e2: { ...PAPER_PLAN, name: 'e2', allocationModes: ['1-to-1', 'Cluster'], clusterRadii: [5, 3, 7], clusterSizes: [3, 2, 4, 6] },
   /**
-   * E3. Charging: base only vs base plus 1 to 7 one-drone stations placed for the battery, without
-   * returning between tasks. The records give the sites each warehouse needs for full coverage.
+   * E3. Charging: base only vs base plus 1 to 8 one-drone stations placed for the battery, without
+   * returning between tasks. The records give the sites each warehouse needs for full coverage (up to
+   * 6 at 64 cells), so every scenario still has three stations beyond its own minimum.
    */
-  e3: { ...PAPER_PLAN, name: 'e3', chargingSites: [1, 2, 3, 4, 5, 6, 7], stationPlacement: 'coverage', roundTrip: false, chargeRate: 2, batteryCapacity: 30 },
+  e3: { ...PAPER_PLAN, name: 'e3', chargingSites: [1, 2, 3, 4, 5, 6, 7, 8, 9], stationPlacement: 'coverage', roundTrip: false, chargeRate: 2, batteryCapacity: 30 },
   /** E4. Planners vs swarm density. Planning time is a metric here, so run it with one worker. */
   e4: { ...PAPER_PLAN, name: 'e4', algorithms: ALL_ALGORITHMS },
   /** E5. Planning time vs warehouse size, for the two safe planners of interest. One worker. */

@@ -87,6 +87,7 @@ export class SimulationManager {
         this.world.setSize(size);
 
         let reservedZone: ReservedZone | undefined = undefined;
+        let docks: Position3D[] | undefined = undefined;
         if (deployFromBase) {
             // Create a temporary warehouse to calculate the restricted bounds
             const tempWarehouse = new Warehouse(agentCount);
@@ -96,11 +97,13 @@ export class SimulationManager {
                 minY: b.minY, maxY: b.maxY,
                 minZ: b.minZ, maxZ: b.maxZ
             };
+            // The cells the drones will take off from (initializeAgents places them the same way)
+            docks = Array.from({ length: agentCount }, (_, i) => tempWarehouse.getSpawnLocation(i));
         }
 
         this.world.generate(theme, reservedZone, totalTasks, numForklifts, priorityMode, rackLevels);
 
-        this.world.generateStations(stationCount, reservedZone, stationCoverage);
+        this.world.generateStations(stationCount, reservedZone, stationCoverage && { docks, ...stationCoverage });
     }
 
     public initializeAgents(count: number, battery: number, deployFromBase: boolean, maxAltitude: number) {
