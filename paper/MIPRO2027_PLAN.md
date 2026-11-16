@@ -31,20 +31,20 @@ Fontes: mipro.hr, páginas "Instructions for Authors MIPRO", "Call for papers" e
 
 Afirmações do abstract que o paper precisa sustentar:
 - [x] "swarms of up to 24 drones": superado (3/11). Os experimentos rodam até 32 drones em todas as escalas, e o abstract do `paper.tex` já diz 32 drones e 1434 paletes. O abstract submetido continua com 24 e 200.
-- [ ] "windowed Conflict-Based Search": descrever a janela de cerca de 10 ticks, o planejamento por trecho e o fallback para Cooperative A*.
-- [ ] "booked in time to avoid queueing in the air": é a intenção da política, não uma garantia. Se o caminho até a estação falha, o drone paira no lugar e tenta de novo (até 5 vezes, 3 ticks cada) antes de voltar à base. Medir quantas vezes isso acontece ou descrever como objetivo de projeto.
-- [ ] "safety-margin energy estimate": a parte da distância foi resolvida (Manhattan × 1,1 desde 2/11). Falta dizer no texto que mortes de bateria são detectadas e contadas, e não impossíveis por construção (zero no E3).
+- [x] "windowed Conflict-Based Search": descrever a janela de cerca de 10 ticks, o planejamento por trecho e o fallback para Cooperative A*. (16/11: feito na Seção IV, janela = ciclo de w passos, 500 nós ou 2 s, fallback para Cooperative A*)
+- [x] "booked in time to avoid queueing in the air": é a intenção da política, não uma garantia. Se o caminho até a estação falha, o drone paira no lugar e tenta de novo (até 5 vezes, 3 ticks cada) antes de voltar à base. Medir quantas vezes isso acontece ou descrever como objetivo de projeto. (16/11: resolvido, texto da Seção IV diz o retry e que no E3 nenhum trecho falhou)
+- [x] "safety-margin energy estimate": a parte da distância foi resolvida (Manhattan × 1,1 desde 2/11). Falta dizer no texto que mortes de bateria são detectadas e contadas, e não impossíveis por construção (zero no E3). (16/11: frase em Metrics)
 
 ## 3. Mensagem do paper
 
 **Pergunta central:** como a forma de alocar tarefas (1-para-1 vs clusters), a infraestrutura de recarga e o planejador de caminhos afetam o tempo de missão, a energia e a segurança de um enxame de drones fazendo inventário?
 
 **Contribuições (rascunho, rever):**
-- [ ] C1. Modelo de alocação com restrição de energia: custo distância/bateria/prioridade e viabilidade com margem de segurança até o carregador mais próximo.
-- [ ] C2. Alocação por clusters de paletes com ordem de visita otimizada, comparada a 1-para-1.
-- [ ] C3. Política de recarga com estações de um drone, reservadas no tempo.
-- [ ] C4. Comparação entre planejamento priorizado (Cooperative A*) e CBS em densidade crescente de drones.
-- [ ] C5 (opcional). Simulador e benchmark com sementes fixas, liberados como código aberto.
+- [x] C1. Modelo de alocação com restrição de energia: custo distância/bateria/prioridade e viabilidade com margem de segurança até o carregador mais próximo.
+- [x] C2. Alocação por clusters de paletes com ordem de visita otimizada, comparada a 1-para-1.
+- [x] C3. Política de recarga com estações de um drone, reservadas no tempo.
+- [x] C4. Comparação entre planejamento priorizado (Cooperative A*) e CBS em densidade crescente de drones.
+- [x] C5 (opcional). Simulador e benchmark com sementes fixas, liberados como código aberto. (16/11: link em Implementation)
 
 **Decidir:** C4 vira resultado principal ou só discussão? Depende do experimento E4 (seção 5).
 
@@ -73,14 +73,14 @@ Situação em 2/11: Introdução e Related Work juntos têm cerca de 900 palavra
 
 ### 5.1 Correções e ajustes antes de rodar
 
-- [ ] Rodar de novo todos os benchmarks no commit atual. Os resultados em `bench-results/` são de antes da mudança nas faixas dos empilhadeiras (1/10, 18:33) e não podem ir para o paper.
+- [x] Rodar de novo todos os benchmarks no commit atual. Os resultados em `bench-results/` são de antes da mudança nas faixas dos empilhadeiras (1/10, 18:33) e não podem ir para o paper. (16/11: tudo rodado de novo com α = 0,5, ver 5.3)
 - [x] Registrar o hash do commit e a versão do Node usados em cada experimento. O `summary.json` agora tem `environment` (commit, se havia mudanças não commitadas, versão do Node).
 - [x] Inconsistência de distância: a alocação usava Euclidiana × γ = 1,3, e o planejador anda em passos no grid. Medido: o voo real era 1,48× a linha reta (mediana), e 87% dos trechos 1-para-1 passavam de γ. Corrigido (decisão de 2/11): a estimativa usa distância Manhattan com γ = 1,1. Agora a razão média é 1,005 (1-para-1) e 1,059 (Cluster), com 1,9% e 11,7% dos trechos acima de γ. Efeito colateral: no preset `charging`, L-24 só com a base cobre 98% dos paletes (a estimativa ficou mais conservadora com bateria 30). Muda os números.
 - [x] `D_MAX` não é usado. O código usa `world.size * 2`. Alinhar código e texto. Agora é `dMaxFor(N) = 2N` no `SimulationConfig.ts`, igual ao paper. Os números não mudam.
 - [x] Prioridade em modo `mixed` vai só de 0,10 a 0,59. Decidir se fica assim e descrever. Ampliada para 0,10 a 1,00 (decisão de 2/11). Muda os números.
 - [x] `t_hover = 5` só entra na estimativa de energia, e o scan não ocupa ticks no caminho. Corrigir ou declarar no texto. Corrigido: o drone paira `SCAN_TICKS` = 3 passos no palete, reservados na tabela, e o CBS segura o objetivo durante a leitura (decisão de 2/11). Muda os números.
 - [x] Decidir sobre Naive e Energy Saver: entram nos experimentos ou saem do paper? Decisão de 2/11: Naive entra como baseline sem coordenação (mostra que sem o método os drones colidem). Energy Saver entra no E4. Ele só muda o custo do A* (energia, esperar custa metade de voar) e hoje gasta o mesmo que o Cooperative (diferença média de 0,03%, idêntico em 59 de 108 missões), porque quase não há conflitos. O E4 mostra se isso muda com densidade alta. Na discussão: a economia de energia vem da alocação e dos clusters (cerca de 52% menos energia), não do caminho. Ressalva: β_hover = β_fly/2 é suposição do modelo, e em multirotores reais pairar gasta perto de voar devagar. Precisa de referência (o Luiz busca: "multirotor hover power consumption model", "quadrotor energy model forward flight vs hover").
-- [ ] Não usar os experimentos "Exp 2 Monte Carlo" e "Exp 3 fault" da UI. O de falha é um stub.
+- [x] Não usar os experimentos "Exp 2 Monte Carlo" e "Exp 3 fault" da UI. O de falha é um stub. (não usados)
 
 ### 5.2 Funcionalidades novas
 
@@ -118,7 +118,7 @@ Situação em 2/11: Introdução e Related Work juntos têm cerca de 900 palavra
     - Smoke (Cooperative, 1 repetição, 2, 8 e 32 drones, sites 1 a 6): cobertura 100% exatamente a partir do mínimo, abaixo dele no máximo 98%. Zero colisões, baterias esgotadas e drones presos. Só a base: 85% a 91% no 32, 23% a 27% no 64. No 64 com 1 estação: 89% a 91% (espalhada: 49%).
     - Makespan além do mínimo: 64 × 8 drones 6299 (4 sites), 5498 (5), 5058 (6), com 5 sites espalhados 6091. 64 × 32 drones 4119, 2493, 2203. 32 × 8 drones 1161 (2 sites) até 942 (5). 64 × 2 drones quase não muda (19323 a 18481): com poucos drones a recarga, e não a viagem, domina.
     - Para o texto: E3 reporta (1) cobertura só com a base e o mínimo de estações por escala, (2) makespan e energia do mínimo até mínimo + 3.
-- [ ] **Escalas 16, 28 e 40 (ideia de 3/11, substituída pela decisão acima).** Teste rápido (1 run, todos os paletes, densidade de 0,35 palete por célula do chão, Cooperative e CBS):
+- [x] **Escalas 16, 28 e 40 (ideia de 3/11, substituída pela decisão acima).** Teste rápido (1 run, todos os paletes, densidade de 0,35 palete por célula do chão, Cooperative e CBS): (substituída pela decisão 16/32/64)
   - 16: 90 paletes, 2 empilhadeiras, cerca de 0,5 s por cenário.
   - 28: 274 paletes, 4 empilhadeiras, cerca de 3 s por cenário (4 drones: makespan 4431, 8 drones: 2136).
   - 40: 560 paletes, 6 empilhadeiras, 11 a 17 s por cenário. Com 8 drones cobre tudo (makespan 5941). Com 2 drones para em `MAX_TIMESTEPS = 10 000` com 40% de cobertura, e com 4 drones também passaria do limite (cerca de 12 000 ticks).
@@ -132,14 +132,14 @@ Situação em 2/11: Introdução e Related Work juntos têm cerca de 900 palavra
 
 ### 5.3 Experimentos (mínimo 10 repetições por célula, idealmente 20)
 
-- [ ] **E1. Alocação:** Hungarian vs greedy vs nearest vs random. 16/32/64, 2 a 32 drones, cobertura total, com e sem ida e volta. Métricas: makespan, energia, soma de custos, `priorityScanTime` e `meanScanTime`.
+- [x] **E1. Alocação:** Hungarian vs greedy vs nearest vs random. 16/32/64, 2 a 32 drones, cobertura total, com e sem ida e volta. Métricas: makespan, energia, soma de custos, `priorityScanTime` e `meanScanTime`. (16/11: feito, 2400 runs, Tabela II)
   - **Rodado em 16/11** (commit 6ad8708, 13 workers): 2400 runs (1200 com volta, 1200 sem), zero falhas, zero incidentes, cobertura 100% em todos. Resultados em `bench-results/e1-return-2026-11-16/` e `bench-results/e1-noreturn-2026-11-16/`.
   - Com volta, variação pareada contra o Hungarian no 16/32/64: makespan e energia empatam (|Δ| ≤ 1,4%). `priorityScanTime`: Greedy ≈ 0, Nearest +15,7/+4,0/+1,2%, Random +28,9/+9,6/+2,8%.
   - **Sem volta, o Nearest ganha do Hungarian em tudo:** makespan −5,6/−17,4/−27,7%, energia −6,8/−19,3/−29,8%, e até o `priorityScanTime` −13,8% no 32 e −23,4% no 64 (+2,0% no 16). Random +46 a +84% de makespan. Greedy ≈ Hungarian (≤ 1,5%), então o problema está na função de custo, não no solver.
   - **Investigação da função de custo (16/11, subconjunto: 16 e 64, 4 e 16 drones, 5 repetições, zero incidentes).** O conjunto de candidatos é o mesmo para todos os métodos (os primeiros max(4·ociosos, 20) paletes na ordem do gerador). Variantes contra o custo atual (w₁d + w₂b)/π, sem volta, no 64 com 4/16 drones: sem prioridade (π ignorado) makespan −28,8/−23,7%, `priorityScanTime` −27,4/−21,8%; dividir por √π: −20,0/−14,6% e −19,8/−15,7%; prioridade somada (+0,25(1−π)): ≈ igual ao atual (+0,1 a +4,8%). Com volta, sem prioridade piora o `priorityScanTime` em +13,4% no 16 (o Nearest também, +12,9/+13,4%), e √π fica a +0,8/+1,8%. Leitura: dividir por π faz o drone atravessar o armazém atrás do palete urgente. Sem volta isso custa mais viagem do que ganha em espera, e piora até a métrica de prioridade. √π fica melhor que o atual nos dois modos.
   - **Varredura do expoente (16/11), custo C/π^α, mesmo subconjunto, zero incidentes.** Sem volta, 64 com 4/16 drones, makespan contra α = 1: α = 0 −28,8/−23,7%, α = 0,25 −26,2/−20,8%, α = 0,5 −20,0/−14,6%, α = 0,75 −12,2/−6,4% (Nearest −28,0/−23,0%). `priorityScanTime` acompanha (α = 0,5: −19,8/−15,7%). Com volta, o makespan e a energia não mudam (|Δ| ≤ 3,9%), e o `priorityScanTime` no 16 com 4/16 drones fica: α = 0 +13,4/+13,4%, α = 0,25 +3,6/+4,8%, α = 0,5 +0,8/+1,8%, α = 0,75 +0,2/−0,2%. Recomendação: α = 0,5 (mantém cerca de 90% do efeito da prioridade com volta e recupera cerca de 2/3 do ganho do Nearest sem volta). Se adotado, mudam a Eq. 15 e os resultados de E1, E2 e E3 (todos usam o custo), então os três precisam rodar de novo (cerca de 50 min). **Decisão do autor (16/11): α = 0,5.** As rodadas com α = 0,5 gravam o commit 00f1577 no `summary.json`. Esse commit depois recebeu amend só no checklist, então o código é o mesmo do commit "feat(alloc): cost divides by the square root of the priority" no histórico. `PRIORITY_EXPONENT` no `SimulationConfig.ts`, Eq. 15 do paper com π_k^α. E1, E2, E3 e E4 rodam de novo com o custo novo. Os resultados de E1 e E2 acima (α = 1) ficam como referência.
 
-- [ ] **E2. Clusters:** 1-para-1 vs Cluster. Variar raio (3, 5, 7) e tamanho máximo (2, 3, 4, 6).
+- [x] **E2. Clusters:** 1-para-1 vs Cluster. Variar raio (3, 5, 7) e tamanho máximo (2, 3, 4, 6). (16/11: feito, 3900 runs, Fig. 4)
   - **Rodado em 16/11, com o custo atual (α = 1)**, com volta à base, 13 workers. A primeira tentativa morreu em 2728/3900 quando a sessão do Claude fechou (o processo filho foi encerrado junto). A segunda completou 3900 runs em 1459 s, com zero falhas, zero incidentes e cobertura 100%. Resultados em `bench-results/e2-2026-11-16/`.
   - Cluster (r = 5, m = 3) contra 1-para-1, pareado, 2/8/32 drones: makespan 16: −49,9/−46,3/−38,3%, 32: −53,7/−52,6/−48,9%, 64: −55,5/−55,2/−54,2%. Energia −50,6 a −56,2% em todas as células. `priorityScanTime` 16: −50,7/−49,5/−32,8%, 32: −59 a −61%, 64: −65%.
   - Sensibilidade, energia no 64 com 8 drones: r = 3: m 2/3/4/6 = −37,0/−46,7/−49,5/−50,5%; r = 5: −42,8/−56,0/−62,0/−66,5%; r = 7: −45,7/−60,6/−67,7/−74,6%. Clusters maiores e raios maiores economizam mais, sem saturar até m = 6.
@@ -161,9 +161,9 @@ Situação em 2/11: Introdução e Related Work juntos têm cerca de 900 palavra
   - **E4** (`bench-results/e4-a05-2026-11-16/`, 1 worker, 1200 runs, 1 h 50 min): zero falhas. Naive: 119,3 colisões drone-drone por run e 298 de 300 runs com cobertura < 100% (drones perdidos). Cooperative, Energy Saver e CBS: zero incidentes, cobertura 100%. Contra o Cooperative, 8/32 drones: Energy Saver makespan −0,1/−0,2% (n.s.), CBS −0,3/−0,7% (p < 0,05), soma de custos CBS −0,1/−0,3%. CBS caiu no fallback 3 vezes em 300 runs.
   - **E5** (dos runs do E4): tempo de planejamento por missão, Cooperative/CBS. N = 16: 0,04 a 0,06 s / 0,05 a 0,07 s. N = 32: 0,47 a 1,17 s / 0,75 a 1,53 s. N = 64: 8,2 a 42,7 s / 11,8 a 67,1 s. O tempo cai com mais drones (2 → 32 drones no 64: 42,7 → 8,2 s), e o CBS custa cerca de 1,3 a 1,6 vezes o Cooperative.
   - **E3 com a correção** (`bench-results/e3-fix-2026-11-16/`, 1 a 9 sites, 2700 runs): zero falhas e zero incidentes, cobertura 100% em todos os runs a partir do mínimo de cada cenário. Só a base: 100% no 16, 78,5 a 92,5% no 32 (média 85,7%), 19,5 a 29,9% no 64 (média 24,1%). Mínimo: 1 no 16, 2 no 32, 4/5/6 no 64 (73/25/2 de 100). +3 estações além do mínimo, 2/4/8/16/32 drones: 16 −16,3/−10,7/−8,7/+0,2/0,0%, 32 −6,1/−13,5/−15,3/−10,1/−3,1%, 64 −4,0/−7,1/−15,3/−27,1/−44,7%.
-- [ ] **E4. Planejadores vs densidade:** Naive vs Cooperative vs Energy Saver vs CBS, 4 a 32 drones (o teto não aumenta a densidade, ver achado acima). Métricas: soma de custos, makespan, tempo de planejamento, nós do CBS, fallbacks, falhas. Teste preliminar de 2/11 (S-12, 3 repetições, teto alto): CBS ganha até 1,5% em soma de custos e é cerca de 1,5× mais lento, com zero fallbacks.
-- [ ] **E5 (opcional). Escalabilidade:** tempo de planejamento vs número de drones e de paletes. Sai dos dados do E4, que já roda com 1 worker.
-- [ ] Confirmar zero colisões e zero baterias esgotadas em todos os cenários seguros. Se alguma aparecer, investigar antes de escrever.
+- [x] **E4. Planejadores vs densidade:** Naive vs Cooperative vs Energy Saver vs CBS, 4 a 32 drones (o teto não aumenta a densidade, ver achado acima). Métricas: soma de custos, makespan, tempo de planejamento, nós do CBS, fallbacks, falhas. Teste preliminar de 2/11 (S-12, 3 repetições, teto alto): CBS ganha até 1,5% em soma de custos e é cerca de 1,5× mais lento, com zero fallbacks. (16/11: feito, 1200 runs, Tabela III)
+- [x] **E5 (opcional). Escalabilidade:** tempo de planejamento vs número de drones e de paletes. Sai dos dados do E4, que já roda com 1 worker. (16/11: feito, Fig. 6)
+- [x] Confirmar zero colisões e zero baterias esgotadas em todos os cenários seguros. Se alguma aparecer, investigar antes de escrever. (16/11: zero em E1 a E4 com os planejadores coordenados, só o Naive colide)
 
 ### 5.4 Figuras e tabelas planejadas
 
@@ -174,15 +174,15 @@ Plano revisto em 2/11: uma figura do problema e um diagrama da solução, e os r
   - Compactada em 16/11: blocos de entrada mais baixos, estágios mais juntos e a saída numa linha só, com a altura indo de 228 para 186 pt (−18%) sem perder informação. A pedido do autor, o rótulo INPUTS fica em pé na frente dos blocos, OUTPUT fica na mesma linha dos blocos de saída, e o último bloco voltou a se chamar "Metrics". Legenda encurtada de 4 para cerca de 2,5 linhas (o resto já está no primeiro parágrafo do Método).
 - [x] Figura dos cenários (largura total, Seção V): renders do simulador dos três armazéns com todas as prateleiras cheias, mais close-ups do drone, da empilhadeira e do rack renderizados sozinhos. Captura em `figures/scenarios_capture.mjs` (repo do paper) e `paper/figure-renders/` (aqui). É a 4ª figura, então o texto precisa encolher.
   - Refeita em 3/11 (ideia do autor): (a) exemplo 10 × 10 com os close-ups do palete, da empilhadeira e do drone, (b) a (d) os armazéns dos experimentos, 16, 32 e 64, numa linha só (painéis com cerca de 86 pt de altura, antes 112). Os renders mostram todas as prateleiras cheias (111, 482 e 1986 paletes na UI, contra cerca de 90, 358 e 1434 no benchmark), e a legenda diz isso. Empilhadeiras geradas: 1, 2, 5 e 10. O slider de grid da UI agora vai até 64, e a captura ganhou `SIM_URL` e `TILT` (arrasta a câmera para cima nos grids grandes, cuja vista padrão é rasa).
-- [ ] **Plano das figuras de resultados (aprovado em 16/11, revisar o espaço quando todos os resultados estiverem prontos):** três figuras de uma coluna no mesmo estilo (um painel por N, rampa de azul + marcador, variação pareada com IC 95%) e uma tabela.
+- [x] **Plano das figuras de resultados (aprovado em 16/11, revisar o espaço quando todos os resultados estiverem prontos):** três figuras de uma coluna no mesmo estilo (um painel por N, rampa de azul + marcador, variação pareada com IC 95%) e uma tabela. (16/11: figuras feitas. Falta conferir o espaço no Overleaf)
   - Tabela II, em cima: E1, Greedy/Nearest/Random contra o Hungarian (makespan, energia, `priorityScanTime`), com e sem volta. Embaixo: E4, colisões do Naive, e CBS e Energy Saver contra o Cooperative (makespan, soma de custos) com 8 e 32 drones. Gerada por script a partir do `runs.csv`.
   - Fig. 4 (E2): x = drones, y = variação de energia (ou makespan) do Cluster (r = 5, m = 3) contra o 1-para-1. A sensibilidade a r e m vai numa frase, ou em linhas extras se algum valor se destacar.
   - Fig. 5 (E3): pronta (`results_e3.py`).
   - Fig. 6 (E5): tempo de planejamento vs drones, uma linha por N, Cooperative e CBS em dois painéis, eixo y log.
   - Plano B se faltar espaço: juntar a Fig. 4 e a Fig. 5 numa figura de largura total, ou o E5 vira uma frase. O formato do E1 e do E2 depende dos dados (diferenças pequenas cabem na tabela).
-- [ ] CBS vs Cooperative em densidade crescente: entra na Tabela II.
+- [x] CBS vs Cooperative em densidade crescente: entra na Tabela II. (Tabela III)
 - [x] Tabela I: virou a tabela dos experimentos E1 a E5 (`tab:experiments`, 3/11). Os parâmetros do modelo ficam no texto do Método e do Setup, para poupar espaço.
-- [ ] Tabela II: resultados (E1 alocação, mais CBS vs Cooperative do E4).
+- [x] Tabela II: resultados (E1 alocação, mais CBS vs Cooperative do E4). (Tabelas II e III)
 
 ## 6. Escrita
 
@@ -194,12 +194,12 @@ Plano revisto em 2/11: uma figura do problema e um diagrama da solução, e os r
 - [x] IV. Método: rascunho com abertura que percorre a Fig. 2 e as quatro subseções (custo e viabilidade com as equações de energia, viabilidade e custo, clusters, planejadores, recarga). Tem cerca de 920 palavras, uns 0,5 página acima do orçamento. Cortar depois.
 - [ ] IV. Pseudocódigo do loop por eventos (`SimulationManager.runPathfinding`): ficou de fora por espaço. Decidir se entra.
 - [x] V. Setup: escrito em 3/11 (ver seção 4). Falta o link e a versão do código.
-- [ ] VI. Resultados: só números do commit atual, com média ± IC95 e resultado dos testes estatísticos.
+- [x] VI. Resultados: só números do commit atual, com média ± IC95 e resultado dos testes estatísticos. (16/11: média ± IC95 e Wilcoxon)
   - 16/11: escritos os parágrafos do E1 (Tabela II, `tab:e1`, com o efeito de α) e do E2 (Fig. `fig:e2`, com a sensibilidade a r e m), com os números de `bench-results/*-a05-2026-11-16/`. A figura do E3 já está no texto, mas o parágrafo é `\todo` até a rodada com a correção das docas. E4 e E5 são `\todo`. A Tabela do E4 vira Tabela III. **16/11, à noite: Seção VI completa.** Parágrafos do E3 (cobertura só com a base, mínimo de sites, +3 estações, 0,8 visitas a estações por run no 16 com 32 drones), do E4 (Tabela III `tab:e4`) e do E5 (Fig. `fig:e5`), mais a frase de abertura com os 9900 runs coordenados de E1 a E4. A causa da queda do tempo de planejamento com mais drones não foi verificada, e o texto só descreve o fato. Floats na Seção VI: Tabela II, Fig. E2, Fig. E3, Tabela III, Fig. E5. Falta conferir o espaço no Overleaf (6 páginas). Scripts prontos e testados (16/11): `results_e3.py` agora compara cada cenário com o próprio mínimo de sites (eixo x "min., +1, +2, +3", título com o mínimo de cada N), e `results_e5.py` desenha o tempo de planejamento por mission contra o número de drones (Cooperative A* e CBS, uma linha por N, eixo y log), a partir do `runs.csv` do E4.
 - [x] VII. Limitações: escritas em 16/11 (parágrafo "Limitations" na Seção VII, cerca de 200 palavras): grid sem dinâmica nem tamanho físico de célula, energia sem velocidade nem carga, empilhadeiras com rotas conhecidas e periódicas, planejamento offline, colisões e baterias checadas depois do planejamento (zero nos planejadores coordenados, mas não impossíveis por construção), janela de candidatos e CBS ótimo só por ciclo, posicionamento guloso das estações (limite superior), margem fixa de 20 unidades, um α para os dois modos, grid até 64. Falta a parte de discussão dos resultados (`\todo`).
 - [x] Conclusão e discussão escritas em 16/11. Discussão (início da Seção VII): o ganho da alocação vem do custo e da verificação de energia, α troca urgência por viagem (com α = 0,5 o Nearest ganha no máximo 9% de makespan sem volta), clusters dão o maior ganho (cerca de metade), estações importam com armazém grande e enxame grande, CBS fica a menos de 1% com 30 a 60% mais tempo de planejamento. Conclusão: método, números principais (zero colisões nos coordenados, clusters cerca de −50%, estações até −45%) e trabalhos futuros (replanejamento online, margem relativa à bateria, α que depende de o drone voltar ou não). Abstract do paper reescrito em 16/11 com os resultados finais (195 palavras, limite do portal 200): custo com √π, estações posicionadas por cobertura, zero colisões nos coordenados, clusters cerca de metade, +3 estações até −45% no 64, CBS menos de 1% com 1,3 a 1,6 vezes o tempo. **O abstract submetido no portal (2/11) ainda fala em 24 drones e 200 paletes, e precisa ser atualizado no portal pelo autor.**
 - [x] Referências: 21 no `.bib`, sem arXiv, incluindo 4 self-citations. Falta página e DOI do Bavaro e Amigoni (ECMR 2025).
-- [ ] Referências novas: o Luiz define as citações. Preparar palavras-chave de busca para cada seção do related work: "multi-robot task allocation survey", "Hungarian algorithm multi-robot assignment", "conflict-based search multi-agent path finding", "prioritized planning multi-agent", "UAV warehouse inventory RFID", "drone charging station scheduling", "mTSP clustering UAV".
+- [x] Referências novas: o Luiz define as citações. Preparar palavras-chave de busca para cada seção do related work: "multi-robot task allocation survey", "Hungarian algorithm multi-robot assignment", "conflict-based search multi-agent path finding", "prioritized planning multi-agent", "UAV warehouse inventory RFID", "drone charging station scheduling", "mTSP clustering UAV". (16/11: Wilcoxon e Zhao 2024 adicionados)
 
 ### TODOs abertos no `paper.tex`
 
@@ -214,23 +214,23 @@ Cada `\todo` vermelho no texto tem um item aqui. Tirar o `\todo` do texto e marc
 - [x] Método (recarga): contadores `stationLegFailures` e `stationFallbacks` adicionados (16/11). E3 rodado de novo (`bench-results/e3-legs-2026-11-16/`, 2700 runs, makespans idênticos ao e3-fix): 192 162 idas a estações, 0 trechos com falha, 0 recargas desviadas para a base. Texto diz isso e explica o retry (paira 3 passos, depois de 5 falhas carrega na base).
 - [x] Método (custo): o texto diz D_max = 2N. Resolvido, o código agora define `dMaxFor(N) = 2N`.
 - [x] Setup: sensibilidade dos racks refeita (16/11, `bench-results/racks-2026-11-16/`, 180 runs, 16/32/64, 8 drones, 10 repetições, 1-para-1 e Cluster r=5 m=3, níveis 8/12/16, α=0,5). Mudança média contra 8 níveis: makespan +0,9 a +13,7%, energia +0,9 a +16,4% (maior no Cluster e no 16 níveis). Cluster economiza 50,5/54,3/56,2% de energia com 8 níveis e 48,4 a 53,7% com 12 ou 16. Zero incidentes, cobertura 100%. Texto: "raise the makespan and the energy by 1 to 16% on average, and the cluster allocation still saves 48 to 56% of the energy".
-- [ ] Resultados (E1): o `\todo` diz que o Greedy ficou a menos de 2% do Hungarian e que o ganho vem da função de custo. Confirmar na rodada final antes de escrever.
-- [ ] Seções VI a VIII: ainda são só `\todo` (a V foi escrita em 3/11).
+- [x] Resultados (E1, 16/11): Greedy fica a até 0,8% do Hungarian com retorno e até 2,1% sem retorno (makespan em N = 64, Tabela II). Resultados e Discussão dizem isso. Antes a Discussão dizia "as good as".
+- [x] Seções VI a VIII: ainda são só `\todo` (a V foi escrita em 3/11). (16/11: VI a VIII escritas)
 
 ### Regras de estilo (sempre)
 
-- [ ] Sem ponto e vírgula no texto corrido (em tabelas pode).
-- [ ] Sem travessões.
-- [ ] Sem construções "not X but Y" e "rather than".
-- [ ] Sem palavras como leverage, ensure, pivotal, crucial, seamless.
+- [x] Sem ponto e vírgula no texto corrido (em tabelas pode). (varredura 16/11: zero ocorrências)
+- [x] Sem travessões. (varredura 16/11: zero ocorrências)
+- [x] Sem construções "not X but Y" e "rather than". (varredura 16/11: zero ocorrências)
+- [x] Sem palavras como leverage, ensure, pivotal, crucial, seamless. (varredura 16/11: zero ocorrências)
 
 ## 7. Checagem final antes de 30/11
 
-- [ ] No máximo 6 páginas, contando referências.
+- [ ] No máximo 6 páginas, contando referências. **16/11, PDF do Overleaf: 7 páginas.** A página 7 tem só as referências (23), ocupando cerca de 55% da altura nas duas colunas, então faltam cortar uns 0,55 página (cerca de 1,1 coluna). Juntar as Figs. 4–6 numa só salva cerca de 1/4 de coluna, o que não basta sozinho. Achado no PDF: a Tabela I dizia "1 to 7 charging sites" para o E3, corrigido para 1 a 9 (paper ec01851). Related Work enxugado (16/11, paper b5d3bf4): sem os títulos run-in, frase do Malang com menos palavras, Kwon e Han numa frase só, "Our windowed CBS follows this idea" movido para a IV-C (substitui "in the spirit of", que o autor não quer), e a última frase do parágrafo de energia removida (repetia a introdução). Mantidos como estavam, a pedido do autor: Ricardo [14] e as autocitações [16]–[18]. A [20] (priority-based search) continua. Ganho estimado: ~5 a 7 linhas. Lacuna achada pelo autor (16/11): o paper não justificava o modo com retorno. Agora a Seção III (Inspection tasks) define os dois modos: com retorno modela tarefas que trazem algo de volta (e.g., buscar uma peça, ligado à ideia de missão de busca de peças de 1/10), sem retorno modela inspeção contínua com recarga em estações. Custa ~2 linhas. A Discussão deve dizer que o ganho do cluster (E2) foi medido com retorno. Discussão e Conclusão reescritas (16/11): ganho vem da formulação (Greedy a 2,1%, CBS a 1%), CBS ganha pouco porque expande menos nós que trechos em todo cenário do E4 (64/2 drones: 2641 nós para ~2868 trechos; 16: ≤150 para 180; 32: ≤673 para 716), troca urgência × viagem do α por modo, cluster medido com retorno (esperamos ganho menor sem retorno, não testado), estações e regra de dimensionamento, recomendação para operador. Limitações ganharam a falta de comparação com CBS-TA e perderam o limite de 64 da codificação. Ficou ~11 linhas maior que antes, o autor quer decidir os cortes olhando o PDF. Contribuições viraram texto corrido numerado 1) a 5), mesmo conteúdo (ideia do autor, ganho estimado ~4 a 6 linhas).
 - [ ] Template MIPRO sem alterações de margem ou fonte. A4. Sem números de página.
 - [ ] Todas as figuras legíveis em impressão P&B.
 - [ ] Todo número do texto bate com um CSV do commit registrado.
-- [ ] O abstract do paper confere com os resultados finais.
+- [x] O abstract do paper confere com os resultados finais. (16/11: 195 palavras. O abstract do portal ainda precisa ser atualizado pelo autor)
 - [ ] Texto original (vai passar por checagem de plágio).
 - [ ] Revisão completa do texto por pelo menos um coautor.
 - [ ] Submeter o PDF pelo portal MIPRO.
